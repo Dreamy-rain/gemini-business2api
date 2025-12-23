@@ -61,7 +61,7 @@ license: mit
 <table>
   <tr>
     <td><img src="https://github.com/user-attachments/assets/4c9c38c4-6322-4057-b5f0-a10f8b82b6ae" alt="日志系统1" width="800"/></td>
-    <td><img src="https://github.com/user-attachments/assets/048a6253-fa7d-4e00-a748-2bb615e16638" alt="日志系统2" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/095b86d7-3924-4258-954a-85bda9e8478e" alt="日志系统2" width="800"/></td>
   </tr>
 </table>
 

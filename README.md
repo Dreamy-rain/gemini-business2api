@@ -38,12 +38,12 @@ license: mit
 
 <table>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/5378ad0b-2a96-4239-9582-df68e8ffa53f" alt="图片生成示例1" width="800"/></td>
-    <td><img src="https://github.com/user-attachments/assets/82aeedf8-ad87-40bc-ae41-defa7271e8b1" alt="图片生成示例2" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/d6837897-63f2-4a17-ba4a-f59030e37018" alt="图片生成示例1" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/dc597631-b00b-4307-bba1-c0ed21db0e1b" alt="图片生成示例2" width="800"/></td>
   </tr>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/772d29c3-a75c-4ab8-98eb-cefea164b62c" alt="图片生成示例3" width="800"/></td>
-    <td><img src="https://github.com/user-attachments/assets/15d36604-dedd-4411-bbfb-f4cf95365101" alt="图片生成示例4" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/4e3a1ffa-dea9-4207-ac9b-bb32f8e83c6f" alt="图片生成示例3" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/53a30edd-c2ec-4cd3-a0bd-ccf68884472a" alt="图片生成示例4" width="800"/></td>
   </tr>
 </table>
 
@@ -51,8 +51,8 @@ license: mit
 
 <table>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/42c0a906-e926-4199-97e4-73ac06381b07" alt="管理面板1" width="800"/></td>
-    <td><img src="https://github.com/user-attachments/assets/d6b9a16b-2ed1-4be9-8465-4c28f974daa7" alt="管理面板2" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/d0548b2b-b57e-4857-8ed0-b48b4daef34f" alt="管理面板1" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/6b2aff95-e48f-412f-9e6e-2e893595b6dd" alt="管理面板2" width="800"/></td>
   </tr>
 </table>
 
@@ -60,7 +60,7 @@ license: mit
 
 <table>
   <tr>
-    <td><img src="https://github.com/user-attachments/assets/8640d7ce-9d22-41de-9907-5c2292883f0c" alt="日志系统1" width="800"/></td>
+    <td><img src="https://github.com/user-attachments/assets/4c9c38c4-6322-4057-b5f0-a10f8b82b6ae" alt="日志系统1" width="800"/></td>
     <td><img src="https://github.com/user-attachments/assets/048a6253-fa7d-4e00-a748-2bb615e16638" alt="日志系统2" width="800"/></td>
   </tr>
 </table>

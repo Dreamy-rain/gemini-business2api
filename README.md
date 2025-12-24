@@ -414,7 +414,7 @@ MIT License - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Dreamy-rain/gemini-business2api&type=Date)](https://star-history.com/#Dreamy-rain/gemini-business2api&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Dreamy-rain/gemini-business2api&type=date&legend=top-left)](https://www.star-history.com/#Dreamy-rain/gemini-business2api&type=date&legend=top-left)
 
 ---
 

@@ -405,9 +405,10 @@ MIT License - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ## 🙏 致谢
 
-- 源项目：[heixxin/gemini](https://huggingface.co/spaces/heixxin/gemini/tree/main) | [Linux.do 讨论](https://linux.do/t/topic/1226413)
-- 绘图参考：[Gemini-Link-System](https://github.com/qxd-ljy/Gemini-Link-System) | [Linux.do 讨论](https://linux.do/t/topic/1234363)
-- Gemini Business 2API Helper 参考：[Linux.do 讨论](https://linux.do/t/topic/1231008)
+* 源项目：[F佬 Linux.do 讨论](https://linux.do/t/topic/1225645)
+* 源项目：[heixxin/gemini](https://huggingface.co/spaces/heixxin/gemini/tree/main) | [Linux.do 讨论](https://linux.do/t/topic/1226413)
+* 绘图参考：[Gemini-Link-System](https://github.com/qxd-ljy/Gemini-Link-System) | [Linux.do 讨论](https://linux.do/t/topic/1234363)
+* Gemini Business 2API Helper 参考：[Linux.do 讨论](https://linux.do/t/topic/1231008)
 
 ---
 

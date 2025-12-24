@@ -204,6 +204,27 @@ ACCOUNTS_CONFIG='[
 | `gemini-3-flash-preview` | Flash 3 预览版         | ❌        |
 | `gemini-3-pro-preview`   | Pro 3 预览版           | ✅        |
 
+### 访问端点
+
+| 端点                       | 方法 | 说明                  |
+| -------------------------- | ---- | --------------------- |
+| `/{PATH_PREFIX}/v1/models` | GET  | 获取模型列表          |
+| `/{PATH_PREFIX}/admin`     | GET  | 管理面板(需ADMIN_KEY) |
+| `/public/log/html`         | GET  | 公开日志页面          |
+| `/health`                  | GET  | 健康检查              |
+
+**访问示例**：
+
+假设你的配置为：
+- Space URL: `https://your-space.hf.space`
+- PATH_PREFIX: `my_prefix`
+- ADMIN_KEY: `my_admin_key`
+
+则访问地址为：
+- **管理面板**: `https://your-space.hf.space/my_prefix/admin?key=my_admin_key`
+- **公开日志**: `https://your-space.hf.space/public/log/html`
+- **API 端点**: `https://your-space.hf.space/my_prefix/v1/chat/completions`
+
 ### 基本对话
 
 ```bash
@@ -272,27 +293,6 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
     ]
   }'
 ```
-
-### 其他端点
-
-| 端点                       | 方法 | 说明                  |
-| -------------------------- | ---- | --------------------- |
-| `/{PATH_PREFIX}/v1/models` | GET  | 获取模型列表          |
-| `/{PATH_PREFIX}/admin`     | GET  | 管理面板(需ADMIN_KEY) |
-| `/public/log/html`         | GET  | 公开日志页面          |
-| `/health`                  | GET  | 健康检查              |
-
-**访问示例**：
-
-假设你的配置为：
-- Space URL: `https://your-space.hf.space`
-- PATH_PREFIX: `my_prefix`
-- ADMIN_KEY: `my_admin_key`
-
-则访问地址为：
-- **管理面板**: `https://your-space.hf.space/my_prefix/admin?key=my_admin_key`
-- **公开日志**: `https://your-space.hf.space/public/log/html`
-- **API 端点**: `https://your-space.hf.space/my_prefix/v1/chat/completions`
 
 ## ❓ 常见问题
 

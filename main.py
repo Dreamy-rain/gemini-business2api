@@ -7,12 +7,13 @@ from dotenv import load_dotenv
 
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Request
-from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
+from functools import wraps
 
 # ---------- 日志配置 ----------
 
@@ -90,6 +91,7 @@ BASE_URL     = os.getenv("BASE_URL")         # 服务器完整URL（可选，用
 LOGO_URL     = os.getenv("LOGO_URL", "")  # Logo URL（公开，为空则不显示）
 CHAT_URL     = os.getenv("CHAT_URL", "")  # 开始对话链接（公开，为空则不显示）
 MODEL_NAME   = os.getenv("MODEL_NAME", "gemini-business")  # 模型名称（公开）
+HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "").lower() == "true"  # 是否隐藏首页（默认不隐藏）
 
 # ---------- 图片存储配置 ----------
 # 自动检测存储路径：优先使用持久化存储，否则使用临时存储
@@ -498,7 +500,7 @@ class JWTManager:
         data = json.loads(txt)
 
         key_bytes = base64.urlsafe_b64decode(data["xsrfToken"] + "==")
-        self.jwt     = create_jwt(key_bytes, data["keyId"], self.config.csesidx)
+        self.jwt      = create_jwt(key_bytes, data["keyId"], self.config.csesidx)
         self.expires = time.time() + 270
         logger.info(f"[AUTH] [{self.config.account_id}] {req_tag}JWT 刷新成功")
 
@@ -648,8 +650,6 @@ else:
     logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (临时存储，重启会丢失)")
 
 # ---------- 认证装饰器 ----------
-from functools import wraps
-from fastapi import Request
 
 def require_admin_key(func):
     """验证管理员密钥（支持 URL 参数或 Header）"""
@@ -929,9 +929,537 @@ def verify_api_key(authorization: str = None):
 
     return True
 
+def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
+    """生成管理页面HTML - 端点带Key参数完整版"""
+    # 获取当前页面的完整URL
+    current_url = get_base_url(request)
+
+    # 获取错误统计
+    error_count = 0
+    with log_lock:
+        for log in log_buffer:
+            if log.get("level") in ["ERROR", "CRITICAL"]:
+                error_count += 1
+
+    # --- 1. 构建提示信息 ---
+    hide_tip = ""
+    if show_hide_tip:
+        hide_tip = """
+        <div class="alert alert-info">
+            <div class="alert-icon">💡</div>
+            <div class="alert-content">
+                <strong>提示</strong>：此页面默认在首页显示。如需隐藏，请设置环境变量：<br>
+                <code style="margin-top:4px; display:inline-block;">HIDE_HOME_PAGE=true</code>
+            </div>
+        </div>
+        """
+
+    api_key_status = ""
+    if API_KEY:
+        api_key_status = """
+        <div class="alert alert-success">
+            <div class="alert-icon">🔒</div>
+            <div class="alert-content">
+                <strong>安全模式已启用</strong>
+                <div class="alert-desc">请求 Header 需携带 Authorization 密钥。</div>
+            </div>
+        </div>
+        """
+    else:
+        api_key_status = """
+        <div class="alert alert-warning">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-content">
+                <strong>API Key 未设置</strong>
+                <div class="alert-desc">API 当前允许公开访问，建议配置 API_KEY。</div>
+            </div>
+        </div>
+        """
+
+    error_alert = ""
+    if error_count > 0:
+        error_alert = f"""
+        <div class="alert alert-error">
+            <div class="alert-icon">🚨</div>
+            <div class="alert-content">
+                <strong>检测到 {error_count} 条错误日志</strong>
+                <a href="/public/log/html" class="alert-link">查看详情 &rarr;</a>
+            </div>
+        </div>
+        """
+
+    # --- 2. 构建账户卡片 ---
+    accounts_html = ""
+    for account_id, account_manager in multi_account_mgr.accounts.items():
+        config = account_manager.config
+        remaining_hours = config.get_remaining_hours()
+        status_text, status_color, expire_display = format_account_expiration(remaining_hours)
+        
+        is_avail = account_manager.is_available
+        dot_color = "#34c759" if is_avail else "#ff3b30"
+        dot_title = "可用" if is_avail else "不可用"
+
+        accounts_html += f"""
+        <div class="card account-card">
+            <div class="acc-header">
+                <div class="acc-title">
+                    <span class="status-dot" style="background-color: {dot_color};" title="{dot_title}"></span>
+                    {config.account_id}
+                </div>
+                <span class="acc-status-text" style="color: {status_color}">{status_text}</span>
+            </div>
+            <div class="acc-body">
+                <div class="acc-row">
+                    <span>过期时间</span>
+                    <span class="font-mono">{config.expires_at or '未设置'}</span>
+                </div>
+                <div class="acc-row">
+                    <span>剩余时长</span>
+                    <span style="color: {status_color}; font-weight: 600;">{expire_display}</span>
+                </div>
+            </div>
+        </div>
+        """
+
+    # --- 3. 构建 HTML ---
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="zh-CN">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>系统管理 - Gemini Business API</title>
+        <style>
+            :root {{
+                --bg-body: #f5f5f7;
+                --text-main: #1d1d1f;
+                --text-sec: #86868b;
+                --border: #d2d2d7;
+                --border-light: #e5e5ea;
+                --blue: #0071e3;
+                --red: #ff3b30;
+                --green: #34c759;
+                --orange: #ff9500;
+            }}
+            
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+                background-color: var(--bg-body);
+                color: var(--text-main);
+                font-size: 13px;
+                line-height: 1.5;
+                -webkit-font-smoothing: antialiased;
+                padding: 30px 20px;
+                cursor: default;
+            }}
+            
+            .container {{ max-width: 1100px; margin: 0 auto; }}
+            
+            /* Header */
+            .header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 24px;
+                flex-wrap: wrap;
+                gap: 16px;
+            }}
+            .header-info h1 {{
+                font-size: 24px;
+                font-weight: 600;
+                letter-spacing: -0.5px;
+                color: var(--text-main);
+                margin-bottom: 4px;
+            }}
+            .header-info .subtitle {{ font-size: 14px; color: var(--text-sec); }}
+            .header-actions {{ display: flex; gap: 10px; }}
+            
+            /* Buttons */
+            .btn {{
+                display: inline-flex;
+                align-items: center;
+                padding: 8px 16px;
+                background: #ffffff;
+                border: 1px solid var(--border-light);
+                border-radius: 8px;
+                color: var(--text-main);
+                font-weight: 500;
+                text-decoration: none;
+                transition: all 0.2s;
+                font-size: 13px;
+                cursor: pointer;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            }}
+            .btn:hover {{ background: #fafafa; border-color: var(--border); text-decoration: none; }}
+            .btn-primary {{ background: var(--blue); color: white; border: none; }}
+            .btn-primary:hover {{ background: #0077ed; border: none; text-decoration: none; }}
+            
+            /* Alerts */
+            .alert {{
+                padding: 12px 16px;
+                border-radius: 10px;
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+                font-size: 13px;
+                border: 1px solid transparent;
+                margin-bottom: 12px;
+            }}
+            .alert-icon {{ font-size: 16px; margin-top: 1px; flex-shrink: 0; }}
+            .alert-content {{ flex: 1; }}
+            .alert-desc {{ color: inherit; opacity: 0.9; margin-top: 2px; font-size: 12px; }}
+            .alert-link {{ color: inherit; text-decoration: underline; margin-left: 10px; font-weight: 600; cursor: pointer; }}
+            .alert-info {{ background: #eef7fe; border-color: #dcebfb; color: #1c5b96; }}
+            .alert-success {{ background: #eafbf0; border-color: #d3f3dd; color: #15682e; }}
+            .alert-warning {{ background: #fff8e6; border-color: #fcebc2; color: #9c6e03; }}
+            .alert-error {{ background: #ffebeb; border-color: #fddddd; color: #c41e1e; }}
+            
+            /* Sections & Grids */
+            .section {{ margin-bottom: 30px; }}
+            .section-title {{
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--text-main);
+                margin-bottom: 12px;
+                padding-left: 4px;
+            }}
+            .grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }}
+            .grid-env {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }}
+            .account-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }}
+            .stack-col {{ display: flex; flex-direction: column; gap: 16px; }}
+            
+            /* Cards */
+            .card {{
+                background: #fafaf9;
+                padding: 20px;
+                border: 1px solid #e5e5e5;
+                border-radius: 12px;
+                transition: all 0.15s ease;
+            }}
+            .card:hover {{ border-color: #d4d4d4; box-shadow: 0 0 8px rgba(0,0,0,0.08); }}
+            .card h3 {{
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-sec);
+                margin-bottom: 12px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid #f5f5f5;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }}
+
+            /* Account & Env Styles */
+            .account-card .acc-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
+            .acc-title {{ font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }}
+            .status-dot {{ width: 8px; height: 8px; border-radius: 50%; }}
+            .acc-status-text {{ font-size: 12px; font-weight: 500; }}
+            .acc-row {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 6px; color: var(--text-sec); }}
+            
+            .env-var {{ display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }}
+            .env-var:last-child {{ border-bottom: none; }}
+            .env-name {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-main); font-weight: 600; }}
+            .env-desc {{ font-size: 11px; color: var(--text-sec); margin-top: 2px; }}
+            .env-value {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-sec); text-align: right; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+            
+            .badge {{ display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; vertical-align: middle; margin-left: 6px; }}
+            .badge-required {{ background: #ffebeb; color: #c62828; }}
+            .badge-optional {{ background: #e8f5e9; color: #2e7d32; }}
+            
+            code {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; background: #f5f5f7; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--blue); }}
+            a {{ color: var(--blue); text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+            .font-mono {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; }}
+
+            /* --- Service Info Styles --- */
+            .model-grid {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }}
+            .model-tag {{
+                background: #f0f0f2;
+                color: #1d1d1f;
+                padding: 4px 10px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+                border: 1px solid transparent;
+            }}
+            .model-tag.highlight {{ background: #eef7ff; color: #0071e3; border-color: #dcebfb; font-weight: 500; }}
+            
+            .info-box {{ background: #f9f9f9; border: 1px solid #e5e5ea; border-radius: 8px; padding: 14px; }}
+            .info-box-title {{ font-weight: 600; font-size: 12px; color: #1d1d1f; margin-bottom: 6px; }}
+            .info-box-text {{ font-size: 12px; color: #86868b; line-height: 1.5; }}
+
+            .ep-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+            .ep-table tr {{ border-bottom: 1px solid #f5f5f5; }}
+            .ep-table tr:last-child {{ border-bottom: none; }}
+            .ep-table td {{ padding: 10px 0; vertical-align: middle; }}
+            
+            .method {{
+                display: inline-block;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                min-width: 48px;
+                text-align: center;
+                margin-right: 8px;
+            }}
+            .m-post {{ background: #eafbf0; color: #166534; border: 1px solid #dcfce7; }}
+            .m-get {{ background: #eff6ff; color: #1e40af; border: 1px solid #dbeafe; }}
+            .m-del {{ background: #fef2f2; color: #991b1b; border: 1px solid #fee2e2; }}
+            
+            .ep-path {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; color: #1d1d1f; margin-right: 8px; font-size: 12px; }}
+            .ep-desc {{ color: #86868b; font-size: 12px; margin-left: auto; }}
+            
+            .current-url-row {{
+                display: flex;
+                align-items: center;
+                padding: 10px 12px;
+                background: #f2f7ff;
+                border-radius: 8px;
+                margin-bottom: 16px;
+                border: 1px solid #e1effe;
+            }}
+
+            @media (max-width: 800px) {{
+                .grid-3, .grid-env {{ grid-template-columns: 1fr; }}
+                .header {{ flex-direction: column; align-items: flex-start; gap: 16px; }}
+                .header-actions {{ width: 100%; justify-content: flex-start; }}
+                .ep-table td {{ display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }}
+                .ep-desc {{ margin-left: 0; }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="header-info">
+                    <h1>Gemini-Business2api</h1>
+                    <div class="subtitle">多账户代理面板</div>
+                </div>
+                <div class="header-actions">
+                    <a href="/public/log/html" class="btn" target="_blank">📄 公开日志</a>
+                    <a href="/{PATH_PREFIX}/admin/log/html?key={ADMIN_KEY}" class="btn btn-primary" target="_blank">🔧 管理日志</a>
+                </div>
+            </div>
+
+            {hide_tip}
+            {api_key_status}
+            {error_alert}
+
+            <div class="section">
+                <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
+                <div class="account-grid">
+                    {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">环境变量配置</div>
+                <div class="grid-env">
+                    <div class="stack-col">
+                        <div class="card">
+                            <h3>必需变量 <span class="badge badge-required">REQUIRED</span></h3>
+                            <div style="margin-top: 12px;">
+                                <div class="env-var">
+                                    <div><div class="env-name">ACCOUNTS_CONFIG</div><div class="env-desc">JSON格式账户列表</div></div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
+                                    <div class="env-value">当前: {PATH_PREFIX}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
+                                    <div class="env-value">已设置</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3>重试配置 <span class="badge badge-optional">OPTIONAL</span></h3>
+                            <div style="margin-top: 12px;">
+                                <div class="env-var">
+                                    <div><div class="env-name">MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
+                                    <div class="env-value">{MAX_NEW_SESSION_TRIES}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
+                                    <div class="env-value">{MAX_REQUEST_RETRIES}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
+                                    <div class="env-value">{ACCOUNT_FAILURE_THRESHOLD} 次</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
+                                    <div class="env-value">{ACCOUNT_COOLDOWN_SECONDS} 秒</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>可选变量 <span class="badge badge-optional">OPTIONAL</span></h3>
+                        <div style="margin-top: 12px;">
+                            <div class="env-var">
+                                <div><div class="env-name">API_KEY</div><div class="env-desc">API访问密钥</div></div>
+                                <div class="env-value">{'已设置' if API_KEY else '未设置'}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
+                                <div class="env-value">{'已设置' if BASE_URL else '未设置（自动检测）'}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">PROXY</div><div class="env-desc">代理地址</div></div>
+                                <div class="env-value">{'已设置' if PROXY else '未设置'}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
+                                <div class="env-value">{SESSION_CACHE_TTL_SECONDS} 秒</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
+                                <div class="env-value">{'已设置' if LOGO_URL else '未设置'}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
+                                <div class="env-value">{'已设置' if CHAT_URL else '未设置'}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
+                                <div class="env-value">{MODEL_NAME}</div>
+                            </div>
+                            <div class="env-var">
+                                <div><div class="env-name">HIDE_HOME_PAGE</div><div class="env-desc">隐藏首页管理面板</div></div>
+                                <div class="env-value">{'已隐藏' if HIDE_HOME_PAGE else '未隐藏'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">服务信息</div>
+                <div class="grid-3">
+                    <div class="card">
+                        <h3>支持的模型</h3>
+                        <div class="model-grid">
+                            <span class="model-tag">gemini-auto</span>
+                            <span class="model-tag">gemini-2.5-flash</span>
+                            <span class="model-tag">gemini-2.5-pro</span>
+                            <span class="model-tag">gemini-3-flash-preview</span>
+                            <span class="model-tag highlight">gemini-3-pro-preview</span>
+                        </div>
+                        
+                        <div class="info-box">
+                            <div class="info-box-title">📸 图片生成说明</div>
+                            <div class="info-box-text">
+                                仅 <code style="background:none;padding:0;color:#0071e3;">gemini-3-pro-preview</code> 支持绘图。<br>
+                                路径: <code>{IMAGE_DIR}</code><br>
+                                类型: {'<span style="color: #34c759; font-weight: 600;">持久化（重启保留）</span>' if IMAGE_DIR == '/data/images' else '<span style="color: #ff3b30; font-weight: 600;">临时（重启丢失）</span>'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="grid-column: span 2;">
+                        <h3>API 端点</h3>
+                        
+                        <div class="current-url-row">
+                            <span style="font-size:12px; font-weight:600; color:#0071e3; margin-right:8px;">当前页面:</span>
+                            <code style="background:none; padding:0; color:#1d1d1f;">{current_url}</code>
+                        </div>
+
+                        <table class="ep-table">
+                            <tr>
+                                <td width="70"><span class="method m-post">POST</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/v1/chat/completions</span></td>
+                                <td><span class="ep-desc">OpenAI 兼容对话接口</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/v1/models</span></td>
+                                <td><span class="ep-desc">获取模型列表</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin</span></td>
+                                <td><span class="ep-desc">管理首页</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin/health?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-desc">健康检查 (需 Key)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin/accounts?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-desc">账户状态 JSON (需 Key)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-desc">获取日志 JSON (需 Key)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log/html?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-desc">日志查看器 HTML (需 Key)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-del">DEL</span></td>
+                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log?confirm=yes&key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-desc">清空系统日志 (需 Key)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/public/stats</span></td>
+                                <td><span class="ep-desc">公开统计数据</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/public/log</span></td>
+                                <td><span class="ep-desc">公开日志 (JSON, 脱敏)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/public/log/html</span></td>
+                                <td><span class="ep-desc">公开日志查看器 (HTML)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/docs</span></td>
+                                <td><span class="ep-desc">Swagger API 文档</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/redoc</span></td>
+                                <td><span class="ep-desc">ReDoc API 文档</span></td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html_content
+
+@app.get("/")
+async def home(request: Request):
+    """首页 - 默认显示管理面板（可通过环境变量隐藏）"""
+    # 检查是否隐藏首页
+    if HIDE_HOME_PAGE:
+        raise HTTPException(404, "Not Found")
+
+    # 显示管理页面（带隐藏提示）
+    html_content = generate_admin_html(request, show_hide_tip=True)
+    return HTMLResponse(content=html_content)
+
 @app.get("/{path_prefix}/admin")
 @app.get("/{path_prefix}/admin/")
-async def admin_home(path_prefix: str, key: str = None, authorization: str = Header(None)):
+async def admin_home(path_prefix: str, request: Request, key: str = None, authorization: str = Header(None)):
     """管理首页 - 显示API信息和错误提醒"""
     # 验证路径前缀
     if path_prefix != PATH_PREFIX:
@@ -941,424 +1469,9 @@ async def admin_home(path_prefix: str, key: str = None, authorization: str = Hea
     admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
     if admin_key != ADMIN_KEY:
         raise HTTPException(404, "Not Found")
-    # 获取错误统计
-    error_count = 0
-    with log_lock:
-        for log in log_buffer:
-            if log.get("level") in ["ERROR", "CRITICAL"]:
-                error_count += 1
 
-    # API Key 状态
-    api_key_status = ""
-    if API_KEY:
-        api_key_status = """
-            <div style="background: #e8f5e9; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <strong style="color: #2e7d32;">🔒 API Key 验证已启用</strong>
-                <p style="color: #4caf50; margin-top: 8px; font-size: 14px;">
-                    请求时需要在 Authorization header 中携带密钥
-                </p>
-            </div>
-        """
-    else:
-        api_key_status = """
-            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <strong style="color: #f57c00;">⚠️ API Key 验证未启用</strong>
-                <p style="color: #ff9800; margin-top: 8px; font-size: 14px;">
-                    任何人都可以访问此 API，建议设置 API_KEY 环境变量
-                </p>
-            </div>
-        """
-
-    # 错误提醒
-    error_alert = ""
-    if error_count > 0:
-        error_alert = f"""
-            <div style="background: #ffebee; padding: 15px; border-radius: 8px; margin: 20px 0;">
-                <strong>检测到 <span style="color: #f44336; font-weight: bold; font-size: 18px;">{error_count}</span> 条错误日志</strong>
-                <a href="/public/log/html" style="color: #f44336; font-weight: bold; margin-left: 15px;">查看详情 →</a>
-            </div>
-        """
-
-    # 获取账户信息
-    accounts_html = ""
-    for account_id, account_manager in multi_account_mgr.accounts.items():
-        config = account_manager.config
-        remaining_hours = config.get_remaining_hours()
-
-        # 使用统一的格式化函数
-        status_text, status_color, expire_display = format_account_expiration(remaining_hours)
-
-        availability = "可用" if account_manager.is_available else "不可用"
-        availability_color = "#4caf50" if account_manager.is_available else "#f44336"
-
-        accounts_html += f"""
-            <div class="card">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <div>
-                        <strong style="color: #1a1a1a; font-size: 14px;">{config.account_id}</strong>
-                        <span style="background: {availability_color}; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; margin-left: 6px;">{availability}</span>
-                    </div>
-                    <span style="color: {status_color}; font-weight: 600; font-size: 12px;">{status_text}</span>
-                </div>
-                <div style="font-size: 12px; color: #6b6b6b; line-height: 1.6;">
-                    <div>过期: {config.expires_at or '未设置'}</div>
-                    <div>剩余: <strong style="color: {status_color};">{expire_display}</strong></div>
-                </div>
-            </div>
-        """
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>系统管理面板 - Gemini Business API</title>
-            <style>
-                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                body {{
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                    background: #fafaf9;
-                    min-height: 100vh;
-                    padding: 20px;
-                }}
-                .container {{
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    background: white;
-                    border-radius: 16px;
-                    padding: 40px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                }}
-                h1 {{
-                    color: #1a1a1a;
-                    font-size: 28px;
-                    font-weight: 600;
-                    margin-bottom: 8px;
-                    text-align: center;
-                }}
-                .subtitle {{
-                    text-align: center;
-                    color: #6b6b6b;
-                    font-size: 14px;
-                    margin-bottom: 30px;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    gap: 12px;
-                }}
-                .section {{
-                    margin-bottom: 24px;
-                }}
-                .section-title {{
-                    font-size: 18px;
-                    font-weight: 600;
-                    color: #1a1a1a;
-                    margin-bottom: 16px;
-                }}
-                .grid {{
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                    gap: 16px;
-                    margin-bottom: 16px;
-                }}
-                .card {{
-                    background: #fafaf9;
-                    padding: 20px;
-                    border: 1px solid #e5e5e5;
-                    border-radius: 12px;
-                    transition: all 0.15s ease;
-                }}
-                .card:hover {{
-                    border-color: #d4d4d4;
-                    box-shadow: 0 0 8px rgba(0,0,0,0.08);
-                }}
-                .card h3 {{
-                    font-size: 15px;
-                    color: #1a1a1a;
-                    margin-bottom: 12px;
-                    font-weight: 600;
-                }}
-                .btn {{
-                    display: inline-block;
-                    background: #1a73e8;
-                    color: white !important;
-                    padding: 8px 16px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-size: 14px;
-                    font-weight: 500;
-                    transition: background 0.15s ease;
-                }}
-                .btn:hover {{ background: #1557b0; }}
-                .list {{ list-style: none; line-height: 1.8; }}
-                .list li {{
-                    color: #6b6b6b;
-                    font-size: 13px;
-                    padding: 4px 0;
-                }}
-                .env-var {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 8px 0;
-                    border-bottom: 1px solid #f0f0f0;
-                }}
-                .env-var:last-child {{
-                    border-bottom: none;
-                }}
-                .env-name {{
-                    font-family: 'Courier New', monospace;
-                    font-size: 13px;
-                    color: #1a73e8;
-                    font-weight: 600;
-                }}
-                .env-desc {{
-                    font-size: 12px;
-                    color: #6b6b6b;
-                }}
-                .env-value {{
-                    font-size: 12px;
-                    color: #9e9e9e;
-                    font-style: italic;
-                }}
-                .badge {{
-                    display: inline-block;
-                    padding: 2px 8px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: 600;
-                }}
-                .badge-required {{
-                    background: #ffebee;
-                    color: #c62828;
-                }}
-                .badge-optional {{
-                    background: #e8f5e9;
-                    color: #2e7d32;
-                }}
-                code {{
-                    background: #f5f5f4;
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    color: #1a73e8;
-                }}
-                a {{ color: #1a73e8; text-decoration: none; }}
-                a:hover {{ color: #1557b0; }}
-                .account-grid {{
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: 16px;
-                }}
-                @media (max-width: 768px) {{
-                    .container {{ padding: 25px; }}
-                    h1 {{ font-size: 24px; }}
-                    .subtitle {{
-                        flex-direction: column;
-                        align-items: center;
-                        gap: 12px;
-                    }}
-                    .subtitle span {{
-                        text-align: center;
-                        font-size: 13px;
-                    }}
-                    .subtitle .btn {{
-                        width: 100%;
-                        text-align: center;
-                    }}
-                    .grid {{ grid-template-columns: 1fr; }}
-                    .account-grid {{ grid-template-columns: 1fr; }}
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <h1>系统管理面板</h1>
-                <div class="subtitle">
-                    <span>Gemini Business API - 多账户代理服务</span>
-                    <a href="/public/log/html" class="btn" style="font-size: 13px; padding: 6px 12px;">查看公开日志</a>
-                </div>
-
-                {api_key_status}
-                {error_alert}
-
-                <!-- 账户状态 -->
-                <div class="section">
-                    <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
-                    <div class="account-grid">
-                        {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px;">暂无账户</p></div>'}
-                    </div>
-                </div>
-
-                <!-- 环境变量配置 -->
-                <div class="section">
-                    <div class="section-title">环境变量配置</div>
-                    <div class="grid">
-                        <div class="card">
-                            <h3>必需变量 <span class="badge badge-required">REQUIRED</span></h3>
-                            <div style="margin-top: 12px;">
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">ACCOUNTS_CONFIG</div>
-                                        <div class="env-desc">JSON格式账户列表</div>
-                                    </div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">PATH_PREFIX</div>
-                                        <div class="env-desc">API路径前缀</div>
-                                    </div>
-                                    <div class="env-value">当前: {PATH_PREFIX}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">ADMIN_KEY</div>
-                                        <div class="env-desc">管理员密钥</div>
-                                    </div>
-                                    <div class="env-value">已设置</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <h3>可选变量 <span class="badge badge-optional">OPTIONAL</span></h3>
-                            <div style="margin-top: 12px;">
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">API_KEY</div>
-                                        <div class="env-desc">API访问密钥</div>
-                                    </div>
-                                    <div class="env-value">{'已设置' if API_KEY else '未设置'}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">BASE_URL</div>
-                                        <div class="env-desc">图片URL生成（推荐设置）</div>
-                                    </div>
-                                    <div class="env-value">{'已设置' if BASE_URL else '未设置（自动检测）'}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">PROXY</div>
-                                        <div class="env-desc">代理地址</div>
-                                    </div>
-                                    <div class="env-value">{'已设置' if PROXY else '未设置'}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">SESSION_CACHE_TTL_SECONDS</div>
-                                        <div class="env-desc">会话缓存过期时间</div>
-                                    </div>
-                                    <div class="env-value">{SESSION_CACHE_TTL_SECONDS} 秒</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">LOGO_URL</div>
-                                        <div class="env-desc">Logo URL（公开，为空则不显示）</div>
-                                    </div>
-                                    <div class="env-value">{'已设置' if LOGO_URL else '未设置'}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">CHAT_URL</div>
-                                        <div class="env-desc">开始对话链接（公开，为空则不显示）</div>
-                                    </div>
-                                    <div class="env-value">{'已设置' if CHAT_URL else '未设置'}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">MODEL_NAME</div>
-                                        <div class="env-desc">模型名称（公开）</div>
-                                    </div>
-                                    <div class="env-value">{MODEL_NAME}</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <h3>重试配置 <span class="badge badge-optional">OPTIONAL</span></h3>
-                            <div style="margin-top: 12px;">
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">MAX_NEW_SESSION_TRIES</div>
-                                        <div class="env-desc">新会话尝试账户数</div>
-                                    </div>
-                                    <div class="env-value">{MAX_NEW_SESSION_TRIES}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">MAX_REQUEST_RETRIES</div>
-                                        <div class="env-desc">请求失败重试次数</div>
-                                    </div>
-                                    <div class="env-value">{MAX_REQUEST_RETRIES}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div>
-                                        <div class="env-desc">账户失败阈值</div>
-                                    </div>
-                                    <div class="env-value">{ACCOUNT_FAILURE_THRESHOLD} 次</div>
-                                </div>
-                                <div class="env-var">
-                                    <div>
-                                        <div class="env-name">ACCOUNT_COOLDOWN_SECONDS</div>
-                                        <div class="env-desc">账户冷却时间</div>
-                                    </div>
-                                    <div class="env-value">{ACCOUNT_COOLDOWN_SECONDS} 秒</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 模型与端点 -->
-                <div class="section">
-                    <div class="section-title">服务信息</div>
-                    <div class="grid">
-                        <div class="card">
-                            <h3>支持的模型</h3>
-                            <ul class="list">
-                                <li><code>gemini-auto</code> - 自动选择（默认）</li>
-                                <li><code>gemini-2.5-flash</code> - Flash 2.5</li>
-                                <li><code>gemini-2.5-pro</code> - Pro 2.5</li>
-                                <li><code>gemini-3-flash-preview</code> - Flash 3 预览</li>
-                                <li><code>gemini-3-pro-preview</code> - Pro 3 预览 <strong style="color: #10b981;">（支持图片生成）</strong></li>
-                            </ul>
-                            <div style="margin-top: 16px; padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;">
-                                <div style="font-weight: 600; color: #334155; margin-bottom: 10px; font-size: 13px;">图片生成说明</div>
-                                <div style="font-size: 13px; color: #475569; line-height: 1.8;">
-                                    仅 <code style="background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 3px; font-weight: 500;">gemini-3-pro-preview</code> 支持图片生成<br>
-                                    保存路径: <code style="background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 3px; font-weight: 500;">{IMAGE_DIR}</code><br>
-                                    存储类型: {'<span style="color: #059669; font-weight: 600;">持久化（重启保留）</span>' if IMAGE_DIR == '/data/images' else '<span style="color: #dc2626; font-weight: 600;">临时（重启丢失）</span>'}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="card" style="grid-column: span 2;">
-                            <h3>API 端点</h3>
-                            <ul class="list">
-                                <li><code>POST /{PATH_PREFIX}/v1/chat/completions</code> - 聊天接口（流式+多模态）</li>
-                                <li><code>GET /{PATH_PREFIX}/v1/models</code> - 获取模型列表</li>
-                                <li><code>GET /{PATH_PREFIX}/admin</code> - 管理首页</li>
-                                <li><code>GET /{PATH_PREFIX}/admin/health?key={{ADMIN_KEY}}</code> - 健康检查</li>
-                                <li><code>GET /{PATH_PREFIX}/admin/accounts?key={{ADMIN_KEY}}</code> - 获取账户状态（JSON）</li>
-                                <li><code>GET /{PATH_PREFIX}/admin/log?key={{ADMIN_KEY}}</code> - 获取日志（JSON）</li>
-                                <li><code>GET /{PATH_PREFIX}/admin/log/html?key={{ADMIN_KEY}}</code> - 日志查看器（HTML）</li>
-                                <li><code>DELETE /{PATH_PREFIX}/admin/log?confirm=yes&key={{ADMIN_KEY}}</code> - 清空日志</li>
-                                <li><code>GET /public/stats</code> - 公开统计信息</li>
-                                <li><code>GET /public/log</code> - 公开日志（JSON，脱敏）</li>
-                                <li><code>GET /public/log/html</code> - 公开日志查看器（HTML，脱敏）</li>
-                                <li><code>GET /docs</code> - FastAPI自动生成的API文档（Swagger UI）</li>
-                                <li><code>GET /redoc</code> - FastAPI自动生成的API文档（ReDoc）</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </body>
-    </html>
-    """
+    # 显示管理页面（不显示隐藏提示）
+    html_content = generate_admin_html(request, show_hide_tip=False)
     return HTMLResponse(content=html_content)
 
 @app.get("/{path_prefix}/v1/models")
@@ -1581,7 +1694,7 @@ async def admin_logs_html(path_prefix: str, key: str = None, authorization: str 
     if admin_key != ADMIN_KEY:
         raise HTTPException(404, "Not Found")
 
-    html_content = """
+    html_content = r"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -2818,7 +2931,7 @@ async def get_public_logs(request: Request, limit: int = 100):
 @app.get("/public/log/html")
 async def get_public_logs_html():
     """公开的脱敏日志查看器"""
-    html_content = """
+    html_content = r"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -3045,12 +3158,12 @@ async def get_public_logs_html():
     <body>
         <div class="container">
             <h1>
-                """ + (f'<img src="{LOGO_URL}" alt="Logo">' if LOGO_URL else '') + """
+                """ + (f'<img src="{LOGO_URL}" alt="Logo">' if LOGO_URL else '') + r"""
                 Gemini服务状态
             </h1>
             <div style="text-align: center; color: #999; font-size: 12px; margin-bottom: 16px;" class="subtitle-public">
                 <span>展示最近1000条对话日志 · 每5秒自动更新</span>
-                """ + (f'<a href="{CHAT_URL}" target="_blank" style="color: #1a73e8; text-decoration: none;">开始对话</a>' if CHAT_URL else '<span style="color: #999;">开始对话</span>') + """
+                """ + (f'<a href="{CHAT_URL}" target="_blank" style="color: #1a73e8; text-decoration: none;">开始对话</a>' if CHAT_URL else '<span style="color: #999;">开始对话</span>') + r"""
             </div>
             <div class="stats">
                 <div class="stat">
@@ -3180,7 +3293,10 @@ async def get_public_logs_html():
                         <div class="log-group" data-req-id="${reqId}">
                             <div class="log-group-header" onclick="toggleGroup('${reqId}')">
                                 <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">⬤ ${statusText}</span>
-                                <span style="color: #999; font-size: 11px;">${log.events.length}条事件</span>
+                                <span style="color: #666; font-size: 11px; margin-left: 8px;">req_${reqId}</span>
+                                ${accountId ? `<span style="color: ${getAccountColor(accountId)}; font-size: 11px; margin-left: 8px;">${accountId}</span>` : ''}
+                                ${model ? `<span style="color: #999; font-size: 11px; margin-left: 8px;">${model}</span>` : ''}
+                                <span style="color: #999; font-size: 11px; margin-left: 8px;">${log.events.length}条事件</span>
                                 <span ${iconClass} style="margin-left: auto; color: #999;">▼</span>
                             </div>
                             <div class="log-group-content" ${contentStyle}>
@@ -3275,7 +3391,6 @@ async def get_public_logs_html():
     return HTMLResponse(content=html_content)
 
 # ---------- 全局 404 处理（必须在最后） ----------
-from fastapi.responses import JSONResponse
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: HTTPException):
@@ -3284,12 +3399,6 @@ async def not_found_handler(request: Request, exc: HTTPException):
         status_code=404,
         content={"detail": "Not Found"}
     )
-
-# 捕获所有未匹配的路径（必须在所有路由之后）
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
-async def catch_all(path: str):
-    """捕获所有未匹配的路径，返回 404"""
-    raise HTTPException(404, "Not Found")
 
 if __name__ == "__main__":
     import uvicorn

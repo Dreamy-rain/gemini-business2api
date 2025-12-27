@@ -22,15 +22,24 @@ license: mit
 
 ## ✨ 功能特性
 
+### 核心功能
 - ✅ **OpenAI API 完全兼容** - 无缝对接现有工具
 - ✅ **流式响应支持** - 实时输出
 - ✅ **多模态支持** - 文本 + 图片输入
 - ✅ **图片生成 & 图生图** - 支持 `gemini-3-pro-preview` 模型
+
+### 多账户管理
 - ✅ **多账户负载均衡** - 支持多账户轮询，故障自动转移
-- ✅ **智能会话复用** - 自动管理对话历史
+- ✅ **智能熔断机制** - 账户连续失败自动熔断并冷却恢复
+- ✅ **三层重试策略** - 新会话重试、请求重试、账户切换
+- ✅ **智能会话复用** - 自动管理对话历史，缓存过期自动清理
+- ✅ **在线配置管理** - Web界面编辑账户配置，实时生效
+
+### 系统功能
 - ✅ **JWT自动管理** - 无需手动刷新令牌
-- 📊 **可视化管理面板** - 实时监控账户状态
-- 📝 **公开日志系统** - 实时查看服务运行状态
+- 📊 **可视化管理面板** - 实时监控账户状态、过期时间、失败计数
+- 📝 **公开日志系统** - 实时查看服务运行状态（内存最多3000条，自动淘汰）
+- 🔐 **双重认证保护** - API_KEY 保护聊天接口，ADMIN_KEY 保护管理面板
 
 ## 📸 功能展示
 
@@ -147,6 +156,26 @@ PROXY=http://127.0.0.1:7890
 LOGO_URL=https://your-domain.com/logo.png
 CHAT_URL=https://your-chat-app.com
 MODEL_NAME=gemini-business
+
+# 重试配置（可选）
+MAX_NEW_SESSION_TRIES=5        # 新会话尝试账户数（默认5）
+MAX_REQUEST_RETRIES=3          # 请求失败重试次数（默认3）
+MAX_ACCOUNT_SWITCH_TRIES=5     # 每次重试查找账户次数（默认5）
+ACCOUNT_FAILURE_THRESHOLD=3    # 账户失败阈值，达到后熔断（默认3）
+ACCOUNT_COOLDOWN_SECONDS=300   # 账户冷却时间，秒（默认300=5分钟）
+SESSION_CACHE_TTL_SECONDS=3600 # 会话缓存过期时间，秒（默认3600=1小时）
+```
+
+### 重试机制说明
+
+系统提供三层重试保护：
+
+1. **新会话创建重试**：创建新对话时，如果账户失败，自动切换到其他账户（最多尝试5个）
+2. **请求失败重试**：对话过程中出错，自动重试并切换账户（最多重试3次）
+3. **智能熔断机制**：
+   - 账户连续失败3次 → 自动标记为不可用
+   - 冷却5分钟后自动恢复
+   - JWT失败和请求失败都会触发熔断
 ```
 
 ### 多账户配置示例
@@ -206,12 +235,19 @@ ACCOUNTS_CONFIG='[
 
 ### 访问端点
 
-| 端点                       | 方法 | 说明                  |
-| -------------------------- | ---- | --------------------- |
-| `/{PATH_PREFIX}/v1/models` | GET  | 获取模型列表          |
-| `/{PATH_PREFIX}/admin`     | GET  | 管理面板(需ADMIN_KEY) |
-| `/public/log/html`         | GET  | 公开日志页面          |
-| `/health`                  | GET  | 健康检查              |
+| 端点                                   | 方法   | 说明                        |
+| -------------------------------------- | ------ | --------------------------- |
+| `/{PATH_PREFIX}/v1/models`             | GET    | 获取模型列表                |
+| `/{PATH_PREFIX}/v1/chat/completions`   | POST   | 聊天接口（需API_KEY）       |
+| `/{PATH_PREFIX}/admin`                 | GET    | 管理面板（需ADMIN_KEY）     |
+| `/{PATH_PREFIX}/admin/accounts`        | GET    | 获取账户状态（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/admin/accounts-config` | GET    | 获取账户配置（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/admin/accounts-config` | PUT    | 更新账户配置（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/admin/accounts/{id}`   | DELETE | 删除指定账户（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/admin/log`             | GET    | 获取系统日志（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/admin/log`             | DELETE | 清空系统日志（需ADMIN_KEY） |
+| `/public/log/html`                     | GET    | 公开日志页面（无需认证）    |
+| `/public/stats`                        | GET    | 公开统计信息（无需认证）    |
 
 **访问示例**：
 
@@ -296,12 +332,31 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 
 ## ❓ 常见问题
 
-### 1. 图片生成后在哪里找到文件?
+### 1. 如何在线编辑账户配置？
+
+访问管理面板 `/{PATH_PREFIX}/admin?key=YOUR_ADMIN_KEY`，点击"编辑配置"按钮：
+- ✅ 实时编辑 JSON 格式配置
+- ✅ 保存后立即生效，无需重启
+- ✅ 配置保存到 `accounts.json` 文件
+- ⚠️ 重启后从环境变量 `ACCOUNTS_CONFIG` 重新加载
+
+**建议**：在线修改后，同步更新环境变量 `ACCOUNTS_CONFIG`，避免重启后配置丢失。
+
+### 2. 账户熔断后如何恢复？
+
+账户连续失败3次后会自动熔断（标记为不可用）：
+- ⏰ 冷却期：5分钟（可通过 `ACCOUNT_COOLDOWN_SECONDS` 配置）
+- 🔄 自动恢复：冷却期过后自动重新尝试
+- ✅ 成功后：失败计数重置为0，账户恢复正常
+
+可在管理面板实时查看账户状态和失败计数。
+
+### 3. 图片生成后在哪里找到文件?
 
 - **临时存储**: 图片保存在 `./images/`，可通过 URL 访问
 - **重启后会丢失**，建议使用持久化存储
 
-### 2. 如何设置 BASE_URL?
+### 4. 如何设置 BASE_URL?
 
 **自动检测**(推荐):
 - 不设置 `BASE_URL` 环境变量
@@ -338,17 +393,23 @@ Deno.serve(handler);
 
 配置反向代理后，将 `BASE_URL` 设置为你的自定义域名即可。
 
-### 3. API_KEY 和 ADMIN_KEY 的区别?
+### 5. API_KEY 和 ADMIN_KEY 的区别?
 
 - **API_KEY**: 保护聊天接口 (`/v1/chat/completions`)
 - **ADMIN_KEY**: 保护管理面板 (`/admin`)
 
 可以设置相同的值，也可以分开
 
-### 4. 如何查看日志?
+### 6. 如何查看日志?
 
 - **公开日志**: 访问 `/public/log/html` (无需密钥)
 - **管理面板**: 访问 `/admin?key=YOUR_ADMIN_KEY`
+
+日志系统说明：
+- 内存存储最多 3000 条日志
+- 超过上限自动删除最旧的日志
+- 重启后清空（内存存储）
+- 可通过 API 手动清空日志
 
 ## 🔧 油猴脚本使用说明
 
@@ -373,21 +434,32 @@ Deno.serve(handler);
 
 ```
 gemini-business2api/
-├── main.py                        # 主程序
+├── main.py                        # 主程序入口
+├── core/                          # 核心模块
+│   ├── __init__.py
+│   ├── auth.py                    # 认证装饰器
+│   └── templates.py               # HTML模板生成
 ├── util/                          # 工具模块
-│   └── streaming_parser.py
+│   └── streaming_parser.py       # 流式JSON解析器
 ├── requirements.txt               # Python依赖
-├── Dockerfile                     # Docker构建
+├── Dockerfile                     # Docker构建文件
 ├── README.md                      # 项目文档
 ├── .env.example                   # 环境变量配置示例
-├── accounts_config.example.json   # 多账户配置示例
-└── .gitignore                     # Git忽略文件
+└── accounts_config.example.json   # 多账户配置示例
 ```
 
-**运行时生成的目录**:
-- `images/` - 生成的图片存储
-- `static/` - 静态文件缓存
-- `logs/` - 日志文件
+**运行时生成的文件和目录**:
+- `accounts.json` - 账户配置持久化文件（Web编辑后保存）
+- `stats.json` - 统计数据（访问量、请求数等）
+- `images/` - 生成的图片存储目录
+  - HF Pro: `/data/images`（持久化，重启不丢失）
+  - 其他环境: `./images`（临时存储，重启会丢失）
+
+**日志系统**:
+- 内存日志缓冲区：最多保存 3000 条日志
+- 自动淘汰机制：超过上限自动删除最旧的日志（FIFO）
+- 重启后清空：日志存储在内存中，重启后丢失
+- 内存占用：约 450KB - 750KB（非常小，不会爆炸）
 
 ## 🛠️ 技术栈
 

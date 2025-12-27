@@ -11,7 +11,7 @@ from fastapi import Request, Header, HTTPException
 from fastapi.responses import HTMLResponse
 
 
-def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
+def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool = False) -> str:
     """生成管理页面HTML - 端点带Key参数完整版"""
     # 动态导入 main 模块的变量（避免循环依赖）
     import main
@@ -75,7 +75,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
 
     # --- 2. 构建账户卡片 ---
     accounts_html = ""
-    for account_id, account_manager in main.multi_account_mgr.accounts.items():
+    for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
         status_text, status_color, expire_display = main.format_account_expiration(remaining_hours)
@@ -474,7 +474,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             {error_alert}
 
             <div class="section">
-                <div class="section-title">账户状态 ({len(main.multi_account_mgr.accounts)} 个)</div>
+                <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
                 <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">过期时间为12小时，可以自行修改时间，脚本可能有误差。</div>
                 <div class="account-grid">
                     {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}

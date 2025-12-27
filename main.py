@@ -1001,7 +1001,7 @@ async def home(request: Request):
         raise HTTPException(404, "Not Found")
 
     # 显示管理页面（带隐藏提示）
-    html_content = templates.generate_admin_html(request, show_hide_tip=True)
+    html_content = templates.generate_admin_html(request, multi_account_mgr, show_hide_tip=True)
     return HTMLResponse(content=html_content)
 
 @app.get("/{path_prefix}/admin")
@@ -1009,7 +1009,7 @@ async def home(request: Request):
 async def admin_home(path_prefix: str, request: Request, key: str = None, authorization: str = Header(None)):
     """管理首页 - 显示API信息和错误提醒"""
     # 显示管理页面（不显示隐藏提示）
-    html_content = templates.generate_admin_html(request, show_hide_tip=False)
+    html_content = templates.generate_admin_html(request, multi_account_mgr, show_hide_tip=False)
     return HTMLResponse(content=html_content)
 
 @app.get("/{path_prefix}/v1/models")

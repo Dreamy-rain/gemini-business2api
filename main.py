@@ -457,7 +457,7 @@ def load_multi_account_config() -> MultiAccountManager:
             raise ValueError(f"账户 {i} 缺少必需字段: {', '.join(missing_fields)}")
 
         config = AccountConfig(
-            account_id=acc.get("id", f"account_{i}"),
+            account_id=get_account_id(acc, i),
             secure_c_ses=acc["secure_c_ses"],
             host_c_oses=acc.get("host_c_oses"),
             csesidx=acc["csesidx"],
@@ -489,6 +489,10 @@ def reload_accounts():
     multi_account_mgr = load_multi_account_config()
     logger.info(f"[CONFIG] 配置已重载，当前账户数: {len(multi_account_mgr.accounts)}")
 
+def get_account_id(acc: dict, index: int) -> str:
+    """获取账户ID（有显式ID则使用，否则生成默认ID）"""
+    return acc.get("id", f"account_{index}")
+
 def update_accounts_config(accounts_data: list):
     """更新账户配置（保存到文件并重新加载）"""
     save_accounts_to_file(accounts_data)
@@ -498,19 +502,14 @@ def delete_account(account_id: str):
     """删除单个账户"""
     accounts_data = load_accounts_from_source()
 
-    # 修复：使用更稳定的匹配逻辑（比较 ID 或 secure_c_ses）
-    # 避免因索引变化导致 ID 不匹配
-    filtered = []
-    for i, acc in enumerate(accounts_data, 1):
-        # 如果账户有显式的 id 字段，使用它；否则使用 secure_c_ses 或索引
-        acc_id = acc.get("id")
-        if not acc_id:
-            # 无显式 ID 时，使用 secure_c_ses 作为唯一标识
-            acc_id = acc.get("secure_c_ses", f"account_{i}")
+    # 过滤掉要删除的账户
+    filtered = [
+        acc for i, acc in enumerate(accounts_data, 1)
+        if get_account_id(acc, i) != account_id
+    ]
 
-        # 同时检查 account_id 是否匹配 ID 或 secure_c_ses
-        if acc_id != account_id and acc.get("secure_c_ses") != account_id:
-            filtered.append(acc)
+    if len(filtered) == len(accounts_data):
+        raise ValueError(f"账户 {account_id} 不存在")
 
     save_accounts_to_file(filtered)
     reload_accounts()

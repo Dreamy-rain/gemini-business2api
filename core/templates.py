@@ -692,6 +692,27 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
         <script>
             let currentConfig = null;
 
+            // 统一的页面刷新函数（避免缓存）
+            function refreshPage() {{
+                window.location.href = window.location.pathname + '?t=' + Date.now();
+            }}
+
+            // 统一的错误处理函数
+            async function handleApiResponse(response) {{
+                if (!response.ok) {{
+                    const errorText = await response.text();
+                    let errorMsg;
+                    try {{
+                        const errorJson = JSON.parse(errorText);
+                        errorMsg = errorJson.detail || errorJson.message || errorText;
+                    }} catch {{
+                        errorMsg = errorText;
+                    }}
+                    throw new Error(`HTTP ${{response.status}}: ${{errorMsg}}`);
+                }}
+                return await response.json();
+            }}
+
             async function showEditConfig() {{
                 const config = await fetch('/{main.PATH_PREFIX}/admin/accounts-config?key={main.ADMIN_KEY}').then(r => r.json());
                 currentConfig = config.accounts;
@@ -746,15 +767,12 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         body: JSON.stringify(data)
                     }});
 
-                    const result = await response.json();
-                    if (response.ok) {{
-                        alert(`配置已更新！\\n当前账户数: ${{result.account_count}}`);
-                        closeModal();
-                        location.reload();
-                    }} else {{
-                        throw new Error(result.detail || '更新失败');
-                    }}
+                    const result = await handleApiResponse(response);
+                    alert(`配置已更新！\\n当前账户数: ${{result.account_count}}`);
+                    closeModal();
+                    setTimeout(refreshPage, 1000);
                 }} catch (error) {{
+                    console.error('保存失败:', error);
                     alert('更新失败: ' + error.message);
                 }}
             }}
@@ -767,14 +785,11 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         method: 'DELETE'
                     }});
 
-                    const result = await response.json();
-                    if (response.ok) {{
-                        alert(`账户已删除！\\n剩余账户数: ${{result.account_count}}`);
-                        location.reload();
-                    }} else {{
-                        throw new Error(result.detail || '删除失败');
-                    }}
+                    const result = await handleApiResponse(response);
+                    alert(`账户已删除！\\n剩余账户数: ${{result.account_count}}`);
+                    refreshPage();
                 }} catch (error) {{
+                    console.error('删除失败:', error);
                     alert('删除失败: ' + error.message);
                 }}
             }}

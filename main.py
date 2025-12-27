@@ -1813,11 +1813,8 @@ async def admin_home(path_prefix: str, request: Request, key: str = None, author
     return HTMLResponse(content=html_content)
 
 @app.get("/{path_prefix}/v1/models")
+@require_path_prefix(PATH_PREFIX)
 async def list_models(path_prefix: str, authorization: str = Header(None)):
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
     # 验证 API Key
     verify_api_key(authorization)
 
@@ -1834,41 +1831,22 @@ async def list_models(path_prefix: str, authorization: str = Header(None)):
     return {"object": "list", "data": data}
 
 @app.get("/{path_prefix}/v1/models/{model_id}")
+@require_path_prefix(PATH_PREFIX)
 async def get_model(path_prefix: str, model_id: str, authorization: str = Header(None)):
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
     # 验证 API Key
     verify_api_key(authorization)
 
     return {"id": model_id, "object": "model"}
 
 @app.get("/{path_prefix}/admin/health")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_health(path_prefix: str, key: str = None, authorization: str = Header(None)):
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
-    # 验证管理员密钥
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
-
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 @app.get("/{path_prefix}/admin/accounts")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_get_accounts(path_prefix: str, key: str = None, authorization: str = Header(None)):
     """获取所有账户的状态信息"""
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
-    # 验证管理员密钥
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
-
     accounts_info = []
     for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
@@ -1893,13 +1871,9 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
     }
 
 @app.put("/{path_prefix}/admin/accounts-config")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_update_config(path_prefix: str, accounts_data: list = Body(...), key: str = None, authorization: str = Header(None)):
     """更新整个账户配置"""
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
     try:
         update_accounts_config(accounts_data)
         return {"status": "success", "message": "配置已更新", "account_count": len(multi_account_mgr.accounts)}
@@ -1908,13 +1882,9 @@ async def admin_update_config(path_prefix: str, accounts_data: list = Body(...),
         raise HTTPException(500, f"更新失败: {str(e)}")
 
 @app.delete("/{path_prefix}/admin/accounts/{account_id}")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_delete_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
     """删除单个账户"""
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
     try:
         delete_account(account_id)
         return {"status": "success", "message": f"账户 {account_id} 已删除", "account_count": len(multi_account_mgr.accounts)}
@@ -1923,6 +1893,7 @@ async def admin_delete_account(path_prefix: str, account_id: str, key: str = Non
         raise HTTPException(500, f"删除失败: {str(e)}")
 
 @app.get("/{path_prefix}/admin/log")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_get_logs(
     path_prefix: str,
     limit: int = 1500,
@@ -1943,15 +1914,6 @@ async def admin_get_logs(
     - start_time: 开始时间 (格式: 2025-12-17 10:00:00)
     - end_time: 结束时间 (格式: 2025-12-17 11:00:00)
     """
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
-    # 验证管理员密钥
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
-
     with log_lock:
         logs = list(log_buffer)
 
@@ -2015,6 +1977,7 @@ async def admin_get_logs(
     }
 
 @app.delete("/{path_prefix}/admin/log")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_clear_logs(path_prefix: str, confirm: str = None, key: str = None, authorization: str = Header(None)):
     """
     清空所有日志（内存缓冲 + 文件）
@@ -2022,15 +1985,6 @@ async def admin_clear_logs(path_prefix: str, confirm: str = None, key: str = Non
     参数:
     - confirm: 必须传入 "yes" 才能清空
     """
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
-    # 验证管理员密钥
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
-
     if confirm != "yes":
         raise HTTPException(
             status_code=400,
@@ -2051,17 +2005,9 @@ async def admin_clear_logs(path_prefix: str, confirm: str = None, key: str = Non
     }
 
 @app.get("/{path_prefix}/admin/log/html")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_logs_html(path_prefix: str, key: str = None, authorization: str = Header(None)):
     """返回美化的 HTML 日志查看界面"""
-    # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
-    # 验证管理员密钥
-    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(404, "Not Found")
-
     html_content = r"""
     <!DOCTYPE html>
     <html>
@@ -2683,16 +2629,13 @@ async def admin_logs_html(path_prefix: str, key: str = None, authorization: str 
     return HTMLResponse(content=html_content)
 
 @app.post("/{path_prefix}/v1/chat/completions")
+@require_path_prefix(PATH_PREFIX)
 async def chat(
     path_prefix: str,
     req: ChatRequest,
     request: Request,
     authorization: Optional[str] = Header(None)
 ):
-    # 0. 验证路径前缀
-    if path_prefix != PATH_PREFIX:
-        raise HTTPException(404, "Not Found")
-
     # 1. API Key 验证
     verify_api_key(authorization)
 

@@ -1070,6 +1070,17 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
         "accounts": accounts_info
     }
 
+@app.get("/{path_prefix}/admin/accounts-config")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
+async def admin_get_config(path_prefix: str, key: str = None, authorization: str = Header(None)):
+    """获取完整账户配置"""
+    try:
+        accounts_data = load_accounts_from_source()
+        return {"accounts": accounts_data}
+    except Exception as e:
+        logger.error(f"[CONFIG] 获取配置失败: {str(e)}")
+        raise HTTPException(500, f"获取失败: {str(e)}")
+
 @app.put("/{path_prefix}/admin/accounts-config")
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_update_config(path_prefix: str, accounts_data: list = Body(...), key: str = None, authorization: str = Header(None)):

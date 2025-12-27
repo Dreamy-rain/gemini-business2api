@@ -693,18 +693,9 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             let currentConfig = null;
 
             async function showEditConfig() {{
-                const config = await fetch('/{main.PATH_PREFIX}/admin/accounts?key={main.ADMIN_KEY}').then(r => r.json());
-                const accounts = config.accounts.map(acc => ({{
-                    id: acc.id,
-                    csesidx: "***",
-                    config_id: "***",
-                    secure_c_ses: "***",
-                    host_c_oses: null,
-                    expires_at: acc.expires_at
-                }}));
-
-                currentConfig = accounts;
-                const json = JSON.stringify(accounts, null, 2);
+                const config = await fetch('/{main.PATH_PREFIX}/admin/accounts-config?key={main.ADMIN_KEY}').then(r => r.json());
+                currentConfig = config.accounts;
+                const json = JSON.stringify(config.accounts, null, 2);
                 document.getElementById('jsonEditor').value = json;
                 document.getElementById('jsonError').classList.remove('show');
                 document.getElementById('jsonModal').classList.add('show');

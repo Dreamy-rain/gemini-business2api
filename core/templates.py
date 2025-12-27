@@ -514,6 +514,10 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                                     <div class="env-value">{main.MAX_REQUEST_RETRIES}</div>
                                 </div>
                                 <div class="env-var">
+                                    <div><div class="env-name">MAX_ACCOUNT_SWITCH_TRIES</div><div class="env-desc">每次重试查找账户次数</div></div>
+                                    <div class="env-value">{main.MAX_ACCOUNT_SWITCH_TRIES}</div>
+                                </div>
+                                <div class="env-var">
                                     <div><div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
                                     <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
                                 </div>

@@ -1385,11 +1385,22 @@ async def chat(
                     request
                 ):
                     yield chunk
+
+                # 请求成功，重置账户失败计数
+                account_manager.is_available = True
+                account_manager.error_count = 0
                 break
 
             except (httpx.ConnectError, httpx.ReadTimeout, ssl.SSLError, HTTPException) as e:
                 # 记录当前失败的账户
                 failed_accounts.add(account_manager.config.account_id)
+
+                # 增加账户失败计数（触发熔断机制）
+                account_manager.last_error_time = time.time()
+                account_manager.error_count += 1
+                if account_manager.error_count >= ACCOUNT_FAILURE_THRESHOLD:
+                    account_manager.is_available = False
+                    logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 请求连续失败{account_manager.error_count}次，账户已标记为不可用")
 
                 retry_count += 1
 

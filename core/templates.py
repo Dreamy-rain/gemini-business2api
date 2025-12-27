@@ -492,11 +492,11 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                                     <div><div class="env-name">ACCOUNTS_CONFIG</div><div class="env-desc">JSON格式账户列表</div></div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">main.PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
+                                    <div><div class="env-name">PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
                                     <div class="env-value">当前: {main.PATH_PREFIX}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">main.ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
+                                    <div><div class="env-name">ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
                                     <div class="env-value">已设置</div>
                                 </div>
                             </div>
@@ -506,19 +506,19 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                             <h3>重试配置 <span class="badge badge-optional">OPTIONAL</span></h3>
                             <div style="margin-top: 12px;">
                                 <div class="env-var">
-                                    <div><div class="env-name">main.MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
+                                    <div><div class="env-name">MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
                                     <div class="env-value">{main.MAX_NEW_SESSION_TRIES}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">main.MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
+                                    <div><div class="env-name">MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
                                     <div class="env-value">{main.MAX_REQUEST_RETRIES}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">main.ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
+                                    <div><div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
                                     <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">main.ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
+                                    <div><div class="env-name">ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
                                     <div class="env-value">{main.ACCOUNT_COOLDOWN_SECONDS} 秒</div>
                                 </div>
                             </div>
@@ -529,35 +529,35 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         <h3>可选变量 <span class="badge badge-optional">OPTIONAL</span></h3>
                         <div style="margin-top: 12px;">
                             <div class="env-var">
-                                <div><div class="env-name">main.API_KEY</div><div class="env-desc">API访问密钥</div></div>
+                                <div><div class="env-name">API_KEY</div><div class="env-desc">API访问密钥</div></div>
                                 <div class="env-value">{'已设置' if main.API_KEY else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
+                                <div><div class="env-name">BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
                                 <div class="env-value">{'已设置' if main.BASE_URL else '未设置（自动检测）'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.PROXY</div><div class="env-desc">代理地址</div></div>
+                                <div><div class="env-name">PROXY</div><div class="env-desc">代理地址</div></div>
                                 <div class="env-value">{'已设置' if main.PROXY else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
+                                <div><div class="env-name">SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
                                 <div class="env-value">{main.SESSION_CACHE_TTL_SECONDS} 秒</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
+                                <div><div class="env-name">LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
                                 <div class="env-value">{'已设置' if main.LOGO_URL else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
+                                <div><div class="env-name">CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
                                 <div class="env-value">{'已设置' if main.CHAT_URL else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
+                                <div><div class="env-name">MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
                                 <div class="env-value">{main.MODEL_NAME}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">main.HIDE_HOME_PAGE</div><div class="env-desc">隐藏首页管理面板</div></div>
+                                <div><div class="env-name">HIDE_HOME_PAGE</div><div class="env-desc">隐藏首页管理面板</div></div>
                                 <div class="env-value">{'已隐藏' if main.HIDE_HOME_PAGE else '未隐藏'}</div>
                             </div>
                         </div>

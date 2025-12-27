@@ -6,7 +6,7 @@ import logging
 from dotenv import load_dotenv
 
 import httpx
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, Body
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -384,15 +384,32 @@ class MultiAccountManager:
             logger.info(f"[MULTI] [ACCOUNT] {req_tag}选择账户: {account_id}")
             return account
 
-# ---------- 多账户配置加载 ----------
-def load_multi_account_config() -> MultiAccountManager:
-    """从环境变量加载多账户配置（仅支持 ACCOUNTS_CONFIG JSON 格式）"""
-    manager = MultiAccountManager()
+# ---------- 配置文件管理 ----------
+ACCOUNTS_FILE = "accounts.json"
 
+def save_accounts_to_file(accounts_data: list):
+    """保存账户配置到文件"""
+    with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(accounts_data, f, ensure_ascii=False, indent=2)
+    logger.info(f"[CONFIG] 配置已保存到 {ACCOUNTS_FILE}")
+
+def load_accounts_from_source() -> list:
+    """优先从文件加载，否则从环境变量加载"""
+    # 优先从文件加载
+    if os.path.exists(ACCOUNTS_FILE):
+        try:
+            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                accounts_data = json.load(f)
+            logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}")
+            return accounts_data
+        except Exception as e:
+            logger.warning(f"[CONFIG] 文件加载失败，尝试环境变量: {str(e)}")
+
+    # 从环境变量加载
     accounts_json = os.getenv("ACCOUNTS_CONFIG")
     if not accounts_json:
         raise ValueError(
-            "未找到 ACCOUNTS_CONFIG 环境变量。\n"
+            "未找到配置文件或 ACCOUNTS_CONFIG 环境变量。\n"
             "请在环境变量中配置 JSON 格式的账户列表，格式示例：\n"
             '[{"id":"account_1","csesidx":"xxx","config_id":"yyy","secure_c_ses":"zzz","host_c_oses":null,"expires_at":"2025-12-23 10:59:21"}]'
         )
@@ -401,49 +418,77 @@ def load_multi_account_config() -> MultiAccountManager:
         accounts_data = json.loads(accounts_json)
         if not isinstance(accounts_data, list):
             raise ValueError("ACCOUNTS_CONFIG 必须是 JSON 数组格式")
-
-        for i, acc in enumerate(accounts_data, 1):
-            # 验证必需字段
-            required_fields = ["secure_c_ses", "csesidx", "config_id"]
-            missing_fields = [f for f in required_fields if f not in acc]
-            if missing_fields:
-                raise ValueError(f"账户 {i} 缺少必需字段: {', '.join(missing_fields)}")
-
-            config = AccountConfig(
-                account_id=acc.get("id", f"account_{i}"),
-                secure_c_ses=acc["secure_c_ses"],
-                host_c_oses=acc.get("host_c_oses"),
-                csesidx=acc["csesidx"],
-                config_id=acc["config_id"],
-                expires_at=acc.get("expires_at")
-            )
-
-            # 检查账户是否已过期
-            if config.is_expired():
-                logger.warning(f"[CONFIG] 账户 {config.account_id} 已过期，跳过加载")
-                continue
-
-            manager.add_account(config)
-
-        if not manager.accounts:
-            raise ValueError("没有有效的账户配置（可能全部已过期）")
-
-        logger.info(f"[CONFIG] 成功加载 {len(manager.accounts)} 个账户")
-        return manager
-
+        # 首次从环境变量加载后，保存到文件
+        save_accounts_to_file(accounts_data)
+        logger.info(f"[CONFIG] 从环境变量加载配置并保存到文件")
+        return accounts_data
     except json.JSONDecodeError as e:
         logger.error(f"[CONFIG] ACCOUNTS_CONFIG JSON 解析失败: {str(e)}")
         raise ValueError(f"ACCOUNTS_CONFIG 格式错误: {str(e)}")
-    except KeyError as e:
-        logger.error(f"[CONFIG] ACCOUNTS_CONFIG 缺少必需字段: {str(e)}")
-        raise ValueError(f"ACCOUNTS_CONFIG 缺少必需字段: {str(e)}")
-    except Exception as e:
-        logger.error(f"[CONFIG] 加载账户配置失败: {str(e)}")
-        raise
+
+# ---------- 多账户配置加载 ----------
+def load_multi_account_config() -> MultiAccountManager:
+    """从文件或环境变量加载多账户配置"""
+    manager = MultiAccountManager()
+
+    accounts_data = load_accounts_from_source()
+
+    for i, acc in enumerate(accounts_data, 1):
+        # 验证必需字段
+        required_fields = ["secure_c_ses", "csesidx", "config_id"]
+        missing_fields = [f for f in required_fields if f not in acc]
+        if missing_fields:
+            raise ValueError(f"账户 {i} 缺少必需字段: {', '.join(missing_fields)}")
+
+        config = AccountConfig(
+            account_id=acc.get("id", f"account_{i}"),
+            secure_c_ses=acc["secure_c_ses"],
+            host_c_oses=acc.get("host_c_oses"),
+            csesidx=acc["csesidx"],
+            config_id=acc["config_id"],
+            expires_at=acc.get("expires_at")
+        )
+
+        # 检查账户是否已过期
+        if config.is_expired():
+            logger.warning(f"[CONFIG] 账户 {config.account_id} 已过期，跳过加载")
+            continue
+
+        manager.add_account(config)
+
+    if not manager.accounts:
+        raise ValueError("没有有效的账户配置（可能全部已过期）")
+
+    logger.info(f"[CONFIG] 成功加载 {len(manager.accounts)} 个账户")
+    return manager
 
 
 # 初始化多账户管理器
 multi_account_mgr = load_multi_account_config()
+
+def reload_accounts():
+    """重新加载账户配置（清空缓存并重新加载）"""
+    global multi_account_mgr
+    multi_account_mgr.global_session_cache.clear()
+    multi_account_mgr = load_multi_account_config()
+    logger.info(f"[CONFIG] 配置已重载，当前账户数: {len(multi_account_mgr.accounts)}")
+
+def update_accounts_config(accounts_data: list):
+    """更新账户配置（保存到文件并重新加载）"""
+    save_accounts_to_file(accounts_data)
+    reload_accounts()
+
+def delete_account(account_id: str):
+    """删除单个账户"""
+    accounts_data = load_accounts_from_source()
+    # 修复：正确匹配账户ID（考虑默认值）
+    filtered = []
+    for i, acc in enumerate(accounts_data, 1):
+        acc_id = acc.get("id", f"account_{i}")
+        if acc_id != account_id:
+            filtered.append(acc)
+    save_accounts_to_file(filtered)
+    reload_accounts()
 
 # 验证必需的环境变量
 if not PATH_PREFIX:
@@ -1006,7 +1051,10 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                     <span class="status-dot" style="background-color: {dot_color};" title="{dot_title}"></span>
                     {config.account_id}
                 </div>
-                <span class="acc-status-text" style="color: {status_color}">{status_text}</span>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="acc-status-text" style="color: {status_color}">{status_text}</span>
+                    <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                </div>
             </div>
             <div class="acc-body">
                 <div class="acc-row">
@@ -1156,7 +1204,143 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             .status-dot {{ width: 8px; height: 8px; border-radius: 50%; }}
             .acc-status-text {{ font-size: 12px; font-weight: 500; }}
             .acc-row {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 6px; color: var(--text-sec); }}
-            
+
+            /* Delete Button */
+            .delete-btn {{
+                background: #fff;
+                color: #dc2626;
+                border: 1px solid #fecaca;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 11px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.2s;
+            }}
+            .delete-btn:hover {{
+                background: #dc2626;
+                color: white;
+                border-color: #dc2626;
+            }}
+
+            /* Modal */
+            .modal {{
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                z-index: 1000;
+                align-items: center;
+                justify-content: center;
+            }}
+            .modal.show {{ display: flex; }}
+            .modal-content {{
+                background: white;
+                border-radius: 12px;
+                width: 90%;
+                max-width: 800px;
+                max-height: 90vh;
+                display: flex;
+                flex-direction: column;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            }}
+            .modal-header {{
+                padding: 20px 24px;
+                border-bottom: 1px solid #e5e5e5;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }}
+            .modal-title {{ font-size: 18px; font-weight: 600; color: #1a1a1a; }}
+            .modal-close {{
+                background: none;
+                border: none;
+                font-size: 24px;
+                color: #6b6b6b;
+                cursor: pointer;
+                padding: 0;
+                width: 32px;
+                height: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 6px;
+                transition: all 0.2s;
+            }}
+            .modal-close:hover {{ background: #f5f5f5; color: #1a1a1a; }}
+            .modal-body {{
+                padding: 24px;
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }}
+            .modal-footer {{
+                padding: 16px 24px;
+                border-top: 1px solid #e5e5e5;
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+            }}
+
+            /* JSON Editor */
+            .json-editor {{
+                width: 100%;
+                flex: 1;
+                min-height: 300px;
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+                font-size: 13px;
+                padding: 16px;
+                border: 1px solid #e5e5e5;
+                border-radius: 8px;
+                background: #fafaf9;
+                color: #1a1a1a;
+                line-height: 1.6;
+                overflow-y: auto;
+                resize: none;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(0,0,0,0.15) transparent;
+            }}
+            .json-editor::-webkit-scrollbar {{
+                width: 4px;
+            }}
+            .json-editor::-webkit-scrollbar-track {{
+                background: transparent;
+            }}
+            .json-editor::-webkit-scrollbar-thumb {{
+                background: rgba(0,0,0,0.15);
+                border-radius: 2px;
+            }}
+            .json-editor::-webkit-scrollbar-thumb:hover {{
+                background: rgba(0,0,0,0.3);
+            }}
+            .json-editor:focus {{
+                outline: none;
+                border-color: #0071e3;
+                box-shadow: 0 0 0 3px rgba(0,113,227,0.1);
+            }}
+            .json-error {{
+                color: #dc2626;
+                font-size: 12px;
+                margin-top: 8px;
+                padding: 8px 12px;
+                background: #fef2f2;
+                border: 1px solid #fecaca;
+                border-radius: 6px;
+                display: none;
+            }}
+            .json-error.show {{ display: block; }}
+
+            .btn-secondary {{
+                background: #f5f5f5;
+                color: #1a1a1a;
+                border: 1px solid #e5e5e5;
+            }}
+            .btn-secondary:hover {{ background: #e5e5e5; }}
+
             .env-var {{ display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }}
             .env-var:last-child {{ border-bottom: none; }}
             .env-name {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-main); font-weight: 600; }}
@@ -1240,7 +1424,8 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                 </div>
                 <div class="header-actions">
                     <a href="/public/log/html" class="btn" target="_blank">📄 公开日志</a>
-                    <a href="/{PATH_PREFIX}/admin/log/html?key={ADMIN_KEY}" class="btn btn-primary" target="_blank">🔧 管理日志</a>
+                    <a href="/{PATH_PREFIX}/admin/log/html?key={ADMIN_KEY}" class="btn" target="_blank">🔧 管理日志</a>
+                    <button class="btn" onclick="showEditConfig()" id="edit-btn">✏️ 编辑配置</button>
                 </div>
             </div>
 
@@ -1442,6 +1627,134 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                 </div>
             </div>
         </div>
+
+        <!-- JSON 编辑器模态框 -->
+        <div id="jsonModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div class="modal-title">编辑账户配置</div>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <textarea id="jsonEditor" class="json-editor" placeholder="在此编辑 JSON 配置..."></textarea>
+                    <div id="jsonError" class="json-error"></div>
+                    <div style="margin-top: 12px; font-size: 12px; color: #6b6b6b;">
+                        <strong>提示：</strong>编辑完成后点击"保存"按钮。JSON 格式错误时无法保存。
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                    <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let currentConfig = null;
+
+            async function showEditConfig() {{
+                const config = await fetch('/{PATH_PREFIX}/admin/accounts?key={ADMIN_KEY}').then(r => r.json());
+                const accounts = config.accounts.map(acc => ({{
+                    id: acc.id,
+                    csesidx: "***",
+                    config_id: "***",
+                    secure_c_ses: "***",
+                    host_c_oses: null,
+                    expires_at: acc.expires_at
+                }}));
+
+                currentConfig = accounts;
+                const json = JSON.stringify(accounts, null, 2);
+                document.getElementById('jsonEditor').value = json;
+                document.getElementById('jsonError').classList.remove('show');
+                document.getElementById('jsonModal').classList.add('show');
+
+                // 实时验证 JSON
+                document.getElementById('jsonEditor').addEventListener('input', validateJSON);
+            }}
+
+            function validateJSON() {{
+                const editor = document.getElementById('jsonEditor');
+                const errorDiv = document.getElementById('jsonError');
+                try {{
+                    JSON.parse(editor.value);
+                    errorDiv.classList.remove('show');
+                    errorDiv.textContent = '';
+                    return true;
+                }} catch (e) {{
+                    errorDiv.classList.add('show');
+                    errorDiv.textContent = '❌ JSON 格式错误: ' + e.message;
+                    return false;
+                }}
+            }}
+
+            function closeModal() {{
+                document.getElementById('jsonModal').classList.remove('show');
+                document.getElementById('jsonEditor').removeEventListener('input', validateJSON);
+            }}
+
+            async function saveConfig() {{
+                if (!validateJSON()) {{
+                    alert('JSON 格式错误，请修正后再保存');
+                    return;
+                }}
+
+                const newJson = document.getElementById('jsonEditor').value;
+                const originalJson = JSON.stringify(currentConfig, null, 2);
+
+                if (newJson === originalJson) {{
+                    closeModal();
+                    return;
+                }}
+
+                try {{
+                    const data = JSON.parse(newJson);
+                    const response = await fetch('/{PATH_PREFIX}/admin/accounts-config?key={ADMIN_KEY}', {{
+                        method: 'PUT',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(data)
+                    }});
+
+                    const result = await response.json();
+                    if (response.ok) {{
+                        alert(`配置已更新！\\n当前账户数: ${{result.account_count}}`);
+                        closeModal();
+                        location.reload();
+                    }} else {{
+                        throw new Error(result.detail || '更新失败');
+                    }}
+                }} catch (error) {{
+                    alert('更新失败: ' + error.message);
+                }}
+            }}
+
+            async function deleteAccount(accountId) {{
+                if (!confirm(`确定删除账户 ${{accountId}}？`)) return;
+
+                try {{
+                    const response = await fetch('/{PATH_PREFIX}/admin/accounts/' + accountId + '?key={ADMIN_KEY}', {{
+                        method: 'DELETE'
+                    }});
+
+                    const result = await response.json();
+                    if (response.ok) {{
+                        alert(`账户已删除！\\n剩余账户数: ${{result.account_count}}`);
+                        location.reload();
+                    }} else {{
+                        throw new Error(result.detail || '删除失败');
+                    }}
+                }} catch (error) {{
+                    alert('删除失败: ' + error.message);
+                }}
+            }}
+
+            // 点击模态框外部关闭
+            document.getElementById('jsonModal').addEventListener('click', function(e) {{
+                if (e.target === this) {{
+                    closeModal();
+                }}
+            }});
+        </script>
     </body>
     </html>
     """
@@ -1554,6 +1867,36 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
         "total": len(accounts_info),
         "accounts": accounts_info
     }
+
+@app.put("/{path_prefix}/admin/accounts-config")
+async def admin_update_config(path_prefix: str, accounts_data: list = Body(...), key: str = None, authorization: str = Header(None)):
+    """更新整个账户配置"""
+    if path_prefix != PATH_PREFIX:
+        raise HTTPException(404, "Not Found")
+    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
+    if admin_key != ADMIN_KEY:
+        raise HTTPException(404, "Not Found")
+    try:
+        update_accounts_config(accounts_data)
+        return {"status": "success", "message": "配置已更新", "account_count": len(multi_account_mgr.accounts)}
+    except Exception as e:
+        logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
+        raise HTTPException(500, f"更新失败: {str(e)}")
+
+@app.delete("/{path_prefix}/admin/accounts/{account_id}")
+async def admin_delete_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+    """删除单个账户"""
+    if path_prefix != PATH_PREFIX:
+        raise HTTPException(404, "Not Found")
+    admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
+    if admin_key != ADMIN_KEY:
+        raise HTTPException(404, "Not Found")
+    try:
+        delete_account(account_id)
+        return {"status": "success", "message": f"账户 {account_id} 已删除", "account_count": len(multi_account_mgr.accounts)}
+    except Exception as e:
+        logger.error(f"[CONFIG] 删除账户失败: {str(e)}")
+        raise HTTPException(500, f"删除失败: {str(e)}")
 
 @app.get("/{path_prefix}/admin/log")
 async def admin_get_logs(

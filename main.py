@@ -1250,6 +1250,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
 
             <div class="section">
                 <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
+                <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">过期时间为12小时，可以自行修改时间，脚本可能有误差。</div>
                 <div class="account-grid">
                     {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}
                 </div>

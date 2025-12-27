@@ -683,7 +683,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                     <textarea id="jsonEditor" class="json-editor" placeholder="在此编辑 JSON 配置..."></textarea>
                     <div id="jsonError" class="json-error"></div>
                     <div style="margin-top: 12px; font-size: 12px; color: #6b6b6b;">
-                        <strong>提示：</strong>编辑完成后点击"保存"按钮。JSON 格式错误时无法保存。
+                        <strong>提示：</strong>编辑完成后点击"保存"按钮。JSON 格式错误时无法保存。<br>
+                        配置立即生效。重启后将从环境变量重新加载，建议同步更新 ACCOUNTS_CONFIG。
                     </div>
                 </div>
                 <div class="modal-footer">

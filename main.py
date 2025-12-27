@@ -442,6 +442,10 @@ def load_accounts_from_source() -> list:
         logger.error(f"[CONFIG] ACCOUNTS_CONFIG JSON 解析失败: {str(e)}")
         raise ValueError(f"ACCOUNTS_CONFIG 格式错误: {str(e)}")
 
+def get_account_id(acc: dict, index: int) -> str:
+    """获取账户ID（有显式ID则使用，否则生成默认ID）"""
+    return acc.get("id", f"account_{index}")
+
 # ---------- 多账户配置加载 ----------
 def load_multi_account_config() -> MultiAccountManager:
     """从文件或环境变量加载多账户配置"""
@@ -488,10 +492,6 @@ def reload_accounts():
     multi_account_mgr.global_session_cache.clear()
     multi_account_mgr = load_multi_account_config()
     logger.info(f"[CONFIG] 配置已重载，当前账户数: {len(multi_account_mgr.accounts)}")
-
-def get_account_id(acc: dict, index: int) -> str:
-    """获取账户ID（有显式ID则使用，否则生成默认ID）"""
-    return acc.get("id", f"account_{index}")
 
 def update_accounts_config(accounts_data: list):
     """更新账户配置（保存到文件并重新加载）"""

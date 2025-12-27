@@ -3,9 +3,8 @@
 此模块包含 HTML 页面生成函数，用于管理界面和日志查看器
 
 注意：
-- 这些函数依赖 main.py 中的全局变量和配置
-- 使用前需要确保相关依赖已正确导入或作为参数传入
-- 主要依赖：PATH_PREFIX, ADMIN_KEY, API_KEY, multi_account_mgr, log_buffer, log_lock 等
+- 这些函数需要通过 import main 动态获取全局变量
+- 避免在模块顶层导入 main，防止循环依赖
 """
 
 from fastapi import Request, Header, HTTPException
@@ -14,13 +13,16 @@ from fastapi.responses import HTMLResponse
 
 def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
     """生成管理页面HTML - 端点带Key参数完整版"""
+    # 动态导入 main 模块的变量（避免循环依赖）
+    import main
+
     # 获取当前页面的完整URL
-    current_url = get_base_url(request)
+    current_url = main.get_base_url(request)
 
     # 获取错误统计
     error_count = 0
-    with log_lock:
-        for log in log_buffer:
+    with main.log_lock:
+        for log in main.log_buffer:
             if log.get("level") in ["ERROR", "CRITICAL"]:
                 error_count += 1
 
@@ -32,13 +34,13 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             <div class="alert-icon">💡</div>
             <div class="alert-content">
                 <strong>提示</strong>：此页面默认在首页显示。如需隐藏，请设置环境变量：<br>
-                <code style="margin-top:4px; display:inline-block;">HIDE_HOME_PAGE=true</code>
+                <code style="margin-top:4px; display:inline-block;">main.HIDE_HOME_PAGE=true</code>
             </div>
         </div>
         """
 
     api_key_status = ""
-    if API_KEY:
+    if main.API_KEY:
         api_key_status = """
         <div class="alert alert-success">
             <div class="alert-icon">🔒</div>
@@ -54,7 +56,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             <div class="alert-icon">⚠️</div>
             <div class="alert-content">
                 <strong>API Key 未设置</strong>
-                <div class="alert-desc">API 当前允许公开访问，建议配置 API_KEY。</div>
+                <div class="alert-desc">API 当前允许公开访问，建议配置 main.API_KEY。</div>
             </div>
         </div>
         """
@@ -73,10 +75,10 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
 
     # --- 2. 构建账户卡片 ---
     accounts_html = ""
-    for account_id, account_manager in multi_account_mgr.accounts.items():
+    for account_id, account_manager in main.multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
-        status_text, status_color, expire_display = format_account_expiration(remaining_hours)
+        status_text, status_color, expire_display = main.format_account_expiration(remaining_hours)
 
         is_avail = account_manager.is_available
         dot_color = "#34c759" if is_avail else "#ff3b30"
@@ -462,7 +464,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                 </div>
                 <div class="header-actions">
                     <a href="/public/log/html" class="btn" target="_blank">📄 公开日志</a>
-                    <a href="/{PATH_PREFIX}/admin/log/html?key={ADMIN_KEY}" class="btn" target="_blank">🔧 管理日志</a>
+                    <a href="/{main.PATH_PREFIX}/admin/log/html?key={main.ADMIN_KEY}" class="btn" target="_blank">🔧 管理日志</a>
                     <button class="btn" onclick="showEditConfig()" id="edit-btn">✏️ 编辑配置</button>
                 </div>
             </div>
@@ -472,7 +474,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             {error_alert}
 
             <div class="section">
-                <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
+                <div class="section-title">账户状态 ({len(main.multi_account_mgr.accounts)} 个)</div>
                 <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">过期时间为12小时，可以自行修改时间，脚本可能有误差。</div>
                 <div class="account-grid">
                     {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}
@@ -490,11 +492,11 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                                     <div><div class="env-name">ACCOUNTS_CONFIG</div><div class="env-desc">JSON格式账户列表</div></div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
-                                    <div class="env-value">当前: {PATH_PREFIX}</div>
+                                    <div><div class="env-name">main.PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
+                                    <div class="env-value">当前: {main.PATH_PREFIX}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
+                                    <div><div class="env-name">main.ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
                                     <div class="env-value">已设置</div>
                                 </div>
                             </div>
@@ -504,20 +506,20 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                             <h3>重试配置 <span class="badge badge-optional">OPTIONAL</span></h3>
                             <div style="margin-top: 12px;">
                                 <div class="env-var">
-                                    <div><div class="env-name">MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
-                                    <div class="env-value">{MAX_NEW_SESSION_TRIES}</div>
+                                    <div><div class="env-name">main.MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
+                                    <div class="env-value">{main.MAX_NEW_SESSION_TRIES}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
-                                    <div class="env-value">{MAX_REQUEST_RETRIES}</div>
+                                    <div><div class="env-name">main.MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
+                                    <div class="env-value">{main.MAX_REQUEST_RETRIES}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
-                                    <div class="env-value">{ACCOUNT_FAILURE_THRESHOLD} 次</div>
+                                    <div><div class="env-name">main.ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
+                                    <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
-                                    <div class="env-value">{ACCOUNT_COOLDOWN_SECONDS} 秒</div>
+                                    <div><div class="env-name">main.ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
+                                    <div class="env-value">{main.ACCOUNT_COOLDOWN_SECONDS} 秒</div>
                                 </div>
                             </div>
                         </div>
@@ -527,36 +529,36 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                         <h3>可选变量 <span class="badge badge-optional">OPTIONAL</span></h3>
                         <div style="margin-top: 12px;">
                             <div class="env-var">
-                                <div><div class="env-name">API_KEY</div><div class="env-desc">API访问密钥</div></div>
-                                <div class="env-value">{'已设置' if API_KEY else '未设置'}</div>
+                                <div><div class="env-name">main.API_KEY</div><div class="env-desc">API访问密钥</div></div>
+                                <div class="env-value">{'已设置' if main.API_KEY else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
-                                <div class="env-value">{'已设置' if BASE_URL else '未设置（自动检测）'}</div>
+                                <div><div class="env-name">main.BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
+                                <div class="env-value">{'已设置' if main.BASE_URL else '未设置（自动检测）'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">PROXY</div><div class="env-desc">代理地址</div></div>
-                                <div class="env-value">{'已设置' if PROXY else '未设置'}</div>
+                                <div><div class="env-name">main.PROXY</div><div class="env-desc">代理地址</div></div>
+                                <div class="env-value">{'已设置' if main.PROXY else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
-                                <div class="env-value">{SESSION_CACHE_TTL_SECONDS} 秒</div>
+                                <div><div class="env-name">main.SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
+                                <div class="env-value">{main.SESSION_CACHE_TTL_SECONDS} 秒</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
-                                <div class="env-value">{'已设置' if LOGO_URL else '未设置'}</div>
+                                <div><div class="env-name">main.LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
+                                <div class="env-value">{'已设置' if main.LOGO_URL else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
-                                <div class="env-value">{'已设置' if CHAT_URL else '未设置'}</div>
+                                <div><div class="env-name">main.CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
+                                <div class="env-value">{'已设置' if main.CHAT_URL else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
-                                <div class="env-value">{MODEL_NAME}</div>
+                                <div><div class="env-name">main.MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
+                                <div class="env-value">{main.MODEL_NAME}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">HIDE_HOME_PAGE</div><div class="env-desc">隐藏首页管理面板</div></div>
-                                <div class="env-value">{'已隐藏' if HIDE_HOME_PAGE else '未隐藏'}</div>
+                                <div><div class="env-name">main.HIDE_HOME_PAGE</div><div class="env-desc">隐藏首页管理面板</div></div>
+                                <div class="env-value">{'已隐藏' if main.HIDE_HOME_PAGE else '未隐藏'}</div>
                             </div>
                         </div>
                     </div>
@@ -580,8 +582,8 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                             <div class="info-box-title">📸 图片生成说明</div>
                             <div class="info-box-text">
                                 仅 <code style="background:none;padding:0;color:#0071e3;">gemini-3-pro-preview</code> 支持绘图。<br>
-                                路径: <code>{IMAGE_DIR}</code><br>
-                                类型: {'<span style="color: #34c759; font-weight: 600;">持久化（重启保留）</span>' if IMAGE_DIR == '/data/images' else '<span style="color: #ff3b30; font-weight: 600;">临时（重启丢失）</span>'}
+                                路径: <code>{main.IMAGE_DIR}</code><br>
+                                类型: {'<span style="color: #34c759; font-weight: 600;">持久化（重启保留）</span>' if main.IMAGE_DIR == '/data/images' else '<span style="color: #ff3b30; font-weight: 600;">临时（重启丢失）</span>'}
                             </div>
                         </div>
                     </div>
@@ -597,42 +599,42 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                         <table class="ep-table">
                             <tr>
                                 <td width="70"><span class="method m-post">POST</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/v1/chat/completions</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/v1/chat/completions</span></td>
                                 <td><span class="ep-desc">OpenAI 兼容对话接口</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/v1/models</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/v1/models</span></td>
                                 <td><span class="ep-desc">获取模型列表</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin</span></td>
                                 <td><span class="ep-desc">管理首页</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin/health?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin/health?key={{main.ADMIN_KEY}}</span></td>
                                 <td><span class="ep-desc">健康检查 (需 Key)</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin/accounts?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin/accounts?key={{main.ADMIN_KEY}}</span></td>
                                 <td><span class="ep-desc">账户状态 JSON (需 Key)</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin/log?key={{main.ADMIN_KEY}}</span></td>
                                 <td><span class="ep-desc">获取日志 JSON (需 Key)</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log/html?key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin/log/html?key={{main.ADMIN_KEY}}</span></td>
                                 <td><span class="ep-desc">日志查看器 HTML (需 Key)</span></td>
                             </tr>
                             <tr>
                                 <td><span class="method m-del">DEL</span></td>
-                                <td><span class="ep-path">/{PATH_PREFIX}/admin/log?confirm=yes&key={{ADMIN_KEY}}</span></td>
+                                <td><span class="ep-path">/{main.PATH_PREFIX}/admin/log?confirm=yes&key={{main.ADMIN_KEY}}</span></td>
                                 <td><span class="ep-desc">清空系统日志 (需 Key)</span></td>
                             </tr>
                             <tr>
@@ -691,7 +693,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
             let currentConfig = null;
 
             async function showEditConfig() {{
-                const config = await fetch('/{PATH_PREFIX}/admin/accounts?key={ADMIN_KEY}').then(r => r.json());
+                const config = await fetch('/{main.PATH_PREFIX}/admin/accounts?key={main.ADMIN_KEY}').then(r => r.json());
                 const accounts = config.accounts.map(acc => ({{
                     id: acc.id,
                     csesidx: "***",
@@ -747,7 +749,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
 
                 try {{
                     const data = JSON.parse(newJson);
-                    const response = await fetch('/{PATH_PREFIX}/admin/accounts-config?key={ADMIN_KEY}', {{
+                    const response = await fetch('/{main.PATH_PREFIX}/admin/accounts-config?key={main.ADMIN_KEY}', {{
                         method: 'PUT',
                         headers: {{'Content-Type': 'application/json'}},
                         body: JSON.stringify(data)
@@ -770,7 +772,7 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
                 if (!confirm(`确定删除账户 ${{accountId}}？`)) return;
 
                 try {{
-                    const response = await fetch('/{PATH_PREFIX}/admin/accounts/' + accountId + '?key={ADMIN_KEY}', {{
+                    const response = await fetch('/{main.PATH_PREFIX}/admin/accounts/' + accountId + '?key={main.ADMIN_KEY}', {{
                         method: 'DELETE'
                     }});
 
@@ -801,13 +803,16 @@ def generate_admin_html(request: Request, show_hide_tip: bool = False) -> str:
 
 async def admin_logs_html(path_prefix: str, key: str = None, authorization: str = Header(None)):
     """返回美化的 HTML 日志查看界面"""
+    # 动态导入 main 模块的变量（避免循环依赖）
+    import main
+
     # 验证路径前缀
-    if path_prefix != PATH_PREFIX:
+    if path_prefix != main.PATH_PREFIX:
         raise HTTPException(404, "Not Found")
 
     # 验证管理员密钥
     admin_key = key or (authorization.replace("Bearer ", "") if authorization and authorization.startswith("Bearer ") else authorization)
-    if admin_key != ADMIN_KEY:
+    if admin_key != main.ADMIN_KEY:
         raise HTTPException(404, "Not Found")
 
     html_content = r"""
@@ -1433,6 +1438,9 @@ async def admin_logs_html(path_prefix: str, key: str = None, authorization: str 
 
 async def get_public_logs_html():
     """公开的脱敏日志查看器"""
+    # 动态导入 main 模块的变量（避免循环依赖）
+    import main
+
     html_content = r"""
     <!DOCTYPE html>
     <html>
@@ -1660,12 +1668,12 @@ async def get_public_logs_html():
     <body>
         <div class="container">
             <h1>
-                """ + (f'<img src="{LOGO_URL}" alt="Logo">' if LOGO_URL else '') + r"""
+                """ + (f'<img src="{main.LOGO_URL}" alt="Logo">' if main.LOGO_URL else '') + r"""
                 Gemini服务状态
             </h1>
             <div style="text-align: center; color: #999; font-size: 12px; margin-bottom: 16px;" class="subtitle-public">
                 <span>展示最近1000条对话日志 · 每5秒自动更新</span>
-                """ + (f'<a href="{CHAT_URL}" target="_blank" style="color: #1a73e8; text-decoration: none;">开始对话</a>' if CHAT_URL else '<span style="color: #999;">开始对话</span>') + r"""
+                """ + (f'<a href="{main.CHAT_URL}" target="_blank" style="color: #1a73e8; text-decoration: none;">开始对话</a>' if main.CHAT_URL else '<span style="color: #999;">开始对话</span>') + r"""
             </div>
             <div class="stats">
                 <div class="stat">

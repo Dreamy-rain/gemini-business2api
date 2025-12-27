@@ -1804,8 +1804,6 @@ async def get_public_logs_html():
                             <div class="log-group-header" onclick="toggleGroup('${reqId}')">
                                 <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">⬤ ${statusText}</span>
                                 <span style="color: #666; font-size: 11px; margin-left: 8px;">req_${reqId}</span>
-                                ${accountId ? `<span style="color: ${getAccountColor(accountId)}; font-size: 11px; margin-left: 8px;">${accountId}</span>` : ''}
-                                ${model ? `<span style="color: #999; font-size: 11px; margin-left: 8px;">${model}</span>` : ''}
                                 <span style="color: #999; font-size: 11px; margin-left: 8px;">${log.events.length}条事件</span>
                                 <span ${iconClass} style="margin-left: auto; color: #999;">▼</span>
                             </div>

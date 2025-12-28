@@ -40,7 +40,8 @@ def load_stats():
         "total_visitors": 0,
         "total_requests": 0,
         "request_timestamps": [],  # 最近1小时的请求时间戳
-        "visitor_ips": {}  # {ip: timestamp} 记录访问IP和时间
+        "visitor_ips": {},  # {ip: timestamp} 记录访问IP和时间
+        "account_conversations": {}  # {account_id: conversation_count} 账户对话次数
     }
 
 def save_stats(stats):
@@ -262,6 +263,7 @@ class AccountManager:
         self.last_error_time = 0.0
         self.last_429_time = 0.0  # 429错误专属时间戳
         self.error_count = 0
+        self.conversation_count = 0  # 累计对话次数
 
     async def get_jwt(self, request_id: str = "") -> str:
         """获取 JWT token (带错误处理)"""
@@ -402,6 +404,9 @@ class MultiAccountManager:
     def add_account(self, config: AccountConfig):
         """添加账户"""
         manager = AccountManager(config)
+        # 从统计数据加载对话次数
+        if "account_conversations" in global_stats:
+            manager.conversation_count = global_stats["account_conversations"].get(config.account_id, 0)
         self.accounts[config.account_id] = manager
         self.account_list.append(config.account_id)
         logger.info(f"[MULTI] [ACCOUNT] 添加账户: {config.account_id}")
@@ -1134,7 +1139,8 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
             "error_count": account_manager.error_count,
             "disabled": config.disabled,  # 添加手动禁用状态
             "cooldown_seconds": cooldown_seconds,  # 冷却剩余秒数
-            "cooldown_reason": cooldown_reason  # 冷却原因
+            "cooldown_reason": cooldown_reason,  # 冷却原因
+            "conversation_count": account_manager.conversation_count  # 累计对话次数
         })
 
     return {
@@ -1484,6 +1490,15 @@ async def chat(
                 # 请求成功，重置账户失败计数
                 account_manager.is_available = True
                 account_manager.error_count = 0
+                account_manager.conversation_count += 1  # 增加对话次数
+
+                # 保存对话次数到统计数据
+                with stats_lock:
+                    if "account_conversations" not in global_stats:
+                        global_stats["account_conversations"] = {}
+                    global_stats["account_conversations"][account_manager.config.account_id] = account_manager.conversation_count
+                    save_stats(global_stats)
+
                 break
 
             except (httpx.ConnectError, httpx.ReadTimeout, ssl.SSLError, HTTPException) as e:

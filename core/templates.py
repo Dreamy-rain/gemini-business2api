@@ -169,6 +169,10 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                     <span>剩余时长</span>
                     <span style="color: {status_color};">{expire_display}</span>
                 </div>
+                <div class="acc-row">
+                    <span>累计对话</span>
+                    <span style="color: #2563eb; font-weight: 600;">{account_manager.conversation_count} 次</span>
+                </div>
                 {'<div class="acc-row cooldown-row"><span>冷却倒计时</span><span class="cooldown-text" style="color: ' + status_color + ';">' + str(cooldown_seconds) + '秒 (' + cooldown_reason + ')</span></div>' if cooldown_seconds > 0 else ''}
             </div>
         </div>

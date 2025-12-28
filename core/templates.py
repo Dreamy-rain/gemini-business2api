@@ -80,21 +80,37 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
         remaining_hours = config.get_remaining_hours()
         status_text, status_color, expire_display = main.format_account_expiration(remaining_hours)
 
-        # 检查账户是否过期
+        # 检查账户是否过期或被手动禁用
         is_expired = config.is_expired()
+        is_disabled = config.disabled
 
-        # 如果过期，覆盖状态显示为灰色和"过期禁用"
+        # 如果过期或手动禁用，覆盖状态显示为灰色
         if is_expired:
             status_text = "过期禁用"
             status_color = "#9e9e9e"
             dot_color = "#9e9e9e"
             dot_title = "过期禁用"
             card_style = 'style="opacity: 0.5; background: #f5f5f5;"'  # 灰色样式
+            action_buttons = f'<button onclick="deleteAccount(\'{config.account_id}\')" class="delete-btn" title="删除账户">删除</button>'
+        elif is_disabled:
+            status_text = "手动禁用"
+            status_color = "#9e9e9e"
+            dot_color = "#9e9e9e"
+            dot_title = "手动禁用"
+            card_style = 'style="opacity: 0.5; background: #f5f5f5;"'  # 灰色样式
+            action_buttons = f'''
+                <button onclick="enableAccount('{config.account_id}')" class="enable-btn" title="启用账户">启用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+            '''
         else:
             is_avail = account_manager.is_available
             dot_color = "#34c759" if is_avail else "#ff3b30"
             dot_title = "可用" if is_avail else "不可用"
             card_style = ''
+            action_buttons = f'''
+                <button onclick="disableAccount('{config.account_id}')" class="disable-btn" title="禁用账户">禁用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+            '''
 
         accounts_html += f"""
         <div class="card account-card" {card_style}>
@@ -105,7 +121,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span class="acc-status-text" style="color: {status_color}">{status_text}</span>
-                    <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                    {action_buttons}
                 </div>
             </div>
             <div class="acc-body">
@@ -273,6 +289,42 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 background: #dc2626;
                 color: white;
                 border-color: #dc2626;
+            }}
+
+            /* Disable Button */
+            .disable-btn {{
+                background: #fff;
+                color: #f59e0b;
+                border: 1px solid #fed7aa;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 11px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.2s;
+            }}
+            .disable-btn:hover {{
+                background: #f59e0b;
+                color: white;
+                border-color: #f59e0b;
+            }}
+
+            /* Enable Button */
+            .enable-btn {{
+                background: #fff;
+                color: #10b981;
+                border: 1px solid #a7f3d0;
+                padding: 4px 12px;
+                border-radius: 6px;
+                font-size: 11px;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.2s;
+            }}
+            .enable-btn:hover {{
+                background: #10b981;
+                color: white;
+                border-color: #10b981;
             }}
 
             /* Modal */
@@ -808,6 +860,40 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 }} catch (error) {{
                     console.error('删除失败:', error);
                     alert('删除失败: ' + error.message);
+                }}
+            }}
+
+            async function disableAccount(accountId) {{
+                if (!confirm(`确定禁用账户 ${{accountId}}？`)) return;
+
+                try {{
+                    const response = await fetch('/{main.PATH_PREFIX}/admin/accounts/' + accountId + '/disable?key={main.ADMIN_KEY}', {{
+                        method: 'PUT'
+                    }});
+
+                    const result = await handleApiResponse(response);
+                    alert(`账户已禁用！`);
+                    refreshPage();
+                }} catch (error) {{
+                    console.error('禁用失败:', error);
+                    alert('禁用失败: ' + error.message);
+                }}
+            }}
+
+            async function enableAccount(accountId) {{
+                if (!confirm(`确定启用账户 ${{accountId}}？`)) return;
+
+                try {{
+                    const response = await fetch('/{main.PATH_PREFIX}/admin/accounts/' + accountId + '/enable?key={main.ADMIN_KEY}', {{
+                        method: 'PUT'
+                    }});
+
+                    const result = await handleApiResponse(response);
+                    alert(`账户已启用！`);
+                    refreshPage();
+                }} catch (error) {{
+                    console.error('启用失败:', error);
+                    alert('启用失败: ' + error.message);
                 }}
             }}
 

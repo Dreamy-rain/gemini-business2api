@@ -205,6 +205,7 @@ class AccountConfig:
     csesidx: str
     config_id: str
     expires_at: Optional[str] = None  # 账户过期时间 (格式: "2025-12-23 10:59:21")
+    disabled: bool = False  # 手动禁用状态
 
     def get_remaining_hours(self) -> Optional[float]:
         """计算账户剩余小时数"""
@@ -386,10 +387,12 @@ class MultiAccountManager:
                     raise HTTPException(503, f"Account {account_id} temporarily unavailable")
                 return account
 
-            # 轮询选择可用账户（排除过期账户）
+            # 轮询选择可用账户（排除过期账户和手动禁用账户）
             available_accounts = [
                 acc_id for acc_id in self.account_list
-                if self.accounts[acc_id].should_retry() and not self.accounts[acc_id].config.is_expired()
+                if self.accounts[acc_id].should_retry()
+                and not self.accounts[acc_id].config.is_expired()
+                and not self.accounts[acc_id].config.disabled
             ]
 
             if not available_accounts:
@@ -472,7 +475,8 @@ def load_multi_account_config() -> MultiAccountManager:
             host_c_oses=acc.get("host_c_oses"),
             csesidx=acc["csesidx"],
             config_id=acc["config_id"],
-            expires_at=acc.get("expires_at")
+            expires_at=acc.get("expires_at"),
+            disabled=acc.get("disabled", False)  # 读取手动禁用状态，默认为 False
         )
 
         # 检查账户是否已过期
@@ -519,6 +523,27 @@ def delete_account(account_id: str):
 
     save_accounts_to_file(filtered)
     reload_accounts()
+
+def update_account_disabled_status(account_id: str, disabled: bool):
+    """更新账户的禁用状态"""
+    accounts_data = load_accounts_from_source()
+
+    # 查找并更新账户
+    found = False
+    for i, acc in enumerate(accounts_data, 1):
+        if get_account_id(acc, i) == account_id:
+            acc["disabled"] = disabled
+            found = True
+            break
+
+    if not found:
+        raise ValueError(f"账户 {account_id} 不存在")
+
+    save_accounts_to_file(accounts_data)
+    reload_accounts()
+
+    status_text = "已禁用" if disabled else "已启用"
+    logger.info(f"[CONFIG] 账户 {account_id} {status_text}")
 
 # 验证必需的环境变量
 if not PATH_PREFIX:
@@ -1067,7 +1092,8 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
             "remaining_hours": remaining_hours,
             "remaining_display": remaining_display,
             "is_available": account_manager.is_available,
-            "error_count": account_manager.error_count
+            "error_count": account_manager.error_count,
+            "disabled": config.disabled  # 添加手动禁用状态
         })
 
     return {
@@ -1107,6 +1133,28 @@ async def admin_delete_account(path_prefix: str, account_id: str, key: str = Non
     except Exception as e:
         logger.error(f"[CONFIG] 删除账户失败: {str(e)}")
         raise HTTPException(500, f"删除失败: {str(e)}")
+
+@app.put("/{path_prefix}/admin/accounts/{account_id}/disable")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
+async def admin_disable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+    """手动禁用账户"""
+    try:
+        update_account_disabled_status(account_id, True)
+        return {"status": "success", "message": f"账户 {account_id} 已禁用", "account_count": len(multi_account_mgr.accounts)}
+    except Exception as e:
+        logger.error(f"[CONFIG] 禁用账户失败: {str(e)}")
+        raise HTTPException(500, f"禁用失败: {str(e)}")
+
+@app.put("/{path_prefix}/admin/accounts/{account_id}/enable")
+@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
+async def admin_enable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+    """启用账户"""
+    try:
+        update_account_disabled_status(account_id, False)
+        return {"status": "success", "message": f"账户 {account_id} 已启用", "account_count": len(multi_account_mgr.accounts)}
+    except Exception as e:
+        logger.error(f"[CONFIG] 启用账户失败: {str(e)}")
+        raise HTTPException(500, f"启用失败: {str(e)}")
 
 @app.get("/{path_prefix}/admin/log")
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)

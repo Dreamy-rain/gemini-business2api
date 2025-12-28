@@ -627,8 +627,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                                     <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">ACCOUNT_COOLDOWN_SECONDS</div><div class="env-desc">账户冷却时间</div></div>
-                                    <div class="env-value">{main.ACCOUNT_COOLDOWN_SECONDS} 秒</div>
+                                    <div><div class="env-name">RATE_LIMIT_COOLDOWN_SECONDS</div><div class="env-desc">429限流冷却时间</div></div>
+                                    <div class="env-value">{main.RATE_LIMIT_COOLDOWN_SECONDS} 秒</div>
                                 </div>
                             </div>
                         </div>

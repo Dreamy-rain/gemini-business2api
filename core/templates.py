@@ -73,6 +73,47 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
         </div>
         """
 
+    # API接口信息提示
+    api_endpoint = f"{current_url}/{main.PATH_PREFIX}/v1/chat/completions"
+    api_key_display = main.API_KEY if main.API_KEY else '<span style="color: #ff9500;">未设置（公开访问）</span>'
+
+    api_info_tip = f"""
+    <div class="alert alert-primary">
+        <div class="alert-icon">🔗</div>
+        <div class="alert-content">
+            <strong>API 接口信息</strong>
+            <div style="margin-top: 10px;">
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">聊天接口</div>
+                    <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{api_endpoint}</code>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">API 密钥</div>
+                    <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block;">{api_key_display}</code>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 6px;">支持的模型</div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                        <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-auto</span>
+                        <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-flash</span>
+                        <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-pro</span>
+                        <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-flash-preview</span>
+                        <span style="background: #eef7ff; color: #0071e3; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; border: 1px solid #dcebfb; font-weight: 500;">gemini-3-pro-preview</span>
+                    </div>
+                </div>
+                <div style="background: rgba(0,0,0,0.03); padding: 10px; border-radius: 6px;">
+                    <div style="font-size: 11px; color: #1d1d1f; margin-bottom: 4px; font-weight: 600;">📸 图片生成说明</div>
+                    <div style="font-size: 11px; color: #86868b; line-height: 1.6;">
+                        • 仅 <code style="font-size: 10px; background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px;">gemini-3-pro-preview</code> 支持绘图<br>
+                        • 存储路径：<code style="font-size: 10px; background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px;">./images</code><br>
+                        • 存储类型：临时（服务重启后丢失）
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """
+
     # --- 2. 构建账户卡片 ---
     accounts_html = ""
     for account_id, account_manager in multi_account_mgr.accounts.items():
@@ -272,6 +313,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             .alert-success {{ background: #eafbf0; border-color: #d3f3dd; color: #15682e; }}
             .alert-warning {{ background: #fff8e6; border-color: #fcebc2; color: #9c6e03; }}
             .alert-error {{ background: #ffebeb; border-color: #fddddd; color: #c41e1e; }}
+            .alert-primary {{ background: #f9fafb; border-color: #e5e7eb; color: #374151; }}
 
             /* Sections & Grids */
             .section {{ margin-bottom: 30px; }}
@@ -581,6 +623,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             {hide_tip}
             {api_key_status}
             {error_alert}
+            {api_info_tip}
 
             <div class="section">
                 <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>

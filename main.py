@@ -108,7 +108,7 @@ MAX_NEW_SESSION_TRIES = int(os.getenv("MAX_NEW_SESSION_TRIES", "5"))  # 新会�
 MAX_REQUEST_RETRIES = int(os.getenv("MAX_REQUEST_RETRIES", "3"))      # 请求失败最多重试次数（默认3）
 MAX_ACCOUNT_SWITCH_TRIES = int(os.getenv("MAX_ACCOUNT_SWITCH_TRIES", "5"))  # 每次重试找账户的最大尝试次数（默认5）
 ACCOUNT_FAILURE_THRESHOLD = int(os.getenv("ACCOUNT_FAILURE_THRESHOLD", "3"))  # 账户连续失败阈值（默认3次）
-ACCOUNT_COOLDOWN_SECONDS = int(os.getenv("ACCOUNT_COOLDOWN_SECONDS", "300"))  # 账户冷却时间（默认300秒=5分钟）
+RATE_LIMIT_COOLDOWN_SECONDS = int(os.getenv("RATE_LIMIT_COOLDOWN_SECONDS", "600"))  # 429错误冷却时间（默认600秒=10分钟）
 SESSION_CACHE_TTL_SECONDS = int(os.getenv("SESSION_CACHE_TTL_SECONDS", "3600"))  # 会话缓存过期时间（默认3600秒=1小时）
 
 # ---------- 模型映射配置 ----------
@@ -260,6 +260,7 @@ class AccountManager:
         self.jwt_manager: Optional['JWTManager'] = None  # 延迟初始化
         self.is_available = True
         self.last_error_time = 0.0
+        self.last_429_time = 0.0  # 429错误专属时间戳
         self.error_count = 0
 
     async def get_jwt(self, request_id: str = "") -> str:
@@ -284,17 +285,52 @@ class AccountManager:
             # 使用配置的失败阈值
             if self.error_count >= ACCOUNT_FAILURE_THRESHOLD:
                 self.is_available = False
-                logger.error(f"[ACCOUNT] [{self.config.account_id}] JWT获取连续失败{self.error_count}次，账户已标记为不可用")
+                logger.error(f"[ACCOUNT] [{self.config.account_id}] JWT获取连续失败{self.error_count}次，账户已永久禁用")
             else:
                 # 安全：只记录异常类型，不记录详细信息
                 logger.warning(f"[ACCOUNT] [{self.config.account_id}] JWT获取失败({self.error_count}/{ACCOUNT_FAILURE_THRESHOLD}): {type(e).__name__}")
             raise
 
     def should_retry(self) -> bool:
-        """检查账户是否可重试（使用配置的冷却期）"""
+        """检查账户是否可重试（429错误10分钟后恢复，普通错误永久禁用）"""
         if self.is_available:
             return True
-        return time.time() - self.last_error_time > ACCOUNT_COOLDOWN_SECONDS
+
+        current_time = time.time()
+
+        # 检查429冷却期（10分钟后自动恢复）
+        if self.last_429_time > 0:
+            if current_time - self.last_429_time > RATE_LIMIT_COOLDOWN_SECONDS:
+                return True  # 冷却期已过，可以重试
+            return False  # 仍在冷却期
+
+        # 普通错误永久禁用
+        return False
+
+    def get_cooldown_info(self) -> tuple[int, str | None]:
+        """
+        获取账户冷却信息
+
+        Returns:
+            (cooldown_seconds, cooldown_reason) 元组
+            - cooldown_seconds: 剩余冷却秒数，0表示无冷却，-1表示永久禁用
+            - cooldown_reason: 冷却原因，None表示无冷却
+        """
+        if self.is_available:
+            return (0, None)
+
+        current_time = time.time()
+
+        # 检查429冷却期（10分钟后自动恢复）
+        if self.last_429_time > 0:
+            remaining_429 = RATE_LIMIT_COOLDOWN_SECONDS - (current_time - self.last_429_time)
+            if remaining_429 > 0:
+                return (int(remaining_429), "429限流")
+            # 429冷却期已过，可以恢复
+            return (0, None)
+
+        # 普通错误永久禁用
+        return (-1, "错误禁用")
 
 class MultiAccountManager:
     """多账户协调器"""
@@ -1085,6 +1121,9 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
         # 使用统一的格式化函数
         status, status_color, remaining_display = format_account_expiration(remaining_hours)
 
+        # 使用AccountManager的方法获取冷却信息
+        cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
+
         accounts_info.append({
             "id": config.account_id,
             "status": status,
@@ -1093,7 +1132,9 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
             "remaining_display": remaining_display,
             "is_available": account_manager.is_available,
             "error_count": account_manager.error_count,
-            "disabled": config.disabled  # 添加手动禁用状态
+            "disabled": config.disabled,  # 添加手动禁用状态
+            "cooldown_seconds": cooldown_seconds,  # 冷却剩余秒数
+            "cooldown_reason": cooldown_reason  # 冷却原因
         })
 
     return {
@@ -1449,12 +1490,21 @@ async def chat(
                 # 记录当前失败的账户
                 failed_accounts.add(account_manager.config.account_id)
 
+                # 检查是否为429错误（Rate Limit）
+                is_rate_limit = isinstance(e, HTTPException) and e.status_code == 429
+
                 # 增加账户失败计数（触发熔断机制）
                 account_manager.last_error_time = time.time()
+                if is_rate_limit:
+                    account_manager.last_429_time = time.time()
+
                 account_manager.error_count += 1
                 if account_manager.error_count >= ACCOUNT_FAILURE_THRESHOLD:
                     account_manager.is_available = False
-                    logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 请求连续失败{account_manager.error_count}次，账户已标记为不可用")
+                    if is_rate_limit:
+                        logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429错误{account_manager.error_count}次，账户已禁用（需休息{RATE_LIMIT_COOLDOWN_SECONDS}秒）")
+                    else:
+                        logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 请求连续失败{account_manager.error_count}次，账户已永久禁用")
 
                 retry_count += 1
 
@@ -1464,7 +1514,10 @@ async def chat(
 
                 # 特殊处理HTTPException，提取状态码和详情
                 if isinstance(e, HTTPException):
-                    logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] HTTP错误 {e.status_code}: {e.detail}")
+                    if is_rate_limit:
+                        logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429限流错误，账户将休息{RATE_LIMIT_COOLDOWN_SECONDS}秒")
+                    else:
+                        logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] HTTP错误 {e.status_code}: {e.detail}")
                 else:
                     logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] {error_type}: {error_detail}")
 

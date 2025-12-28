@@ -78,51 +78,87 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
     for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
-        status_text, status_color, expire_display = main.format_account_expiration(remaining_hours)
+        expire_status_text, _, expire_display = main.format_account_expiration(remaining_hours)
 
         # 检查账户是否过期或被手动禁用
         is_expired = config.is_expired()
         is_disabled = config.disabled
 
-        # 如果过期或手动禁用，覆盖状态显示为灰色
+        # 使用AccountManager的方法获取冷却信息
+        cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
+
+        # 确定账户状态和颜色
         if is_expired:
             status_text = "过期禁用"
             status_color = "#9e9e9e"
             dot_color = "#9e9e9e"
-            dot_title = "过期禁用"
-            card_style = 'style="opacity: 0.5; background: #f5f5f5;"'  # 灰色样式
+            card_opacity = "0.5"
             action_buttons = f'<button onclick="deleteAccount(\'{config.account_id}\')" class="delete-btn" title="删除账户">删除</button>'
         elif is_disabled:
             status_text = "手动禁用"
             status_color = "#9e9e9e"
             dot_color = "#9e9e9e"
-            dot_title = "手动禁用"
-            card_style = 'style="opacity: 0.5; background: #f5f5f5;"'  # 灰色样式
+            card_opacity = "0.5"
             action_buttons = f'''
                 <button onclick="enableAccount('{config.account_id}')" class="enable-btn" title="启用账户">启用</button>
                 <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
             '''
+        elif cooldown_seconds == -1:
+            # 错误永久禁用
+            status_text = cooldown_reason  # "错误禁用"
+            status_color = "#f44336"
+            dot_color = "#f44336"
+            card_opacity = "0.5"
+            action_buttons = f'''
+                <button onclick="enableAccount('{config.account_id}')" class="enable-btn" title="启用账户">启用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+            '''
+        elif cooldown_seconds > 0:
+            # 429限流（冷却中）
+            status_text = cooldown_reason  # "429限流"
+            status_color = "#ff9800"
+            dot_color = "#ff9800"
+            card_opacity = "1"
+            action_buttons = f'''
+                <button onclick="disableAccount('{config.account_id}')" class="disable-btn" title="禁用账户">禁用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+            '''
         else:
+            # 正常状态
             is_avail = account_manager.is_available
-            dot_color = "#34c759" if is_avail else "#ff3b30"
-            dot_title = "可用" if is_avail else "不可用"
-            card_style = ''
+            if is_avail:
+                status_text = expire_status_text  # "正常", "即将过期", "紧急"
+                if expire_status_text == "正常":
+                    status_color = "#4caf50"
+                    dot_color = "#34c759"
+                elif expire_status_text == "即将过期":
+                    status_color = "#ff9800"
+                    dot_color = "#ff9800"
+                else:  # 紧急
+                    status_color = "#f44336"
+                    dot_color = "#f44336"
+            else:
+                status_text = "不可用"
+                status_color = "#f44336"
+                dot_color = "#ff3b30"
+            card_opacity = "1"
             action_buttons = f'''
                 <button onclick="disableAccount('{config.account_id}')" class="disable-btn" title="禁用账户">禁用</button>
                 <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
             '''
 
+        # 构建卡片内容
         accounts_html += f"""
-        <div class="card account-card" {card_style}>
+        <div class="card account-card" style="opacity: {card_opacity}; background: {'#f5f5f5' if float(card_opacity) < 1 else '#fafaf9'};">
             <div class="acc-header">
                 <div class="acc-title">
-                    <span class="status-dot" style="background-color: {dot_color};" title="{dot_title}"></span>
-                    {config.account_id}
+                    <span class="status-dot" style="background-color: {dot_color};"></span>
+                    <span>{config.account_id}</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="acc-status-text" style="color: {status_color}">{status_text}</span>
-                    {action_buttons}
-                </div>
+                <span class="acc-status" style="color: {status_color};">{status_text}</span>
+            </div>
+            <div class="acc-actions">
+                {action_buttons}
             </div>
             <div class="acc-body">
                 <div class="acc-row">
@@ -131,8 +167,9 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 </div>
                 <div class="acc-row">
                     <span>剩余时长</span>
-                    <span style="color: {status_color}; font-weight: 600;">{expire_display}</span>
+                    <span style="color: {status_color};">{expire_display}</span>
                 </div>
+                {'<div class="acc-row cooldown-row"><span>冷却倒计时</span><span class="cooldown-text" style="color: ' + status_color + ';">' + str(cooldown_seconds) + '秒 (' + cooldown_reason + ')</span></div>' if cooldown_seconds > 0 else ''}
             </div>
         </div>
         """
@@ -270,8 +307,12 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             .account-card .acc-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
             .acc-title {{ font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }}
             .status-dot {{ width: 8px; height: 8px; border-radius: 50%; }}
-            .acc-status-text {{ font-size: 12px; font-weight: 500; }}
+            .acc-status {{ font-size: 12px; font-weight: 600; }}
+            .acc-actions {{ display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
+            .acc-body {{ }}
             .acc-row {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 6px; color: var(--text-sec); }}
+            .cooldown-row {{ background: #fff8e6; padding: 8px; border-radius: 6px; margin-top: 8px; }}
+            .cooldown-text {{ color: #f59e0b; font-weight: 600; }}
 
             /* Delete Button */
             .delete-btn {{

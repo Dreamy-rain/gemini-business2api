@@ -80,12 +80,24 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
         remaining_hours = config.get_remaining_hours()
         status_text, status_color, expire_display = main.format_account_expiration(remaining_hours)
 
-        is_avail = account_manager.is_available
-        dot_color = "#34c759" if is_avail else "#ff3b30"
-        dot_title = "可用" if is_avail else "不可用"
+        # 检查账户是否过期
+        is_expired = config.is_expired()
+
+        # 如果过期，覆盖状态显示为灰色和"过期禁用"
+        if is_expired:
+            status_text = "过期禁用"
+            status_color = "#9e9e9e"
+            dot_color = "#9e9e9e"
+            dot_title = "过期禁用"
+            card_style = 'style="opacity: 0.5; background: #f5f5f5;"'  # 灰色样式
+        else:
+            is_avail = account_manager.is_available
+            dot_color = "#34c759" if is_avail else "#ff3b30"
+            dot_title = "可用" if is_avail else "不可用"
+            card_style = ''
 
         accounts_html += f"""
-        <div class="card account-card">
+        <div class="card account-card" {card_style}>
             <div class="acc-header">
                 <div class="acc-title">
                     <span class="status-dot" style="background-color: {dot_color};" title="{dot_title}"></span>

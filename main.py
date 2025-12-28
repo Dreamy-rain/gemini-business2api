@@ -263,6 +263,12 @@ class AccountManager:
 
     async def get_jwt(self, request_id: str = "") -> str:
         """获取 JWT token (带错误处理)"""
+        # 检查账户是否过期
+        if self.config.is_expired():
+            self.is_available = False
+            logger.warning(f"[ACCOUNT] [{self.config.account_id}] 账户已过期，已自动禁用")
+            raise HTTPException(403, f"Account {self.config.account_id} has expired")
+
         try:
             if self.jwt_manager is None:
                 # 延迟初始化 JWTManager (避免循环依赖)
@@ -380,10 +386,10 @@ class MultiAccountManager:
                     raise HTTPException(503, f"Account {account_id} temporarily unavailable")
                 return account
 
-            # 轮询选择可用账户
+            # 轮询选择可用账户（排除过期账户）
             available_accounts = [
                 acc_id for acc_id in self.account_list
-                if self.accounts[acc_id].should_retry()
+                if self.accounts[acc_id].should_retry() and not self.accounts[acc_id].config.is_expired()
             ]
 
             if not available_accounts:

@@ -318,17 +318,17 @@ class AccountManager:
             - cooldown_seconds: 剩余冷却秒数，0表示无冷却，-1表示永久禁用
             - cooldown_reason: 冷却原因，None表示无冷却
         """
-        if self.is_available:
-            return (0, None)
-
         current_time = time.time()
 
-        # 检查429冷却期（10分钟后自动恢复）
+        # 优先检查429冷却期（无论账户是否可用）
         if self.last_429_time > 0:
             remaining_429 = RATE_LIMIT_COOLDOWN_SECONDS - (current_time - self.last_429_time)
             if remaining_429 > 0:
                 return (int(remaining_429), "429限流")
-            # 429冷却期已过，可以恢复
+            # 429冷却期已过
+
+        # 如果账户可用且没有429冷却，返回正常状态
+        if self.is_available:
             return (0, None)
 
         # 普通错误永久禁用

@@ -6,6 +6,7 @@ import logging
 from dotenv import load_dotenv
 
 import httpx
+import aiofiles
 from fastapi import FastAPI, HTTPException, Header, Request, Body
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,14 +27,15 @@ log_lock = Lock()
 
 # 统计数据持久化
 STATS_FILE = "stats.json"
-stats_lock = Lock()
+stats_lock = asyncio.Lock()  # 改为异步锁
 
-def load_stats():
-    """加载统计数据"""
+async def load_stats():
+    """加载统计数据（异步）"""
     try:
         if os.path.exists(STATS_FILE):
-            with open(STATS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            async with aiofiles.open(STATS_FILE, 'r', encoding='utf-8') as f:
+                content = await f.read()
+                return json.loads(content)
     except Exception:
         pass
     return {
@@ -44,16 +46,22 @@ def load_stats():
         "account_conversations": {}  # {account_id: conversation_count} 账户对话次数
     }
 
-def save_stats(stats):
-    """保存统计数据"""
+async def save_stats(stats):
+    """保存统计数据（异步，避免阻塞事件循环）"""
     try:
-        with open(STATS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
+        async with aiofiles.open(STATS_FILE, 'w', encoding='utf-8') as f:
+            await f.write(json.dumps(stats, ensure_ascii=False, indent=2))
     except Exception as e:
         logger.error(f"[STATS] 保存统计数据失败: {str(e)[:50]}")
 
-# 初始化统计数据
-global_stats = load_stats()
+# 初始化统计数据（需要在启动时异步加载）
+global_stats = {
+    "total_visitors": 0,
+    "total_requests": 0,
+    "request_timestamps": [],
+    "visitor_ips": {},
+    "account_conversations": {}
+}
 
 class MemoryLogHandler(logging.Handler):
     """自定义日志处理器，将日志写入内存缓冲区"""
@@ -825,6 +833,12 @@ else:
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化后台任务"""
+    global global_stats
+
+    # 加载统计数据
+    global_stats = await load_stats()
+    logger.info(f"[SYSTEM] 统计数据已加载: {global_stats['total_requests']} 次请求, {global_stats['total_visitors']} 位访客")
+
     # 启动缓存清理任务
     asyncio.create_task(multi_account_mgr.start_background_cleanup())
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
@@ -1366,10 +1380,10 @@ async def chat(
     request_id = str(uuid.uuid4())[:6]
 
     # 记录请求统计
-    with stats_lock:
+    async with stats_lock:
         global_stats["total_requests"] += 1
         global_stats["request_timestamps"].append(time.time())
-        save_stats(global_stats)
+        await save_stats(global_stats)
 
     # 2. 模型校验
     if req.model not in MODEL_MAPPING:
@@ -1528,11 +1542,11 @@ async def chat(
                 account_manager.conversation_count += 1  # 增加对话次数
 
                 # 保存对话次数到统计数据
-                with stats_lock:
+                async with stats_lock:
                     if "account_conversations" not in global_stats:
                         global_stats["account_conversations"] = {}
                     global_stats["account_conversations"][account_manager.config.account_id] = account_manager.conversation_count
-                    save_stats(global_stats)
+                    await save_stats(global_stats)
 
                 break
 
@@ -2031,7 +2045,7 @@ async def get_public_logs(request: Request, limit: int = 100):
 
     current_time = time.time()
 
-    with stats_lock:
+    async with stats_lock:
         # 清理24小时前的IP记录
         if "visitor_ips" not in global_stats:
             global_stats["visitor_ips"] = {}
@@ -2047,7 +2061,7 @@ async def get_public_logs(request: Request, limit: int = 100):
         if client_ip not in global_stats["visitor_ips"]:
             global_stats["visitor_ips"][client_ip] = current_time
             global_stats["total_visitors"] = len(global_stats["visitor_ips"])
-            save_stats(global_stats)
+            await save_stats(global_stats)
 
     sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
     return {

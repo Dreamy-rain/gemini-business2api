@@ -345,6 +345,10 @@ class MultiAccountManager:
         self.global_session_cache: Dict[str, dict] = {}
         self.cache_max_size = 1000  # 最大缓存条目数
         self.cache_ttl = SESSION_CACHE_TTL_SECONDS  # 缓存过期时间（秒）
+        # Session级别锁：防止同一对话的并发请求冲突
+        self._session_locks: Dict[str, asyncio.Lock] = {}
+        self._session_locks_lock = asyncio.Lock()  # 保护锁字典的锁
+        self._session_locks_max_size = 2000  # 最大锁数量
 
     def _clean_expired_cache(self):
         """清理过期的缓存条目"""
@@ -400,6 +404,21 @@ class MultiAccountManager:
         async with self._lock:
             if conv_key in self.global_session_cache:
                 self.global_session_cache[conv_key]["updated_at"] = time.time()
+
+    async def acquire_session_lock(self, conv_key: str) -> asyncio.Lock:
+        """获取指定对话的锁（用于防止同一对话的并发请求冲突）"""
+        async with self._session_locks_lock:
+            # 清理过多的锁（LRU策略：删除不在缓存中的锁）
+            if len(self._session_locks) > self._session_locks_max_size:
+                # 只保留当前缓存中存在的锁
+                valid_keys = set(self.global_session_cache.keys())
+                keys_to_remove = [k for k in self._session_locks if k not in valid_keys]
+                for k in keys_to_remove[:len(keys_to_remove)//2]:  # 删除一半无效锁
+                    del self._session_locks[k]
+
+            if conv_key not in self._session_locks:
+                self._session_locks[conv_key] = asyncio.Lock()
+            return self._session_locks[conv_key]
 
     def add_account(self, config: AccountConfig):
         """添加账户"""
@@ -1348,45 +1367,49 @@ async def chat(
             detail=f"Model '{req.model}' not found. Available models: {list(MODEL_MAPPING.keys())}"
         )
 
-    # 3. 生成会话指纹，检查是否已有绑定的账户
+    # 3. 生成会话指纹，获取Session锁（防止同一对话的并发请求冲突）
     conv_key = get_conversation_key([m.dict() for m in req.messages])
-    cached_session = multi_account_mgr.global_session_cache.get(conv_key)
+    session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
 
-    if cached_session:
-        # 使用已绑定的账户
-        account_id = cached_session["account_id"]
-        account_manager = await multi_account_mgr.get_account(account_id, request_id)
-        google_session = cached_session["session_id"]
-        is_new_conversation = False
-        logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 继续会话: {google_session[-12:]}")
-    else:
-        # 新对话：轮询选择可用账户，失败时尝试其他账户
-        max_account_tries = min(MAX_NEW_SESSION_TRIES, len(multi_account_mgr.accounts))
-        last_error = None
+    # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）
+    async with session_lock:
+        cached_session = multi_account_mgr.global_session_cache.get(conv_key)
 
-        for attempt in range(max_account_tries):
-            try:
-                account_manager = await multi_account_mgr.get_account(None, request_id)
-                google_session = await create_google_session(account_manager, request_id)
-                # 线程安全地绑定账户到此对话
-                await multi_account_mgr.set_session_cache(
-                    conv_key,
-                    account_manager.config.account_id,
-                    google_session
-                )
-                is_new_conversation = True
-                logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
-                break
-            except Exception as e:
-                last_error = e
-                error_type = type(e).__name__
-                # 安全获取账户ID
-                account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
-                logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
-                if attempt == max_account_tries - 1:
-                    logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
-                    raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                # 继续尝试下一个账户
+        if cached_session:
+            # 使用已绑定的账户
+            account_id = cached_session["account_id"]
+            account_manager = await multi_account_mgr.get_account(account_id, request_id)
+            google_session = cached_session["session_id"]
+            is_new_conversation = False
+            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 继续会话: {google_session[-12:]}")
+        else:
+            # 新对话：轮询选择可用账户，失败时尝试其他账户
+            max_account_tries = min(MAX_NEW_SESSION_TRIES, len(multi_account_mgr.accounts))
+            last_error = None
+
+            for attempt in range(max_account_tries):
+                try:
+                    account_manager = await multi_account_mgr.get_account(None, request_id)
+                    google_session = await create_google_session(account_manager, request_id)
+                    # 线程安全地绑定账户到此对话
+                    await multi_account_mgr.set_session_cache(
+                        conv_key,
+                        account_manager.config.account_id,
+                        google_session
+                    )
+                    is_new_conversation = True
+                    logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
+                    break
+                except Exception as e:
+                    last_error = e
+                    error_type = type(e).__name__
+                    # 安全获取账户ID
+                    account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
+                    logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
+                    if attempt == max_account_tries - 1:
+                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
+                        raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
+                    # 继续尝试下一个账户
 
     # 提取用户消息内容用于日志
     if req.messages:

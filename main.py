@@ -1918,28 +1918,44 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
                         # 获取文件元数据，找到正确的session路径
                         file_metadata = await get_session_file_metadata(account_manager, session_name, request_id)
-                        logger.info(f"[IMAGE] [DEBUG] 获取到{len(file_metadata)}个文件元数据")
+                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 获取到{len(file_metadata)}个文件元数据")
 
-                        for idx, file_info in enumerate(file_ids, 1):
+                        # 并行下载所有图片（提升多图响应速度）
+                        download_tasks = []
+                        for file_info in file_ids:
+                            fid = file_info["fileId"]
+                            mime = file_info["mimeType"]
+
+                            # 从元数据中获取正确的session路径
+                            meta = file_metadata.get(fid, {})
+                            correct_session = meta.get("session") or session_name
+
+                            # 创建下载任务
+                            task = download_image_with_jwt(account_manager, correct_session, fid, request_id)
+                            download_tasks.append((fid, mime, task))
+
+                        # 并行执行所有下载任务
+                        results = await asyncio.gather(*[task for _, _, task in download_tasks], return_exceptions=True)
+
+                        # 处理下载结果
+                        for idx, ((fid, mime, _), result) in enumerate(zip(download_tasks, results), 1):
                             try:
-                                fid = file_info["fileId"]
-                                mime = file_info["mimeType"]
+                                if isinstance(result, Exception):
+                                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}: {str(result)[:100]}")
+                                    continue
 
-                                # 从元数据中获取正确的session路径
-                                meta = file_metadata.get(fid, {})
-                                correct_session = meta.get("session") or session_name
-                                logger.info(f"[IMAGE] [DEBUG] 文件{fid}使用session: {correct_session}")
-
-                                image_data = await download_image_with_jwt(account_manager, correct_session, fid, request_id)
+                                # 保存图片
+                                image_data = result
                                 image_url = save_image_to_hf(image_data, chat_id, fid, mime, base_url)
-                                logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片已保存: {image_url}")
+                                logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
 
                                 # 返回Markdown格式图片
                                 markdown = f"\n\n![生成的图片]({image_url})\n\n"
                                 chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
                                 yield f"data: {chunk}\n\n"
                             except Exception as e:
-                                logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 单张图片处理失败: {str(e)}")
+                                logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}处理失败: {str(e)}")
+
 
                     except Exception as e:
                         logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片处理失败: {str(e)}")

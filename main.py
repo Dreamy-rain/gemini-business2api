@@ -127,7 +127,10 @@ http_client = httpx.AsyncClient(
     verify=False,
     http2=False,
     timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
-    limits=httpx.Limits(max_keepalive_connections=20, max_connections=50)
+    limits=httpx.Limits(
+        max_keepalive_connections=100,  # 增加5倍：20 -> 100
+        max_connections=200              # 增加4倍：50 -> 200
+    )
 )
 
 # ---------- 工具函数 ----------

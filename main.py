@@ -351,7 +351,8 @@ class MultiAccountManager:
         self.accounts: Dict[str, AccountManager] = {}
         self.account_list: List[str] = []  # 账户ID列表 (用于轮询)
         self.current_index = 0
-        self._lock = asyncio.Lock()
+        self._cache_lock = asyncio.Lock()  # 缓存操作专用锁
+        self._index_lock = asyncio.Lock()  # 索引更新专用锁
         # 全局会话缓存：{conv_key: {"account_id": str, "session_id": str, "updated_at": float}}
         self.global_session_cache: Dict[str, dict] = {}
         self.cache_max_size = 1000  # 最大缓存条目数
@@ -391,7 +392,7 @@ class MultiAccountManager:
         try:
             while True:
                 await asyncio.sleep(300)  # 5分钟
-                async with self._lock:
+                async with self._cache_lock:
                     self._clean_expired_cache()
                     self._ensure_cache_size()
         except asyncio.CancelledError:
@@ -401,7 +402,7 @@ class MultiAccountManager:
 
     async def set_session_cache(self, conv_key: str, account_id: str, session_id: str):
         """线程安全地设置会话缓存"""
-        async with self._lock:
+        async with self._cache_lock:
             self.global_session_cache[conv_key] = {
                 "account_id": account_id,
                 "session_id": session_id,
@@ -412,7 +413,7 @@ class MultiAccountManager:
 
     async def update_session_time(self, conv_key: str):
         """线程安全地更新会话时间戳"""
-        async with self._lock:
+        async with self._cache_lock:
             if conv_key in self.global_session_cache:
                 self.global_session_cache[conv_key]["updated_at"] = time.time()
 
@@ -442,43 +443,40 @@ class MultiAccountManager:
         logger.info(f"[MULTI] [ACCOUNT] 添加账户: {config.account_id}")
 
     async def get_account(self, account_id: Optional[str] = None, request_id: str = "") -> AccountManager:
-        """获取账户 (轮询或指定)"""
-        async with self._lock:
-            # 定期清理过期缓存（每次获取账户时检查）
-            self._clean_expired_cache()
+        """获取账户 (轮询或指定) - 优化锁粒度，减少竞争"""
+        req_tag = f"[req_{request_id}] " if request_id else ""
 
-            req_tag = f"[req_{request_id}] " if request_id else ""
+        # 如果指定了账户ID（无需锁）
+        if account_id:
+            if account_id not in self.accounts:
+                raise HTTPException(404, f"Account {account_id} not found")
+            account = self.accounts[account_id]
+            if not account.should_retry():
+                raise HTTPException(503, f"Account {account_id} temporarily unavailable")
+            return account
 
-            # 如果指定了账户ID
-            if account_id:
-                if account_id not in self.accounts:
-                    raise HTTPException(404, f"Account {account_id} not found")
-                account = self.accounts[account_id]
-                if not account.should_retry():
-                    raise HTTPException(503, f"Account {account_id} temporarily unavailable")
-                return account
+        # 轮询选择可用账户（无锁读取账户列表）
+        available_accounts = [
+            acc_id for acc_id in self.account_list
+            if self.accounts[acc_id].should_retry()
+            and not self.accounts[acc_id].config.is_expired()
+            and not self.accounts[acc_id].config.disabled
+        ]
 
-            # 轮询选择可用账户（排除过期账户和手动禁用账户）
-            available_accounts = [
-                acc_id for acc_id in self.account_list
-                if self.accounts[acc_id].should_retry()
-                and not self.accounts[acc_id].config.is_expired()
-                and not self.accounts[acc_id].config.disabled
-            ]
+        if not available_accounts:
+            raise HTTPException(503, "No available accounts")
 
-            if not available_accounts:
-                raise HTTPException(503, "No available accounts")
-
-            # Round-robin（修复：基于可用账户列表的索引）
+        # 只在更新索引时加锁（最小化锁持有时间）
+        async with self._index_lock:
             if not hasattr(self, '_available_index'):
                 self._available_index = 0
 
             account_id = available_accounts[self._available_index % len(available_accounts)]
             self._available_index = (self._available_index + 1) % len(available_accounts)
 
-            account = self.accounts[account_id]
-            logger.info(f"[MULTI] [ACCOUNT] {req_tag}选择账户: {account_id}")
-            return account
+        account = self.accounts[account_id]
+        logger.info(f"[MULTI] [ACCOUNT] {req_tag}选择账户: {account_id}")
+        return account
 
 # ---------- 配置文件管理 ----------
 ACCOUNTS_FILE = "accounts.json"

@@ -727,30 +727,39 @@ async def upload_context_file(session_name: str, mime_type: str, base64_content:
 
 # ---------- 消息处理逻辑 ----------
 def get_conversation_key(messages: List[dict]) -> str:
-    """使用第一条user消息生成对话指纹"""
+    """
+    生成对话指纹（使用前3条消息，平衡唯一性和Session复用）
+
+    策略：
+    1. 使用前3条消息生成指纹（而非仅第1条）
+    2. 大幅降低不同用户共享Session的概率
+    3. 保持Session复用能力（后续消息仍能找到同一Session）
+    """
     if not messages:
         return "empty"
 
-    # 只使用第一条user消息生成指纹（对话起点不变）
-    user_messages = [msg for msg in messages if msg.get("role") == "user"]
-    if not user_messages:
-        return "no_user_msg"
+    # 提取前3条消息的关键信息（角色+内容）
+    message_fingerprints = []
+    for msg in messages[:3]:  # 只取前3条
+        role = msg.get("role", "")
+        content = msg.get("content", "")
 
-    # 只取第一条user消息
-    first_user_msg = user_messages[0]
-    content = first_user_msg.get("content", "")
+        # 统一处理内容格式（字符串或数组）
+        if isinstance(content, list):
+            # 多模态消息：只提取文本部分
+            text = "".join([x.get("text", "") for x in content if x.get("type") == "text"])
+        else:
+            text = str(content)
 
-    # 统一处理内容格式（字符串或数组）
-    if isinstance(content, list):
-        text = "".join([x.get("text", "") for x in content if x.get("type") == "text"])
-    else:
-        text = str(content)
+        # 标准化：去除首尾空白，转小写
+        text = text.strip().lower()
 
-    # 标准化：去除首尾空白，转小写（避免因空格/大小写导致指纹不同）
-    text = text.strip().lower()
+        # 组合角色和内容
+        message_fingerprints.append(f"{role}:{text}")
 
-    # 生成指纹
-    return hashlib.md5(text.encode()).hexdigest()
+    # 使用前3条消息生成指纹
+    conversation_prefix = "|".join(message_fingerprints)
+    return hashlib.md5(conversation_prefix.encode()).hexdigest()
 
 def parse_last_message(messages: List['Message']):
     """解析最后一条消息，分离文本和图片"""

@@ -1747,25 +1747,66 @@ def build_image_download_url(session_name: str, file_id: str) -> str:
     return f"https://biz-discoveryengine.googleapis.com/v1alpha/{session_name}:downloadFile?fileId={file_id}&alt=media"
 
 
-async def download_image_with_jwt(account_mgr: AccountManager, session_name: str, file_id: str, request_id: str = "") -> bytes:
-    """使用JWT认证下载图片"""
+async def download_image_with_jwt(account_mgr: AccountManager, session_name: str, file_id: str, request_id: str = "", max_retries: int = 3) -> bytes:
+    """
+    使用JWT认证下载图片（带超时和重试机制）
+
+    Args:
+        account_mgr: 账户管理器
+        session_name: Session名称
+        file_id: 文件ID
+        request_id: 请求ID
+        max_retries: 最大重试次数（默认3次）
+
+    Returns:
+        图片字节数据
+
+    Raises:
+        HTTPException: 下载失败
+        asyncio.TimeoutError: 超时
+    """
     url = build_image_download_url(session_name, file_id)
-    logger.info(f"[IMAGE] [DEBUG] 下载URL: {url}")
-    logger.info(f"[IMAGE] [DEBUG] Session完整路径: {session_name}")
-    jwt = await account_mgr.get_jwt(request_id)
-    headers = get_common_headers(jwt)
+    logger.info(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 开始下载图片: {file_id[:8]}...")
 
-    # 复用全局http_client
-    resp = await http_client.get(url, headers=headers, follow_redirects=True)
+    for attempt in range(max_retries):
+        try:
+            # 3分钟超时（180秒）
+            async with asyncio.timeout(180):
+                jwt = await account_mgr.get_jwt(request_id)
+                headers = get_common_headers(jwt)
 
-    if resp.status_code == 401:
-        # JWT过期，刷新后重试
-        jwt = await account_mgr.get_jwt(request_id)
-        headers = get_common_headers(jwt)
-        resp = await http_client.get(url, headers=headers, follow_redirects=True)
+                # 复用全局http_client
+                resp = await http_client.get(url, headers=headers, follow_redirects=True)
 
-    resp.raise_for_status()
-    return resp.content
+                if resp.status_code == 401:
+                    # JWT过期，刷新后重试
+                    jwt = await account_mgr.get_jwt(request_id)
+                    headers = get_common_headers(jwt)
+                    resp = await http_client.get(url, headers=headers, follow_redirects=True)
+
+                resp.raise_for_status()
+                logger.info(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载成功: {file_id[:8]}... ({len(resp.content)} bytes)")
+                return resp.content
+
+        except asyncio.TimeoutError:
+            logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载超时 (尝试 {attempt + 1}/{max_retries}): {file_id[:8]}...")
+            if attempt == max_retries - 1:
+                raise HTTPException(504, f"Image download timeout after {max_retries} attempts")
+            await asyncio.sleep(2 ** attempt)  # 指数退避：2s, 4s, 8s
+
+        except httpx.HTTPError as e:
+            logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载失败 (尝试 {attempt + 1}/{max_retries}): {type(e).__name__}")
+            if attempt == max_retries - 1:
+                raise HTTPException(500, f"Image download failed: {str(e)[:100]}")
+            await asyncio.sleep(2 ** attempt)  # 指数退避
+
+        except Exception as e:
+            logger.error(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载异常: {type(e).__name__}: {str(e)[:100]}")
+            raise
+
+    # 不应该到达这里
+    raise HTTPException(500, "Image download failed unexpectedly")
+
 
 
 def save_image_to_hf(image_data: bytes, chat_id: str, file_id: str, mime_type: str, base_url: str) -> str:

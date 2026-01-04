@@ -1761,7 +1761,7 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
         if not sar:
             continue
 
-        # 获取session信息
+        # 获取session信息（优先使用最新的）
         session_info = sar.get("sessionInfo", {})
         if session_info.get("session"):
             session_name = session_info["session"]
@@ -1775,13 +1775,11 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
 
             # 检查file字段（图片生成的关键）
             file_info = content.get("file")
-            if file_info:
-                logger.info(f"[IMAGE] [DEBUG] 发现file字段: {file_info}")
-                if file_info.get("fileId"):
-                    file_ids.append({
-                        "fileId": file_info["fileId"],
-                        "mimeType": file_info.get("mimeType", "image/png")
-                    })
+            if file_info and file_info.get("fileId"):
+                file_ids.append({
+                    "fileId": file_info["fileId"],
+                    "mimeType": file_info.get("mimeType", "image/png")
+                })
 
     return file_ids, session_name
 
@@ -1991,59 +1989,39 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
             # 处理图片生成
             if json_objects:
-                logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 开始解析图片，共{len(json_objects)}个响应对象")
                 file_ids, session_name = parse_images_from_response(json_objects)
-                logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 解析结果: {len(file_ids)}张图片")
-                logger.info(f"[IMAGE] [DEBUG] 响应中的session路径: {session_name}")
 
                 if file_ids and session_name:
                     logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 检测到{len(file_ids)}张生成图片")
 
                     try:
-                        # 获取base_url
                         base_url = get_base_url(request) if request else ""
-                        logger.info(f"[IMAGE] [DEBUG] 使用base_url: {base_url}")
-
-                        # 获取文件元数据，找到正确的session路径
                         file_metadata = await get_session_file_metadata(account_manager, session_name, request_id)
-                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 获取到{len(file_metadata)}个文件元数据")
 
-                        # 并行下载所有图片（提升多图响应速度）
+                        # 并行下载所有图片
                         download_tasks = []
                         for file_info in file_ids:
                             fid = file_info["fileId"]
                             mime = file_info["mimeType"]
-
-                            # 从元数据中获取正确的session路径
                             meta = file_metadata.get(fid, {})
                             correct_session = meta.get("session") or session_name
-
-                            # 创建下载任务
                             task = download_image_with_jwt(account_manager, correct_session, fid, request_id)
                             download_tasks.append((fid, mime, task))
 
-                        # 并行执行所有下载任务
                         results = await asyncio.gather(*[task for _, _, task in download_tasks], return_exceptions=True)
 
                         # 处理下载结果
                         for idx, ((fid, mime, _), result) in enumerate(zip(download_tasks, results), 1):
-                            try:
-                                if isinstance(result, Exception):
-                                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}: {str(result)[:100]}")
-                                    continue
+                            if isinstance(result, Exception):
+                                logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}")
+                                continue
 
-                                # 保存图片
-                                image_data = result
-                                image_url = save_image_to_hf(image_data, chat_id, fid, mime, base_url)
-                                logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
+                            image_url = save_image_to_hf(result, chat_id, fid, mime, base_url)
+                            logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
 
-                                # 返回Markdown格式图片
-                                markdown = f"\n\n![生成的图片]({image_url})\n\n"
-                                chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
-                                yield f"data: {chunk}\n\n"
-                            except Exception as e:
-                                logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}处理失败: {str(e)}")
-
+                            markdown = f"\n\n![生成的图片]({image_url})\n\n"
+                            chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
+                            yield f"data: {chunk}\n\n"
 
                     except Exception as e:
                         logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片处理失败: {str(e)}")

@@ -190,10 +190,7 @@ async def parse_json_array_stream_async(line_iterator: AsyncIterator[str]) -> As
     if not in_array:
         raise ValueError("数据流不是以一个JSON数组 ( '[' ) 开始。")
 
-    # 2. 遍历流，逐个字符地构建和解析对象
-    in_string = False  # 是否在字符串内部
-    escape_next = False  # 下一个字符是否被转义
-
+    # 2. 遍历流，逐个字符地构建和解析对象（保持第一行处理后的状态）
     async for line in line_iterator:
         for char in line:
             # 处理转义字符

@@ -810,6 +810,16 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                             </tr>
                             <tr>
                                 <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/public/uptime</span></td>
+                                <td><span class="ep-desc">实时状态监控 (JSON)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
+                                <td><span class="ep-path">/public/uptime/html</span></td>
+                                <td><span class="ep-desc">实时状态监控页面 (HTML)</span></td>
+                            </tr>
+                            <tr>
+                                <td><span class="method m-get">GET</span></td>
                                 <td><span class="ep-path">/docs</span></td>
                                 <td><span class="ep-desc">Swagger API 文档</span></td>
                             </tr>

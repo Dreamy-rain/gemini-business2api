@@ -616,6 +616,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                     <div class="subtitle">多账户代理面板</div>
                 </div>
                 <div class="header-actions">
+                    <a href="/public/uptime/html" class="btn" target="_blank">📊 状态监控</a>
                     <a href="/public/log/html" class="btn" target="_blank">📄 公开日志</a>
                     <a href="/{main.PATH_PREFIX}/admin/log/html?key={main.ADMIN_KEY}" class="btn" target="_blank">🔧 管理日志</a>
                     <button class="btn" onclick="document.getElementById('fileInput').click()">📥 批量上传</button>

@@ -773,7 +773,7 @@ def get_conversation_key(messages: List[dict]) -> str:
     conversation_prefix = "|".join(message_fingerprints)
     return hashlib.md5(conversation_prefix.encode()).hexdigest()
 
-async def parse_last_message(messages: List['Message']):
+async def parse_last_message(messages: List['Message'], request_id: str = ""):
     """解析最后一条消息，分离文本和图片（支持 base64 和 URL）"""
     if not messages:
         return "", []
@@ -800,7 +800,7 @@ async def parse_last_message(messages: List['Message']):
                 elif url.startswith(("http://", "https://")):
                     image_urls.append(url)
                 else:
-                    logger.warning(f"[FILE] 不支持的图片格式: {url[:30]}...")
+                    logger.warning(f"[FILE] [req_{request_id}] 不支持的图片格式: {url[:30]}...")
 
     # 并行下载所有 URL 图片
     if image_urls:
@@ -812,10 +812,10 @@ async def parse_last_message(messages: List['Message']):
                 if not content_type.startswith("image/"):
                     content_type = "image/jpeg"
                 b64 = base64.b64encode(resp.content).decode()
-                logger.info(f"[FILE] URL图片下载成功: {url[:50]}... ({len(resp.content)} bytes)")
+                logger.info(f"[FILE] [req_{request_id}] URL图片下载成功: {url[:50]}... ({len(resp.content)} bytes)")
                 return {"mime": content_type, "data": b64}
             except Exception as e:
-                logger.warning(f"[FILE] URL图片下载失败: {url[:50]}... - {e}")
+                logger.warning(f"[FILE] [req_{request_id}] URL图片下载失败: {url[:50]}... - {e}")
                 return None
 
         results = await asyncio.gather(*[download_url(u) for u in image_urls])
@@ -1529,7 +1529,7 @@ async def chat(
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 用户消息: {preview}")
 
     # 3. 解析请求内容
-    last_text, current_images = await parse_last_message(req.messages)
+    last_text, current_images = await parse_last_message(req.messages, request_id)
 
     # 4. 准备文本内容
     if is_new_conversation:
@@ -2116,41 +2116,45 @@ async def get_public_stats():
 @app.get("/public/log")
 async def get_public_logs(request: Request, limit: int = 100):
     """获取脱敏后的日志（JSON格式）"""
-    # 基于IP的访问统计（24小时内去重）
-    # 优先从 X-Forwarded-For 获取真实IP（处理代理情况）
-    client_ip = request.headers.get("x-forwarded-for")
-    if client_ip:
-        # X-Forwarded-For 可能包含多个IP，取第一个
-        client_ip = client_ip.split(",")[0].strip()
-    else:
-        # 没有代理时使用直连IP
-        client_ip = request.client.host if request.client else "unknown"
+    try:
+        # 基于IP的访问统计（24小时内去重）
+        # 优先从 X-Forwarded-For 获取真实IP（处理代理情况）
+        client_ip = request.headers.get("x-forwarded-for")
+        if client_ip:
+            # X-Forwarded-For 可能包含多个IP，取第一个
+            client_ip = client_ip.split(",")[0].strip()
+        else:
+            # 没有代理时使用直连IP
+            client_ip = request.client.host if request.client else "unknown"
 
-    current_time = time.time()
+        current_time = time.time()
 
-    async with stats_lock:
-        # 清理24小时前的IP记录
-        if "visitor_ips" not in global_stats:
-            global_stats["visitor_ips"] = {}
+        async with stats_lock:
+            # 清理24小时前的IP记录
+            if "visitor_ips" not in global_stats:
+                global_stats["visitor_ips"] = {}
 
-        expired_ips = [
-            ip for ip, timestamp in global_stats["visitor_ips"].items()
-            if current_time - timestamp > 86400  # 24小时
-        ]
-        for ip in expired_ips:
-            del global_stats["visitor_ips"][ip]
+            expired_ips = [
+                ip for ip, timestamp in global_stats["visitor_ips"].items()
+                if current_time - timestamp > 86400  # 24小时
+            ]
+            for ip in expired_ips:
+                del global_stats["visitor_ips"][ip]
 
-        # 记录新访问（24小时内同一IP只计数一次）
-        if client_ip not in global_stats["visitor_ips"]:
-            global_stats["visitor_ips"][client_ip] = current_time
-            global_stats["total_visitors"] = len(global_stats["visitor_ips"])
-            await save_stats(global_stats)
+            # 记录新访问（24小时内同一IP只计数一次）
+            if client_ip not in global_stats["visitor_ips"]:
+                global_stats["visitor_ips"][client_ip] = current_time
+                global_stats["total_visitors"] = len(global_stats["visitor_ips"])
+                await save_stats(global_stats)
 
-    sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
-    return {
-        "total": len(sanitized_logs),
-        "logs": sanitized_logs
-    }
+        sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
+        return {
+            "total": len(sanitized_logs),
+            "logs": sanitized_logs
+        }
+    except Exception as e:
+        logger.error(f"[LOG] 获取公开日志失败: {e}")
+        return {"total": 0, "logs": [], "error": str(e)}
 
 @app.get("/public/log/html")
 async def get_public_logs_html():

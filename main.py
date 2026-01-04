@@ -2079,7 +2079,7 @@ async def get_public_uptime_html():
 @app.get("/public/stats")
 async def get_public_stats():
     """获取公开统计信息"""
-    with stats_lock:
+    async with stats_lock:
         # 清理1小时前的请求时间戳
         current_time = time.time()
         global_stats["request_timestamps"] = [

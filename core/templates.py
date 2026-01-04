@@ -351,8 +351,9 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
 
             /* Account & Env Styles */
             .account-card .acc-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
-            .acc-title {{ font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }}
-            .status-dot {{ width: 8px; height: 8px; border-radius: 50%; }}
+            .acc-title {{ font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; overflow: hidden; }}
+            .acc-title span:last-child {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }}
+            .status-dot {{ width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }}
             .acc-status {{ font-size: 12px; font-weight: 600; }}
             .acc-actions {{ display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
             .acc-body {{ }}
@@ -600,7 +601,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             @media (max-width: 800px) {{
                 .grid-3, .grid-env {{ grid-template-columns: 1fr; }}
                 .header {{ flex-direction: column; align-items: flex-start; gap: 16px; }}
-                .header-actions {{ width: 100%; justify-content: flex-start; }}
+                .header-actions {{ width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
+                .header-actions .btn {{ justify-content: center; text-align: center; }}
                 .ep-table td {{ display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }}
                 .ep-desc {{ margin-left: 0; }}
             }}
@@ -616,6 +618,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 <div class="header-actions">
                     <a href="/public/log/html" class="btn" target="_blank">📄 公开日志</a>
                     <a href="/{main.PATH_PREFIX}/admin/log/html?key={main.ADMIN_KEY}" class="btn" target="_blank">🔧 管理日志</a>
+                    <button class="btn" onclick="document.getElementById('fileInput').click()">📥 批量上传</button>
+                    <input type="file" id="fileInput" accept=".json" multiple style="display:none" onchange="handleFileUpload(event)">
                     <button class="btn" onclick="showEditConfig()" id="edit-btn">✏️ 编辑配置</button>
                 </div>
             </div>
@@ -627,7 +631,10 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
 
             <div class="section">
                 <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
-                <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">过期时间为12小时，可以自行修改时间，脚本可能有误差。</div>
+                <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
+                    过期时间为12小时，可以自行修改时间，脚本可能有误差。<br>
+                    批量上传格式：<code style="font-size: 11px;">[{{"secure_c_ses": "...", "csesidx": "...", "config_id": "...", "id": "account_1"}}]</code>（id 可选）
+                </div>
                 <div class="account-grid">
                     {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}
                 </div>
@@ -856,6 +863,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             </div>
         </div>
 
+
         <script>
             let currentConfig = null;
 
@@ -992,6 +1000,90 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 }} catch (error) {{
                     console.error('启用失败:', error);
                     alert('启用失败: ' + error.message);
+                }}
+            }}
+
+            // 批量上传相关函数
+            async function handleFileUpload(event) {{
+                const files = event.target.files;
+                if (!files.length) return;
+
+                let newAccounts = [];
+                for (const file of files) {{
+                    try {{
+                        const text = await file.text();
+                        const data = JSON.parse(text);
+                        if (Array.isArray(data)) {{
+                            newAccounts.push(...data);
+                        }} else {{
+                            newAccounts.push(data);
+                        }}
+                    }} catch (e) {{
+                        alert(`文件 ${{file.name}} 解析失败: ${{e.message}}`);
+                        event.target.value = '';
+                        return;
+                    }}
+                }}
+
+                if (!newAccounts.length) {{
+                    alert('未找到有效账户数据');
+                    event.target.value = '';
+                    return;
+                }}
+
+                try {{
+                    // 获取现有配置
+                    const configResp = await fetch('/{main.PATH_PREFIX}/admin/accounts-config?key={main.ADMIN_KEY}');
+                    const configData = await handleApiResponse(configResp);
+                    const existing = configData.accounts || [];
+
+                    // 构建ID到索引的映射
+                    const idToIndex = new Map();
+                    existing.forEach((acc, idx) => {{
+                        if (acc.id) idToIndex.set(acc.id, idx);
+                    }});
+
+                    // 合并：相同ID覆盖，新ID追加
+                    let added = 0;
+                    let updated = 0;
+                    for (const acc of newAccounts) {{
+                        if (!acc.secure_c_ses || !acc.csesidx || !acc.config_id) continue;
+                        const accId = acc.id || `account_${{existing.length + added + 1}}`;
+                        acc.id = accId;
+
+                        if (idToIndex.has(accId)) {{
+                            // 覆盖已存在的账户
+                            existing[idToIndex.get(accId)] = acc;
+                            updated++;
+                        }} else {{
+                            // 追加新账户
+                            existing.push(acc);
+                            idToIndex.set(accId, existing.length - 1);
+                            added++;
+                        }}
+                    }}
+
+                    if (added === 0 && updated === 0) {{
+                        alert('没有有效账户可导入');
+                        event.target.value = '';
+                        return;
+                    }}
+
+                    // 保存合并后的配置
+                    const response = await fetch('/{main.PATH_PREFIX}/admin/accounts-config?key={main.ADMIN_KEY}', {{
+                        method: 'PUT',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(existing)
+                    }});
+
+                    const result = await handleApiResponse(response);
+                    alert(`导入完成！\\n新增: ${{added}} 个\\n覆盖: ${{updated}} 个\\n当前账户数: ${{result.account_count}}`);
+                    event.target.value = '';
+                    setTimeout(refreshPage, 1000);
+                }} catch (error) {{
+                    console.error('导入失败:', error);
+                    alert('导入失败: ' + error.message);
+                    event.target.value = '';
                 }}
             }}
 

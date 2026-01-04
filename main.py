@@ -773,16 +773,17 @@ def get_conversation_key(messages: List[dict]) -> str:
     conversation_prefix = "|".join(message_fingerprints)
     return hashlib.md5(conversation_prefix.encode()).hexdigest()
 
-def parse_last_message(messages: List['Message']):
-    """解析最后一条消息，分离文本和图片"""
+async def parse_last_message(messages: List['Message']):
+    """解析最后一条消息，分离文本和图片（支持 base64 和 URL）"""
     if not messages:
         return "", []
-    
+
     last_msg = messages[-1]
     content = last_msg.content
-    
+
     text_content = ""
     images = [] # List of {"mime": str, "data": str_base64}
+    image_urls = []  # 需要下载的 URL
 
     if isinstance(content, str):
         text_content = content
@@ -796,8 +797,29 @@ def parse_last_message(messages: List['Message']):
                 match = re.match(r"data:(image/[^;]+);base64,(.+)", url)
                 if match:
                     images.append({"mime": match.group(1), "data": match.group(2)})
+                elif url.startswith(("http://", "https://")):
+                    image_urls.append(url)
                 else:
                     logger.warning(f"[FILE] 不支持的图片格式: {url[:30]}...")
+
+    # 并行下载所有 URL 图片
+    if image_urls:
+        async def download_url(url: str):
+            try:
+                resp = await http_client.get(url, timeout=30, follow_redirects=True)
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+                if not content_type.startswith("image/"):
+                    content_type = "image/jpeg"
+                b64 = base64.b64encode(resp.content).decode()
+                logger.info(f"[FILE] URL图片下载成功: {url[:50]}... ({len(resp.content)} bytes)")
+                return {"mime": content_type, "data": b64}
+            except Exception as e:
+                logger.warning(f"[FILE] URL图片下载失败: {url[:50]}... - {e}")
+                return None
+
+        results = await asyncio.gather(*[download_url(u) for u in image_urls])
+        images.extend([r for r in results if r])
 
     return text_content, images
 
@@ -1507,7 +1529,7 @@ async def chat(
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 用户消息: {preview}")
 
     # 3. 解析请求内容
-    last_text, current_images = parse_last_message(req.messages)
+    last_text, current_images = await parse_last_message(req.messages)
 
     # 4. 准备文本内容
     if is_new_conversation:

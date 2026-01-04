@@ -19,6 +19,9 @@ from functools import wraps
 # 导入认证装饰器
 from core.auth import require_path_prefix, require_admin_auth, require_path_and_admin
 
+# 导入 Uptime 追踪器
+import uptime_tracker
+
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 3000 条日志，重启后清空)
@@ -819,6 +822,43 @@ def build_full_context_text(messages: List['Message']) -> str:
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
 
+# ---------- Uptime 追踪中间件 ----------
+@app.middleware("http")
+async def track_uptime_middleware(request: Request, call_next):
+    """追踪每个请求的成功/失败状态，用于 Uptime 监控"""
+    # 只追踪 API 请求（排除静态文件、管理端点等）
+    path = request.url.path
+    if path.startswith("/images/") or path.startswith("/public/") or path.startswith("/favicon"):
+        return await call_next(request)
+
+    start_time = time.time()
+    success = False
+    model = None
+
+    try:
+        response = await call_next(request)
+        success = response.status_code < 400
+
+        # 尝试从请求中提取模型信息
+        if hasattr(request.state, "model"):
+            model = request.state.model
+
+        # 记录 API 主服务状态
+        uptime_tracker.record_request("api_service", success)
+
+        # 如果有模型信息，记录模型状态
+        if model and model in uptime_tracker.SUPPORTED_MODELS:
+            uptime_tracker.record_request(model, success)
+
+        return response
+
+    except Exception as e:
+        # 请求失败
+        uptime_tracker.record_request("api_service", False)
+        if model and model in uptime_tracker.SUPPORTED_MODELS:
+            uptime_tracker.record_request(model, False)
+        raise
+
 # ---------- 图片静态服务初始化 ----------
 os.makedirs(IMAGE_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
@@ -840,6 +880,10 @@ async def startup_event():
     # 启动缓存清理任务
     asyncio.create_task(multi_account_mgr.start_background_cleanup())
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
+
+    # 启动 Uptime 数据聚合任务
+    asyncio.create_task(uptime_tracker.uptime_aggregation_task())
+    logger.info("[SYSTEM] Uptime 数据聚合任务已启动（间隔: 240秒）")
 
 # ---------- 导入模板模块 ----------
 # 注意：必须在所有全局变量初始化之后导入，避免循环依赖
@@ -1391,6 +1435,9 @@ async def chat(
             detail=f"Model '{req.model}' not found. Available models: {list(MODEL_MAPPING.keys())}"
         )
 
+    # 保存模型信息到 request.state（用于 Uptime 追踪）
+    request.state.model = req.model
+
     # 3. 生成会话指纹，获取Session锁（防止同一对话的并发请求冲突）
     conv_key = get_conversation_key([m.dict() for m in req.messages])
     session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
@@ -1423,6 +1470,8 @@ async def chat(
                     )
                     is_new_conversation = True
                     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
+                    # 记录服务状态（账户可用）
+                    uptime_tracker.record_request("service_status", True)
                     break
                 except Exception as e:
                     last_error = e
@@ -1432,6 +1481,8 @@ async def chat(
                     logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
                     if attempt == max_account_tries - 1:
                         logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
+                        # 记录服务状态（账户不可用）
+                        uptime_tracker.record_request("service_status", False)
                         raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
                     # 继续尝试下一个账户
 
@@ -1991,6 +2042,18 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         yield "data: [DONE]\n\n"
 
 # ---------- 公开端点（无需认证） ----------
+@app.get("/public/uptime")
+async def get_public_uptime(days: int = 90):
+    """获取 Uptime 监控数据（JSON格式）"""
+    if days < 1 or days > 90:
+        days = 90
+    return await uptime_tracker.get_uptime_summary(days)
+
+@app.get("/public/uptime/html")
+async def get_public_uptime_html():
+    """Uptime 监控页面（类似 status.openai.com）"""
+    return await templates.get_uptime_html()
+
 @app.get("/public/stats")
 async def get_public_stats():
     """获取公开统计信息"""

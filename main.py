@@ -774,7 +774,7 @@ def get_conversation_key(messages: List[dict]) -> str:
     return hashlib.md5(conversation_prefix.encode()).hexdigest()
 
 async def parse_last_message(messages: List['Message'], request_id: str = ""):
-    """解析最后一条消息，分离文本和图片（支持 base64 和 URL）"""
+    """解析最后一条消息，分离文本和文件（支持图片、PDF、文档等，base64 和 URL）"""
     if not messages:
         return "", []
 
@@ -782,8 +782,8 @@ async def parse_last_message(messages: List['Message'], request_id: str = ""):
     content = last_msg.content
 
     text_content = ""
-    images = [] # List of {"mime": str, "data": str_base64}
-    image_urls = []  # 需要下载的 URL
+    images = [] # List of {"mime": str, "data": str_base64} - 兼容变量名，实际支持所有文件
+    image_urls = []  # 需要下载的 URL - 兼容变量名，实际支持所有文件
 
     if isinstance(content, str):
         text_content = content
@@ -793,29 +793,28 @@ async def parse_last_message(messages: List['Message'], request_id: str = ""):
                 text_content += part.get("text", "")
             elif part.get("type") == "image_url":
                 url = part.get("image_url", {}).get("url", "")
-                # 解析 Data URI: data:image/png;base64,xxxxxx
-                match = re.match(r"data:(image/[^;]+);base64,(.+)", url)
+                # 解析 Data URI: data:mime/type;base64,xxxxxx (支持所有 MIME 类型)
+                match = re.match(r"data:([^;]+);base64,(.+)", url)
                 if match:
                     images.append({"mime": match.group(1), "data": match.group(2)})
                 elif url.startswith(("http://", "https://")):
                     image_urls.append(url)
                 else:
-                    logger.warning(f"[FILE] [req_{request_id}] 不支持的图片格式: {url[:30]}...")
+                    logger.warning(f"[FILE] [req_{request_id}] 不支持的文件格式: {url[:30]}...")
 
-    # 并行下载所有 URL 图片
+    # 并行下载所有 URL 文件（支持图片、PDF、文档等）
     if image_urls:
         async def download_url(url: str):
             try:
                 resp = await http_client.get(url, timeout=30, follow_redirects=True)
                 resp.raise_for_status()
-                content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
-                if not content_type.startswith("image/"):
-                    content_type = "image/jpeg"
+                content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0]
+                # 移除图片类型限制，支持所有文件类型
                 b64 = base64.b64encode(resp.content).decode()
-                logger.info(f"[FILE] [req_{request_id}] URL图片下载成功: {url[:50]}... ({len(resp.content)} bytes)")
+                logger.info(f"[FILE] [req_{request_id}] URL文件下载成功: {url[:50]}... ({len(resp.content)} bytes, {content_type})")
                 return {"mime": content_type, "data": b64}
             except Exception as e:
-                logger.warning(f"[FILE] [req_{request_id}] URL图片下载失败: {url[:50]}... - {e}")
+                logger.warning(f"[FILE] [req_{request_id}] URL文件下载失败: {url[:50]}... - {e}")
                 return None
 
         results = await asyncio.gather(*[download_url(u) for u in image_urls])

@@ -25,8 +25,9 @@ license: mit
 ### 核心功能
 - ✅ **OpenAI API 完全兼容** - 无缝对接现有工具
 - ✅ **流式响应支持** - 实时输出
-- ✅ **多模态支持** - 文本 + 图片输入
+- ✅ **多模态支持** - 支持 100+ 种文件类型（图片、PDF、Office 文档、音频、视频、代码等）
 - ✅ **图片生成 & 图生图** - 支持 `gemini-3-pro-preview` 模型
+- ✅ **智能文件处理** - 自动识别文件类型，支持 URL 和 Base64 格式
 
 ### 多账户管理
 - ✅ **多账户负载均衡** - 支持多账户轮询，故障自动转移
@@ -44,6 +45,14 @@ license: mit
 - 📈 **账户使用统计** - 自动统计每个账户累计对话次数，持久化保存
 - 📝 **公开日志系统** - 实时查看服务运行状态（内存最多3000条，自动淘汰）
 - 🔐 **双重认证保护** - API_KEY 保护聊天接口，ADMIN_KEY 保护管理面板
+- 📡 **实时状态监控** - 公开统计接口，实时查看服务状态和请求统计
+
+### 性能优化
+- ⚡ **异步文件 I/O** - 避免阻塞事件循环，提升并发性能
+- ⚡ **HTTP 连接池优化** - 提升高并发场景下的稳定性
+- ⚡ **图片并行下载** - 多图场景下显著提升响应速度
+- ⚡ **智能锁优化** - 减少锁竞争，提升账户选择效率
+- ⚡ **会话并发控制** - Session 级别锁，避免对话冲突
 
 ## 📸 功能展示
 
@@ -255,6 +264,7 @@ ACCOUNTS_CONFIG='[
 | `/{PATH_PREFIX}/admin/log`               | DELETE | 清空系统日志（需ADMIN_KEY） |
 | `/public/log/html`                       | GET    | 公开日志页面（无需认证）    |
 | `/public/stats`                          | GET    | 公开统计信息（无需认证）    |
+| `/public/stats/html`                     | GET    | 实时状态监控页面（无需认证）|
 
 **访问示例**：
 
@@ -283,9 +293,14 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
   }'
 ```
 
-### 图片输入（多模态）
+### 多模态输入（支持 100+ 种文件类型）
+
+本项目支持图片、PDF、Office 文档、音频、视频、代码等 100+ 种文件类型。详细列表请查看 [支持的文件类型清单](SUPPORTED_FILE_TYPES.md)。
+
+#### 图片输入
 
 ```bash
+# Base64 格式
 curl -X POST http://localhost:7860/v1/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your_api_key" \
@@ -301,7 +316,139 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
       }
     ]
   }'
+
+# URL 格式（自动下载并转换）
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "分析这张图片"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+        ]
+      }
+    ]
+  }'
 ```
+
+#### PDF 文档
+
+```bash
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "总结这个PDF的内容"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/document.pdf"}}
+        ]
+      }
+    ]
+  }'
+```
+
+#### Office 文档（Word、Excel、PowerPoint）
+
+```bash
+# Word 文档
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "总结这个Word文档"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/document.docx"}}
+        ]
+      }
+    ]
+  }'
+
+# Excel 表格
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "分析这个Excel数据"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/data.xlsx"}}
+        ]
+      }
+    ]
+  }'
+```
+
+#### 音频文件（语音转录）
+
+```bash
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "转录这段音频"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/audio.mp3"}}
+        ]
+      }
+    ]
+  }'
+```
+
+#### 视频文件（场景分析）
+
+```bash
+curl -X POST http://localhost:7860/v1/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your_api_key" \
+  -d '{
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {"type": "text", "text": "描述这个视频的内容"},
+          {"type": "image_url", "image_url": {"url": "https://example.com/video.mp4"}}
+        ]
+      }
+    ]
+  }'
+```
+
+**支持的文件类型**（12 个分类，100+ 种格式）：
+
+- 🖼️ **图片文件** - 11 种格式（PNG, JPEG, WebP, GIF, BMP, TIFF, SVG, ICO, HEIC, HEIF, AVIF）
+- 📄 **文档文件** - 9 种格式（PDF, TXT, Markdown, HTML, XML, CSV, TSV, RTF, LaTeX）
+- 📊 **Microsoft Office** - 6 种格式（.docx, .doc, .xlsx, .xls, .pptx, .ppt）
+- 📝 **Google Workspace** - 3 种格式（Docs, Sheets, Slides）
+- 💻 **代码文件** - 19 种语言（Python, JavaScript, TypeScript, Java, C/C++, Go, Rust, PHP, Ruby, Swift, Kotlin, Scala, Shell, PowerShell, SQL, R, MATLAB 等）
+- 🎨 **Web 开发** - 8 种格式（CSS, SCSS, LESS, JSON, YAML, TOML, Vue, Svelte）
+- 🎵 **音频文件** - 10 种格式（MP3, WAV, AAC, M4A, OGG, FLAC, AIFF, WMA, OPUS, AMR）
+- 🎬 **视频文件** - 10 种格式（MP4, MOV, AVI, MPEG, WebM, FLV, WMV, MKV, 3GPP, M4V）
+- 📦 **数据文件** - 6 种格式（JSON, JSONL, CSV, TSV, Parquet, Avro）
+- 🗜️ **压缩文件** - 5 种格式（ZIP, RAR, 7Z, TAR, GZ）
+- 🔧 **配置文件** - 5 种格式（YAML, TOML, INI, ENV, Properties）
+- 📚 **电子书** - 2 种格式（EPUB, MOBI）
+
+完整列表和使用示例请查看 [支持的文件类型清单](SUPPORTED_FILE_TYPES.md)
 
 ### 图片生成
 
@@ -525,6 +672,7 @@ gemini-business2api/
 ├── requirements.txt               # Python依赖
 ├── Dockerfile                     # Docker构建文件
 ├── README.md                      # 项目文档
+├── SUPPORTED_FILE_TYPES.md        # 支持的文件类型清单
 ├── .env.example                   # 环境变量配置示例
 └── accounts_config.example.json   # 多账户配置示例
 ```

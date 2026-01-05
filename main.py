@@ -1621,7 +1621,7 @@ async def chat(
 
                 break
 
-            except (httpx.ConnectError, httpx.ReadTimeout, ssl.SSLError, HTTPException) as e:
+            except (httpx.HTTPError, ssl.SSLError, HTTPException) as e:
                 # 记录当前失败的账户
                 failed_accounts.add(account_manager.config.account_id)
 

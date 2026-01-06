@@ -874,7 +874,10 @@ async def track_uptime_middleware(request: Request, call_next):
         return response
 
     except Exception as e:
-        # 请求失败
+        # 请求失败 - 尝试提取模型信息（可能在异常前已设置）
+        if hasattr(request.state, "model"):
+            model = request.state.model
+
         uptime_tracker.record_request("api_service", False)
         if model and model in uptime_tracker.SUPPORTED_MODELS:
             uptime_tracker.record_request(model, False)
@@ -1491,8 +1494,8 @@ async def chat(
                     )
                     is_new_conversation = True
                     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
-                    # 记录服务状态（账户可用）
-                    uptime_tracker.record_request("service_status", True)
+                    # 记录账号池状态（账户可用）
+                    uptime_tracker.record_request("account_pool", True)
                     break
                 except Exception as e:
                     last_error = e
@@ -1500,10 +1503,10 @@ async def chat(
                     # 安全获取账户ID
                     account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
                     logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
+                    # 记录账号池状态（单个账户失败）
+                    uptime_tracker.record_request("account_pool", False)
                     if attempt == max_account_tries - 1:
                         logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
-                        # 记录服务状态（账户不可用）
-                        uptime_tracker.record_request("service_status", False)
                         raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
                     # 继续尝试下一个账户
 
@@ -1611,6 +1614,9 @@ async def chat(
                 account_manager.error_count = 0
                 account_manager.conversation_count += 1  # 增加对话次数
 
+                # 记录账号池状态（请求成功）
+                uptime_tracker.record_request("account_pool", True)
+
                 # 保存对话次数到统计数据
                 async with stats_lock:
                     if "account_conversations" not in global_stats:
@@ -1623,6 +1629,9 @@ async def chat(
             except (httpx.HTTPError, ssl.SSLError, HTTPException) as e:
                 # 记录当前失败的账户
                 failed_accounts.add(account_manager.config.account_id)
+
+                # 记录账号池状态（请求失败）
+                uptime_tracker.record_request("account_pool", False)
 
                 # 检查是否为429错误（Rate Limit）
                 is_rate_limit = isinstance(e, HTTPException) and e.status_code == 429
@@ -1697,6 +1706,8 @@ async def chat(
                     except Exception as create_err:
                         error_type = type(create_err).__name__
                         logger.error(f"[CHAT] [req_{request_id}] 账户切换失败 ({error_type}): {str(create_err)}")
+                        # 记录账号池状态（账户切换失败）
+                        uptime_tracker.record_request("account_pool", False)
                         if req.stream: yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
                         return
                 else:

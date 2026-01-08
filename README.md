@@ -295,7 +295,7 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 
 ### 多模态输入（支持 100+ 种文件类型）
 
-本项目支持图片、PDF、Office 文档、音频、视频、代码等 100+ 种文件类型。详细列表请查看 [支持的文件类型清单](SUPPORTED_FILE_TYPES.md)。
+本项目支持图片、PDF、Office 文档、音频、视频、代码等 100+ 种文件类型。详细列表请查看 [支持的文件类型清单](docs/SUPPORTED_FILE_TYPES.md)。
 
 #### 图片输入
 
@@ -448,7 +448,7 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 - 🔧 **配置文件** - 5 种格式（YAML, TOML, INI, ENV, Properties）
 - 📚 **电子书** - 2 种格式（EPUB, MOBI）
 
-完整列表和使用示例请查看 [支持的文件类型清单](SUPPORTED_FILE_TYPES.md)
+完整列表和使用示例请查看 [支持的文件类型清单](docs/SUPPORTED_FILE_TYPES.md)
 
 ### 图片生成
 
@@ -559,9 +559,9 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 #### 📊 **统计说明**
 
 - **自动计数**：每次聊天请求成功后自动 +1
-- **持久化保存**：保存到 `stats.json` 文件，重启不丢失
+- **持久化保存**：保存到 `data/stats.json` 文件，重启不丢失
 - **实时显示**：管理面板账户卡片实时显示累计次数
-- **数据位置**：`stats.json` → `account_conversations` 字段
+- **数据位置**：`data/stats.json` → `account_conversations` 字段
 
 #### 📈 **显示位置**
 
@@ -577,11 +577,11 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 - 统计范围：仅统计成功的对话请求
 - 失败请求：不计入累计次数
 - 数据格式：`{"account_id": conversation_count}`
-- 重置方式：目前需要手动编辑 `stats.json` 文件
+- 重置方式：目前需要手动编辑 `data/stats.json` 文件
 
 ### 5. 图片生成后在哪里找到文件?
 
-- **临时存储**: 图片保存在 `./images/`，可通过 URL 访问
+- **临时存储**: 图片保存在 `./data/images/`，可通过 URL 访问
 - **重启后会丢失**，建议使用持久化存储
 
 ### 6. 如何设置 BASE_URL?
@@ -669,20 +669,27 @@ gemini-business2api/
 │   └── templates.py               # HTML模板生成
 ├── util/                          # 工具模块
 │   └── streaming_parser.py       # 流式JSON解析器
+├── docs/                         # 文档目录
+│   └── SUPPORTED_FILE_TYPES.md   # 支持的文件类型清单
+├── data/                         # 运行时数据目录
+│   ├── stats.json                # 统计数据（gitignore）
+│   └── images/                   # 生成的图片（gitignore）
+├── script/                       # 辅助脚本
+│   ├── copy-config.js            # 油猴脚本：复制配置到剪贴板
+│   └── download-config.js        # 油猴脚本：下载配置文件
 ├── requirements.txt               # Python依赖
 ├── Dockerfile                     # Docker构建文件
 ├── README.md                      # 项目文档
-├── SUPPORTED_FILE_TYPES.md        # 支持的文件类型清单
 ├── .env.example                   # 环境变量配置示例
 └── accounts_config.example.json   # 多账户配置示例
 ```
 
 **运行时生成的文件和目录**:
 - `accounts.json` - 账户配置持久化文件（Web编辑后保存）
-- `stats.json` - 统计数据（访问量、请求数等）
-- `images/` - 生成的图片存储目录
+- `data/stats.json` - 统计数据（访问量、请求数等）
+- `data/images/` - 生成的图片存储目录
   - HF Pro: `/data/images`（持久化，重启不丢失）
-  - 其他环境: `./images`（临时存储，重启会丢失）
+  - 其他环境: `./data/images`（临时存储，重启会丢失）
 
 **日志系统**:
 - 内存日志缓冲区：最多保存 3000 条日志

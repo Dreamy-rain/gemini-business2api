@@ -34,7 +34,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             <div class="alert-icon">💡</div>
             <div class="alert-content">
                 <strong>提示</strong>：此页面默认在首页显示。如需隐藏，请设置环境变量：<br>
-                <code style="margin-top:4px; display:inline-block;">main.HIDE_HOME_PAGE=true</code>
+                <code style="margin-top:4px; display:inline-block;">HIDE_HOME_PAGE=true</code>
             </div>
         </div>
         """

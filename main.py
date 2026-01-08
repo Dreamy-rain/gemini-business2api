@@ -298,47 +298,11 @@ logger.info("[SYSTEM] 公开端点: /public/log/html")
 logger.info("[SYSTEM] 系统初始化完成")
 
 # ---------- JWT 管理 ----------
-class JWTManager:
-    def __init__(self, config: AccountConfig) -> None:
-        self.config = config
-        self.jwt: str = ""
-        self.expires: float = 0
-        self._lock = asyncio.Lock()
-
-    async def get(self, request_id: str = "") -> str:
-        async with self._lock:
-            if time.time() > self.expires:
-                await self._refresh(request_id)
-            return self.jwt
-
-    async def _refresh(self, request_id: str = "") -> None:
-        cookie = f"__Secure-C_SES={self.config.secure_c_ses}"
-        if self.config.host_c_oses:
-            cookie += f"; __Host-C_OSES={self.config.host_c_oses}"
-
-        req_tag = f"[req_{request_id}] " if request_id else ""
-        r = await http_client.get(
-            "https://business.gemini.google/auth/getoxsrf",
-            params={"csesidx": self.config.csesidx},
-            headers={
-                "cookie": cookie,
-                "user-agent": USER_AGENT,
-                "referer": "https://business.gemini.google/"
-            },
-        )
-        if r.status_code != 200:
-            logger.error(f"[AUTH] [{self.config.account_id}] {req_tag}JWT 刷新失败: {r.status_code}")
-            raise HTTPException(r.status_code, "getoxsrf failed")
-
-        txt = r.text[4:] if r.text.startswith(")]}'") else r.text
-        data = json.loads(txt)
-
-        key_bytes = base64.urlsafe_b64decode(data["xsrfToken"] + "==")
-        self.jwt      = create_jwt(key_bytes, data["keyId"], self.config.csesidx)
-        self.expires = time.time() + 270
-        logger.info(f"[AUTH] [{self.config.account_id}] {req_tag}JWT 刷新成功")
+# (JWTManager已移至 core/jwt.py)
 
 # ---------- Session & File 管理 ----------
+# (Google API函数已移至 core/google_api.py)
+
 async def create_google_session(account_manager: AccountManager, request_id: str = "") -> str:
     jwt = await account_manager.get_jwt(request_id)
     headers = get_common_headers(jwt)

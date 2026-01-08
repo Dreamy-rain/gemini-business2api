@@ -759,7 +759,7 @@ def get_conversation_key(messages: List[dict]) -> str:
         # 统一处理内容格式（字符串或数组）
         if isinstance(content, list):
             # 多模态消息：只提取文本部分
-            text = "".join([x.get("text", "") for x in content if x.get("type") == "text"])
+            text = extract_text_from_content(content)
         else:
             text = str(content)
 
@@ -772,6 +772,19 @@ def get_conversation_key(messages: List[dict]) -> str:
     # 使用前3条消息生成指纹
     conversation_prefix = "|".join(message_fingerprints)
     return hashlib.md5(conversation_prefix.encode()).hexdigest()
+
+def extract_text_from_content(content) -> str:
+    """
+    从消息 content 中提取文本内容
+    统一处理字符串和多模态数组格式
+    """
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        # 多模态消息：只提取文本部分
+        return "".join([x.get("text", "") for x in content if x.get("type") == "text"])
+    else:
+        return str(content)
 
 async def parse_last_message(messages: List['Message'], request_id: str = ""):
     """解析最后一条消息，分离文本和文件（支持图片、PDF、文档等，base64 和 URL）"""
@@ -827,16 +840,14 @@ def build_full_context_text(messages: List['Message']) -> str:
     prompt = ""
     for msg in messages:
         role = "User" if msg.role in ["user", "system"] else "Assistant"
-        content_str = ""
-        if isinstance(msg.content, str):
-            content_str = msg.content
-        elif isinstance(msg.content, list):
-            for part in msg.content:
-                if part.get("type") == "text":
-                    content_str += part.get("text", "")
-                elif part.get("type") == "image_url":
-                    content_str += "[图片]"
-        
+        content_str = extract_text_from_content(msg.content)
+
+        # 为多模态消息添加图片标记
+        if isinstance(msg.content, list):
+            image_count = sum(1 for part in msg.content if part.get("type") == "image_url")
+            if image_count > 0:
+                content_str += "[图片]" * image_count
+
         prompt += f"{role}: {content_str}\n\n"
     return prompt
 

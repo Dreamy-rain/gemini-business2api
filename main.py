@@ -1,7 +1,7 @@
-import json, time, hmac, hashlib, base64, os, asyncio, uuid, ssl, re
+import json, time, os, asyncio, uuid, ssl, re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass  # 保留用于类型注解兼容性
 import logging
 from dotenv import load_dotenv
 
@@ -20,7 +20,7 @@ from functools import wraps
 from core.auth import require_path_prefix, require_admin_auth, require_path_and_admin
 
 # 导入核心模块
-from core.jwt import JWTManager, create_jwt, urlsafe_b64encode, kq_encode
+from core.jwt import JWTManager
 from core.message import (
     get_conversation_key,
     extract_text_from_content,
@@ -33,12 +33,10 @@ from core.google_api import (
     create_google_session,
     upload_context_file,
     get_session_file_metadata,
-    build_image_download_url,
     download_image_with_jwt,
     save_image_to_hf
 )
 from core.account import (
-    AccountConfig,
     AccountManager,
     MultiAccountManager,
     format_account_expiration,

@@ -253,15 +253,15 @@ ACCOUNTS_CONFIG='[
 | ---------------------------------------- | ------ | --------------------------- |
 | `/{PATH_PREFIX}/v1/models`               | GET    | 获取模型列表                |
 | `/{PATH_PREFIX}/v1/chat/completions`     | POST   | 聊天接口（需API_KEY）       |
-| `/{PATH_PREFIX}/admin`                   | GET    | 管理面板（需ADMIN_KEY）     |
-| `/{PATH_PREFIX}/admin/accounts`          | GET    | 获取账户状态（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/accounts-config`   | GET    | 获取账户配置（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/accounts-config`   | PUT    | 更新账户配置（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/accounts/{id}`     | DELETE | 删除指定账户（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/accounts/{id}/disable` | PUT | 禁用指定账户（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/accounts/{id}/enable`  | PUT | 启用指定账户（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/log`               | GET    | 获取系统日志（需ADMIN_KEY） |
-| `/{PATH_PREFIX}/admin/log`               | DELETE | 清空系统日志（需ADMIN_KEY） |
+| `/{PATH_PREFIX}`                   | GET    | 管理面板（需ADMIN_KEY）     |
+| `/{PATH_PREFIX}/accounts`          | GET    | 获取账户状态（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/accounts-config`   | GET    | 获取账户配置（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/accounts-config`   | PUT    | 更新账户配置（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/accounts/{id}`     | DELETE | 删除指定账户（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/accounts/{id}/disable` | PUT | 禁用指定账户（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/accounts/{id}/enable`  | PUT | 启用指定账户（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/log`               | GET    | 获取系统日志（需ADMIN_KEY） |
+| `/{PATH_PREFIX}/log`               | DELETE | 清空系统日志（需ADMIN_KEY） |
 | `/public/log/html`                       | GET    | 公开日志页面（无需认证）    |
 | `/public/stats`                          | GET    | 公开统计信息（无需认证）    |
 | `/public/stats/html`                     | GET    | 实时状态监控页面（无需认证）|
@@ -488,7 +488,7 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 
 ### 1. 如何在线编辑账户配置？
 
-访问管理面板 `/{PATH_PREFIX}/admin?key=YOUR_ADMIN_KEY`，点击"编辑配置"按钮：
+访问管理面板 `/{PATH_PREFIX}?key=YOUR_ADMIN_KEY`，点击"编辑配置"按钮：
 - ✅ 实时编辑 JSON 格式配置
 - ✅ 保存后立即生效，无需重启
 - ✅ 配置保存到 `accounts.json` 文件

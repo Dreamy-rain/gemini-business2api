@@ -643,10 +643,18 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             .info-box-title {{ font-weight: 600; font-size: 12px; color: #1d1d1f; margin-bottom: 6px; }}
             .info-box-text {{ font-size: 12px; color: #86868b; line-height: 1.5; }}
 
-            .ep-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+            .ep-table {{
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 13px;
+                background: #fff;
+                border: 1px solid #e5e5e5;
+                border-radius: 12px;
+                overflow: hidden;
+            }}
             .ep-table tr {{ border-bottom: 1px solid #f5f5f5; }}
             .ep-table tr:last-child {{ border-bottom: none; }}
-            .ep-table td {{ padding: 10px 0; vertical-align: middle; }}
+            .ep-table td {{ padding: 12px 16px; vertical-align: middle; }}
 
             .method {{
                 display: inline-block;

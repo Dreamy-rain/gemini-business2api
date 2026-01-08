@@ -29,7 +29,7 @@ log_buffer = deque(maxlen=3000)
 log_lock = Lock()
 
 # 统计数据持久化
-STATS_FILE = "stats.json"
+STATS_FILE = "data/stats.json"
 stats_lock = asyncio.Lock()  # 改为异步锁
 
 async def load_stats():
@@ -109,11 +109,10 @@ MODEL_NAME   = os.getenv("MODEL_NAME", "gemini-business")  # 模型名称（公�
 HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "").lower() == "true"  # 是否隐藏首页（默认不隐藏）
 
 # ---------- 图片存储配置 ----------
-# 自动检测存储路径：优先使用持久化存储，否则使用临时存储
 if os.path.exists("/data"):
-    IMAGE_DIR = "/data/images"  # HF Pro持久化存储（重启不丢失）
+    IMAGE_DIR = "/data/images"  # HF Pro持久化存储
 else:
-    IMAGE_DIR = "./images"  # 临时存储（重启会丢失）
+    IMAGE_DIR = "./data/images"  # 本地持久化存储
 
 # ---------- 重试配置 ----------
 MAX_NEW_SESSION_TRIES = int(os.getenv("MAX_NEW_SESSION_TRIES", "5"))  # 新会话创建最多尝试账户数（默认5）
@@ -898,9 +897,9 @@ async def track_uptime_middleware(request: Request, call_next):
 os.makedirs(IMAGE_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
 if IMAGE_DIR == "/data/images":
-    logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (持久化存储)")
+    logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (HF Pro持久化)")
 else:
-    logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (临时存储，重启会丢失)")
+    logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (本地持久化)")
 
 # ---------- 后台任务启动 ----------
 @app.on_event("startup")

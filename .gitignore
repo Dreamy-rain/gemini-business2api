@@ -35,10 +35,11 @@ ENV/
 # Project specific
 .env
 *.log
-stats.json
+data/stats.json
+accounts.json
 
 # Generated files
-images/
+data/images/
 static/
 logs/
 

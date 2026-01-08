@@ -14,4 +14,8 @@ COPY uptime_tracker.py .
 COPY core ./core
 # 复制 util 目录
 COPY util ./util
+# 创建数据目录
+RUN mkdir -p ./data/images
+# 声明数据卷（运行时需要 -v 挂载才能持久化）
+VOLUME ["/app/data"]
 CMD ["python", "-u", "main.py"]

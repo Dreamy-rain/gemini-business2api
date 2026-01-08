@@ -108,8 +108,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
     </div>
     """
 
-    # --- 2. 构建账户卡片 ---
-    accounts_html = ""
+    # --- 2. 构建账户表格行 ---
+    accounts_rows = ""
     for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
@@ -127,36 +127,36 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             status_text = "过期禁用"
             status_color = "#9e9e9e"
             dot_color = "#9e9e9e"
-            card_opacity = "0.5"
-            action_buttons = f'<button onclick="deleteAccount(\'{config.account_id}\')" class="delete-btn" title="删除账户">删除</button>'
+            row_opacity = "0.5"
+            action_buttons = f'<button onclick="deleteAccount(\'{config.account_id}\')" class="btn-sm btn-delete" title="删除">删除</button>'
         elif is_disabled:
             status_text = "手动禁用"
             status_color = "#9e9e9e"
             dot_color = "#9e9e9e"
-            card_opacity = "0.5"
+            row_opacity = "0.5"
             action_buttons = f'''
-                <button onclick="enableAccount('{config.account_id}')" class="enable-btn" title="启用账户">启用</button>
-                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                <button onclick="enableAccount('{config.account_id}')" class="btn-sm btn-enable" title="启用">启用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="btn-sm btn-delete" title="删除">删除</button>
             '''
         elif cooldown_seconds == -1:
             # 错误永久禁用
             status_text = cooldown_reason  # "错误禁用"
             status_color = "#f44336"
             dot_color = "#f44336"
-            card_opacity = "0.5"
+            row_opacity = "0.5"
             action_buttons = f'''
-                <button onclick="enableAccount('{config.account_id}')" class="enable-btn" title="启用账户">启用</button>
-                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                <button onclick="enableAccount('{config.account_id}')" class="btn-sm btn-enable" title="启用">启用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="btn-sm btn-delete" title="删除">删除</button>
             '''
         elif cooldown_seconds > 0:
             # 429限流（冷却中）
-            status_text = cooldown_reason  # "429限流"
+            status_text = f"{cooldown_reason} ({cooldown_seconds}s)"
             status_color = "#ff9800"
             dot_color = "#ff9800"
-            card_opacity = "1"
+            row_opacity = "1"
             action_buttons = f'''
-                <button onclick="disableAccount('{config.account_id}')" class="disable-btn" title="禁用账户">禁用</button>
-                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                <button onclick="disableAccount('{config.account_id}')" class="btn-sm btn-disable" title="禁用">禁用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="btn-sm btn-delete" title="删除">删除</button>
             '''
         else:
             # 正常状态
@@ -176,42 +176,59 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 status_text = "不可用"
                 status_color = "#f44336"
                 dot_color = "#ff3b30"
-            card_opacity = "1"
+            row_opacity = "1"
             action_buttons = f'''
-                <button onclick="disableAccount('{config.account_id}')" class="disable-btn" title="禁用账户">禁用</button>
-                <button onclick="deleteAccount('{config.account_id}')" class="delete-btn" title="删除账户">删除</button>
+                <button onclick="disableAccount('{config.account_id}')" class="btn-sm btn-disable" title="禁用">禁用</button>
+                <button onclick="deleteAccount('{config.account_id}')" class="btn-sm btn-delete" title="删除">删除</button>
             '''
 
-        # 构建卡片内容
-        accounts_html += f"""
-        <div class="card account-card" style="opacity: {card_opacity}; background: {'#f5f5f5' if float(card_opacity) < 1 else '#fafaf9'};">
-            <div class="acc-header">
-                <div class="acc-title">
-                    <span class="status-dot" style="background-color: {dot_color};"></span>
-                    <span>{config.account_id}</span>
-                </div>
-                <span class="acc-status" style="color: {status_color};">{status_text}</span>
-            </div>
-            <div class="acc-actions">
-                {action_buttons}
-            </div>
-            <div class="acc-body">
-                <div class="acc-row">
-                    <span>过期时间</span>
-                    <span class="font-mono">{config.expires_at or '未设置'}</span>
-                </div>
-                <div class="acc-row">
-                    <span>剩余时长</span>
-                    <span style="color: {status_color};">{expire_display}</span>
-                </div>
-                <div class="acc-row">
-                    <span>累计对话</span>
-                    <span style="color: #2563eb; font-weight: 600;">{account_manager.conversation_count} 次</span>
-                </div>
-                {'<div class="acc-row cooldown-row"><span>冷却倒计时</span><span class="cooldown-text" style="color: ' + status_color + ';">' + str(cooldown_seconds) + '秒 (' + cooldown_reason + ')</span></div>' if cooldown_seconds > 0 else ''}
-            </div>
-        </div>
+        # 构建表格行
+        accounts_rows += f"""
+            <tr style="opacity: {row_opacity};">
+                <td data-label="账号ID">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="status-dot" style="background-color: {dot_color};"></span>
+                        <span style="font-weight: 600;">{config.account_id}</span>
+                    </div>
+                </td>
+                <td data-label="状态">
+                    <span style="color: {status_color}; font-weight: 600; font-size: 12px;">{status_text}</span>
+                </td>
+                <td data-label="过期时间">
+                    <span class="font-mono" style="font-size: 11px; color: #6b6b6b;">{config.expires_at or '未设置'}</span>
+                </td>
+                <td data-label="剩余时长">
+                    <span style="color: {status_color}; font-weight: 500; font-size: 12px;">{expire_display}</span>
+                </td>
+                <td data-label="累计对话">
+                    <span style="color: #2563eb; font-weight: 600;">{account_manager.conversation_count}</span>
+                </td>
+                <td data-label="操作">
+                    <div style="display: flex; gap: 6px;">
+                        {action_buttons}
+                    </div>
+                </td>
+            </tr>
         """
+
+    # 构建完整的账户表格HTML
+    accounts_html = f"""
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>账号ID</th>
+                    <th>状态</th>
+                    <th>过期时间</th>
+                    <th>剩余时长</th>
+                    <th>累计对话</th>
+                    <th style="text-align: center;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {accounts_rows if accounts_rows else '<tr><td colspan="6" style="text-align: center; color: #6b6b6b; padding: 24px;">暂无账户</td></tr>'}
+            </tbody>
+        </table>
+    """
 
     # --- 3. 构建 HTML ---
     html_content = f"""
@@ -320,7 +337,6 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             }}
             .grid-3 {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }}
             .grid-env {{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }}
-            .account-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }}
             .stack-col {{ display: flex; flex-direction: column; gap: 16px; }}
 
             /* Cards */
@@ -343,67 +359,87 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 letter-spacing: 0.5px;
             }}
 
-            /* Account & Env Styles */
-            .account-card .acc-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
-            .acc-title {{ font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; overflow: hidden; }}
-            .acc-title span:last-child {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px; }}
-            .status-dot {{ width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }}
-            .acc-status {{ font-size: 12px; font-weight: 600; }}
-            .acc-actions {{ display: flex; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #f5f5f5; }}
-            .acc-body {{ }}
-            .acc-row {{ display: flex; justify-content: space-between; font-size: 12px; margin-top: 6px; color: var(--text-sec); }}
-            .cooldown-row {{ background: #fff8e6; padding: 8px; border-radius: 6px; margin-top: 8px; }}
-            .cooldown-text {{ color: #f59e0b; font-weight: 600; }}
-
-            /* Delete Button */
-            .delete-btn {{
+            /* Account Table */
+            .account-table {{
+                width: 100%;
+                border-collapse: collapse;
                 background: #fff;
-                color: #dc2626;
-                border: 1px solid #fecaca;
-                padding: 4px 12px;
+                border: 1px solid #e5e5e5;
+                border-radius: 12px;
+                overflow: hidden;
+            }}
+            .account-table thead {{
+                background: #fafaf9;
+                border-bottom: 2px solid #e5e5e5;
+            }}
+            .account-table th {{
+                padding: 12px 16px;
+                text-align: left;
+                font-size: 12px;
+                font-weight: 600;
+                color: #6b6b6b;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }}
+            .account-table tbody tr {{
+                border-bottom: 1px solid #f5f5f5;
+                transition: background 0.15s ease;
+            }}
+            .account-table tbody tr:last-child {{
+                border-bottom: none;
+            }}
+            .account-table tbody tr:hover {{
+                background: #fafaf9;
+            }}
+            .account-table td {{
+                padding: 14px 16px;
+                font-size: 13px;
+                color: var(--text-main);
+                vertical-align: middle;
+            }}
+            .status-dot {{
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                flex-shrink: 0;
+            }}
+
+            /* Small Buttons for Table */
+            .btn-sm {{
+                padding: 4px 10px;
                 border-radius: 6px;
                 font-size: 11px;
                 cursor: pointer;
                 font-weight: 500;
                 transition: all 0.2s;
+                border: 1px solid;
             }}
-            .delete-btn:hover {{
+            .btn-delete {{
+                background: #fff;
+                color: #dc2626;
+                border-color: #fecaca;
+            }}
+            .btn-delete:hover {{
                 background: #dc2626;
                 color: white;
                 border-color: #dc2626;
             }}
-
-            /* Disable Button */
-            .disable-btn {{
+            .btn-disable {{
                 background: #fff;
                 color: #f59e0b;
-                border: 1px solid #fed7aa;
-                padding: 4px 12px;
-                border-radius: 6px;
-                font-size: 11px;
-                cursor: pointer;
-                font-weight: 500;
-                transition: all 0.2s;
+                border-color: #fed7aa;
             }}
-            .disable-btn:hover {{
+            .btn-disable:hover {{
                 background: #f59e0b;
                 color: white;
                 border-color: #f59e0b;
             }}
-
-            /* Enable Button */
-            .enable-btn {{
+            .btn-enable {{
                 background: #fff;
                 color: #10b981;
-                border: 1px solid #a7f3d0;
-                padding: 4px 12px;
-                border-radius: 6px;
-                font-size: 11px;
-                cursor: pointer;
-                font-weight: 500;
-                transition: all 0.2s;
+                border-color: #a7f3d0;
             }}
-            .enable-btn:hover {{
+            .btn-enable:hover {{
                 background: #10b981;
                 color: white;
                 border-color: #10b981;
@@ -599,6 +635,102 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 .header-actions .btn {{ justify-content: center; text-align: center; }}
                 .ep-table td {{ display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }}
                 .ep-desc {{ margin-left: 0; }}
+
+                /* Account Table Mobile - Card Layout */
+                .account-table {{
+                    display: block;
+                    border: none;
+                }}
+                .account-table thead {{
+                    display: none;
+                }}
+                .account-table tbody {{
+                    display: block;
+                }}
+                .account-table tr {{
+                    display: block;
+                    margin-bottom: 12px;
+                    border: 1px solid #e5e5e5;
+                    border-radius: 10px;
+                    background: #fff;
+                    padding: 12px;
+                    position: relative;
+                }}
+                .account-table td {{
+                    display: block;
+                    padding: 0;
+                    border: none;
+                }}
+
+                /* 账号ID - 卡片头部 */
+                .account-table td:nth-child(1) {{
+                    margin-bottom: 10px;
+                    padding-bottom: 10px;
+                    padding-right: 80px;
+                    border-bottom: 1px solid #f5f5f5;
+                }}
+                .account-table td:nth-child(1) > div {{
+                    width: 100%;
+                }}
+                .account-table td:nth-child(1) span:last-child {{
+                    word-break: break-all;
+                }}
+
+                /* 状态 - 右上角显示 */
+                .account-table td:nth-child(2) {{
+                    position: absolute;
+                    top: 12px;
+                    right: 12px;
+                    padding: 0;
+                }}
+                .account-table td:nth-child(2)::before {{
+                    display: none;
+                }}
+                .account-table td:nth-child(2) > span {{
+                    display: inline-block;
+                    padding: 4px 10px;
+                    border-radius: 6px;
+                    font-size: 11px;
+                    white-space: nowrap;
+                    font-weight: 600;
+                    background: rgba(255,255,255,0.95);
+                    border: 1px solid currentColor;
+                    opacity: 0.9;
+                }}
+
+                /* 信息行 - 紧凑布局 */
+                .account-table td:nth-child(3),
+                .account-table td:nth-child(4),
+                .account-table td:nth-child(5) {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 6px 0;
+                    font-size: 12px;
+                }}
+                .account-table td:nth-child(3)::before,
+                .account-table td:nth-child(4)::before,
+                .account-table td:nth-child(5)::before {{
+                    content: attr(data-label);
+                    font-weight: 600;
+                    color: #86868b;
+                    font-size: 11px;
+                    margin-right: 8px;
+                }}
+
+                /* 操作按钮 - 底部 */
+                .account-table td:nth-child(6) {{
+                    margin-top: 10px;
+                    padding-top: 10px;
+                    border-top: 1px solid #f5f5f5;
+                }}
+                .account-table td:nth-child(6)::before {{
+                    display: none;
+                }}
+                .account-table td:nth-child(6) > div {{
+                    width: 100%;
+                    justify-content: flex-end;
+                }}
             }}
         </style>
     </head>
@@ -629,9 +761,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                     过期时间为12小时，可以自行修改时间，脚本可能有误差。<br>
                     批量上传格式：<code style="font-size: 11px;">[{{"secure_c_ses": "...", "csesidx": "...", "config_id": "...", "id": "account_1"}}]</code>（id 可选）
                 </div>
-                <div class="account-grid">
-                    {accounts_html if accounts_html else '<div class="card"><p style="color: #6b6b6b; font-size: 14px; text-align:center;">暂无账户</p></div>'}
-                </div>
+                {accounts_html}
             </div>
 
             <div class="section">

@@ -829,7 +829,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 <div class="section">
                     <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
                     <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
-                        默认过期时间12小时 • 批量上传格式：<code style="font-size: 11px;">[{{"secure_c_ses": "...", "csesidx": "...", "config_id": "...", "id": "account_1"}}]</code>（id可选）
+                        默认过期时间12小时，注意北京时间 • 批量上传使用 <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px;">script/download-config.js</code> 油猴脚本
                     </div>
                     {accounts_html}
                 </div>

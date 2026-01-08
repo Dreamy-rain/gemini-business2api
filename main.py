@@ -134,7 +134,7 @@ MODEL_MAPPING = {
 
 # ---------- HTTP 客户端 ----------
 http_client = httpx.AsyncClient(
-    proxies=PROXY,
+    proxy=PROXY,
     verify=False,
     http2=False,
     timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),

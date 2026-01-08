@@ -206,40 +206,6 @@ multi_account_mgr = load_multi_account_config(
     SESSION_CACHE_TTL_SECONDS,
     global_stats
 )
-    """单个账户配置"""
-    account_id: str
-    secure_c_ses: str
-    host_c_oses: Optional[str]
-    csesidx: str
-    config_id: str
-    expires_at: Optional[str] = None  # 账户过期时间 (格式: "2025-12-23 10:59:21")
-    disabled: bool = False  # 手动禁用状态
-
-    def get_remaining_hours(self) -> Optional[float]:
-        """计算账户剩余小时数"""
-        if not self.expires_at:
-            return None
-        try:
-            # 解析过期时间（假设为北京时间）
-            beijing_tz = timezone(timedelta(hours=8))
-            expire_time = datetime.strptime(self.expires_at, "%Y-%m-%d %H:%M:%S")
-            expire_time = expire_time.replace(tzinfo=beijing_tz)
-
-            # 当前时间（北京时间）
-            now = datetime.now(beijing_tz)
-
-            # 计算剩余时间
-            remaining = (expire_time - now).total_seconds() / 3600
-            return remaining
-        except Exception:
-            return None
-
-    def is_expired(self) -> bool:
-        """检查账户是否已过期"""
-        remaining = self.get_remaining_hours()
-        if remaining is None:
-            return False  # 未设置过期时间，默认不过期
-        return remaining <= 0
 
 def format_account_expiration(remaining_hours: Optional[float]) -> tuple:
     """
@@ -260,86 +226,6 @@ def format_account_expiration(remaining_hours: Optional[float]) -> tuple:
         return ("即将过期", "#ff9800", f"{remaining_hours:.1f} 小时")
     else:  # 3小时及以上，统一显示小时
         return ("正常", "#4caf50", f"{remaining_hours:.1f} 小时")
-
-class AccountManager:
-    """单个账户管理器"""
-    def __init__(self, config: AccountConfig):
-        self.config = config
-        self.jwt_manager: Optional['JWTManager'] = None  # 延迟初始化
-        self.is_available = True
-        self.last_error_time = 0.0
-        self.last_429_time = 0.0  # 429错误专属时间戳
-        self.error_count = 0
-        self.conversation_count = 0  # 累计对话次数
-
-    async def get_jwt(self, request_id: str = "") -> str:
-        """获取 JWT token (带错误处理)"""
-        # 检查账户是否过期
-        if self.config.is_expired():
-            self.is_available = False
-            logger.warning(f"[ACCOUNT] [{self.config.account_id}] 账户已过期，已自动禁用")
-            raise HTTPException(403, f"Account {self.config.account_id} has expired")
-
-        try:
-            if self.jwt_manager is None:
-                # 延迟初始化 JWTManager (避免循环依赖)
-                self.jwt_manager = JWTManager(self.config)
-            jwt = await self.jwt_manager.get(request_id)
-            self.is_available = True
-            self.error_count = 0
-            return jwt
-        except Exception as e:
-            self.last_error_time = time.time()
-            self.error_count += 1
-            # 使用配置的失败阈值
-            if self.error_count >= ACCOUNT_FAILURE_THRESHOLD:
-                self.is_available = False
-                logger.error(f"[ACCOUNT] [{self.config.account_id}] JWT获取连续失败{self.error_count}次，账户已永久禁用")
-            else:
-                # 安全：只记录异常类型，不记录详细信息
-                logger.warning(f"[ACCOUNT] [{self.config.account_id}] JWT获取失败({self.error_count}/{ACCOUNT_FAILURE_THRESHOLD}): {type(e).__name__}")
-            raise
-
-    def should_retry(self) -> bool:
-        """检查账户是否可重试（429错误10分钟后恢复，普通错误永久禁用）"""
-        if self.is_available:
-            return True
-
-        current_time = time.time()
-
-        # 检查429冷却期（10分钟后自动恢复）
-        if self.last_429_time > 0:
-            if current_time - self.last_429_time > RATE_LIMIT_COOLDOWN_SECONDS:
-                return True  # 冷却期已过，可以重试
-            return False  # 仍在冷却期
-
-        # 普通错误永久禁用
-        return False
-
-    def get_cooldown_info(self) -> tuple[int, str | None]:
-        """
-        获取账户冷却信息
-
-        Returns:
-            (cooldown_seconds, cooldown_reason) 元组
-            - cooldown_seconds: 剩余冷却秒数，0表示无冷却，-1表示永久禁用
-            - cooldown_reason: 冷却原因，None表示无冷却
-        """
-        current_time = time.time()
-
-        # 优先检查429冷却期（无论账户是否可用）
-        if self.last_429_time > 0:
-            remaining_429 = RATE_LIMIT_COOLDOWN_SECONDS - (current_time - self.last_429_time)
-            if remaining_429 > 0:
-                return (int(remaining_429), "429限流")
-            # 429冷却期已过
-
-        # 如果账户可用且没有429冷却，返回正常状态
-        if self.is_available:
-            return (0, None)
-
-        # 普通错误永久禁用
-        return (-1, "错误禁用")
 
 class MultiAccountManager:
     """多账户协调器"""

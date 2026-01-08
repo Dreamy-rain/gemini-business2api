@@ -19,6 +19,38 @@ from functools import wraps
 # 导入认证装饰器
 from core.auth import require_path_prefix, require_admin_auth, require_path_and_admin
 
+# 导入核心模块
+from core.jwt import JWTManager, create_jwt, urlsafe_b64encode, kq_encode
+from core.message import (
+    get_conversation_key,
+    extract_text_from_content,
+    parse_last_message,
+    build_full_context_text
+)
+from core.google_api import (
+    get_common_headers,
+    make_request_with_jwt_retry,
+    create_google_session,
+    upload_context_file,
+    get_session_file_metadata,
+    build_image_download_url,
+    download_image_with_jwt,
+    save_image_to_hf
+)
+from core.account import (
+    AccountConfig,
+    AccountManager,
+    MultiAccountManager,
+    format_account_expiration,
+    load_multi_account_config,
+    reload_accounts,
+    update_accounts_config,
+    delete_account,
+    update_account_disabled_status,
+    load_accounts_from_source,
+    get_account_id
+)
+
 # 导入 Uptime 追踪器
 import uptime_tracker
 
@@ -159,107 +191,21 @@ def get_base_url(request: Request) -> str:
 # ---------- 常量定义 ----------
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
-def get_common_headers(jwt: str) -> dict:
-    return {
-        "accept": "*/*",
-        "accept-encoding": "gzip, deflate, br, zstd",
-        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "authorization": f"Bearer {jwt}",
-        "content-type": "application/json",
-        "origin": "https://business.gemini.google",
-        "referer": "https://business.gemini.google/",
-        "user-agent": USER_AGENT,
-        "x-server-timeout": "1800",
-        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "cross-site",
-    }
-
-async def make_request_with_jwt_retry(
-    account_mgr,
-    method: str,
-    url: str,
-    request_id: str = "",
-    **kwargs
-) -> httpx.Response:
-    """通用HTTP请求，自动处理JWT过期重试
-
-    Args:
-        account_mgr: AccountManager实例
-        method: HTTP方法 (GET/POST)
-        url: 请求URL
-        request_id: 请求ID（用于日志）
-        **kwargs: 传递给httpx的其他参数（如json, headers等）
-
-    Returns:
-        httpx.Response对象
-    """
-    jwt = await account_mgr.get_jwt(request_id)
-    headers = get_common_headers(jwt)
-
-    # 合并用户提供的headers（如果有）
-    if "headers" in kwargs:
-        headers.update(kwargs.pop("headers"))
-
-    # 发起请求
-    if method.upper() == "GET":
-        resp = await http_client.get(url, headers=headers, **kwargs)
-    elif method.upper() == "POST":
-        resp = await http_client.post(url, headers=headers, **kwargs)
-    else:
-        raise ValueError(f"Unsupported HTTP method: {method}")
-
-    # 如果401，刷新JWT后重试一次
-    if resp.status_code == 401:
-        jwt = await account_mgr.get_jwt(request_id)
-        headers = get_common_headers(jwt)
-        if "headers" in kwargs:
-            headers.update(kwargs["headers"])
-
-        if method.upper() == "GET":
-            resp = await http_client.get(url, headers=headers, **kwargs)
-        elif method.upper() == "POST":
-            resp = await http_client.post(url, headers=headers, **kwargs)
-
-    return resp
-
-def urlsafe_b64encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode().rstrip("=")
-
-def kq_encode(s: str) -> str:
-    b = bytearray()
-    for ch in s:
-        v = ord(ch)
-        if v > 255:
-            b.append(v & 255)
-            b.append(v >> 8)
-        else:
-            b.append(v)
-    return urlsafe_b64encode(bytes(b))
-
-def create_jwt(key_bytes: bytes, key_id: str, csesidx: str) -> str:
-    now = int(time.time())
-    header = {"alg": "HS256", "typ": "JWT", "kid": key_id}
-    payload = {
-        "iss": "https://business.gemini.google",
-        "aud": "https://biz-discoveryengine.googleapis.com",
-        "sub": f"csesidx/{csesidx}",
-        "iat": now,
-        "exp": now + 300,
-        "nbf": now,
-    }
-    header_b64  = kq_encode(json.dumps(header, separators=(",", ":")))
-    payload_b64 = kq_encode(json.dumps(payload, separators=(",", ":")))
-    message     = f"{header_b64}.{payload_b64}"
-    sig         = hmac.new(key_bytes, message.encode(), hashlib.sha256).digest()
-    return f"{message}.{urlsafe_b64encode(sig)}"
-
 # ---------- 多账户支持 ----------
-@dataclass
-class AccountConfig:
+# (AccountConfig, AccountManager, MultiAccountManager 已移至 core/account.py)
+
+# ---------- 配置文件管理 ----------
+# (配置管理函数已移至 core/account.py)
+
+# 初始化多账户管理器
+multi_account_mgr = load_multi_account_config(
+    http_client,
+    USER_AGENT,
+    ACCOUNT_FAILURE_THRESHOLD,
+    RATE_LIMIT_COOLDOWN_SECONDS,
+    SESSION_CACHE_TTL_SECONDS,
+    global_stats
+)
     """单个账户配置"""
     account_id: str
     secure_c_ses: str

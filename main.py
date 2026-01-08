@@ -1,7 +1,6 @@
 import json, time, os, asyncio, uuid, ssl, re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
-from dataclasses import dataclass  # 保留用于类型注解兼容性
 import logging
 from dotenv import load_dotenv
 
@@ -14,22 +13,18 @@ from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
-from functools import wraps
 
 # 导入认证装饰器
 from core.auth import require_path_prefix, require_admin_auth, require_path_and_admin
 
 # 导入核心模块
-from core.jwt import JWTManager
 from core.message import (
     get_conversation_key,
-    extract_text_from_content,
     parse_last_message,
     build_full_context_text
 )
 from core.google_api import (
     get_common_headers,
-    make_request_with_jwt_retry,
     create_google_session,
     upload_context_file,
     get_session_file_metadata,

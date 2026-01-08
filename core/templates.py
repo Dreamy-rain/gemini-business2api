@@ -415,6 +415,43 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 flex-shrink: 0;
             }}
 
+            /* Tabs Navigation */
+            .tabs-nav {{
+                display: flex;
+                gap: 4px;
+                border-bottom: 1px solid #e5e5e5;
+                margin-bottom: 24px;
+                padding: 0 4px;
+            }}
+            .tab-button {{
+                padding: 12px 20px;
+                background: none;
+                border: none;
+                font-size: 14px;
+                font-weight: 500;
+                color: #6b6b6b;
+                cursor: pointer;
+                transition: all 0.2s;
+                border-bottom: 2px solid transparent;
+                position: relative;
+                top: 1px;
+            }}
+            .tab-button:hover {{
+                color: #1d1d1f;
+                background: #f5f5f5;
+            }}
+            .tab-button.active {{
+                color: #0071e3;
+                border-bottom-color: #0071e3;
+                font-weight: 600;
+            }}
+            .tab-content {{
+                display: none;
+            }}
+            .tab-content.active {{
+                display: block;
+            }}
+
             /* Small Buttons for Table */
             .btn-sm {{
                 padding: 4px 10px;
@@ -647,6 +684,20 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 .ep-table td {{ display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }}
                 .ep-desc {{ margin-left: 0; }}
 
+                /* Tabs Mobile */
+                .tabs-nav {{
+                    overflow-x: auto;
+                    padding: 0;
+                    gap: 0;
+                    -webkit-overflow-scrolling: touch;
+                }}
+                .tab-button {{
+                    flex: 1;
+                    min-width: 100px;
+                    padding: 10px 16px;
+                    font-size: 13px;
+                }}
+
                 /* Account Table Mobile - Card Layout */
                 .account-table {{
                     display: block;
@@ -762,25 +813,126 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 </div>
             </div>
 
-            {api_key_status}
-            {error_alert}
-            {api_info_tip}
-
-            <div class="section">
-                <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
-                <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
-                    过期时间为12小时，可以自行修改时间，脚本可能有误差。<br>
-                    批量上传格式：<code style="font-size: 11px;">[{{"secure_c_ses": "...", "csesidx": "...", "config_id": "...", "id": "account_1"}}]</code>（id 可选）
-                </div>
-                {accounts_html}
+            <!-- Tabs Navigation -->
+            <div class="tabs-nav">
+                <button class="tab-button active" onclick="switchTab('accounts')">📋 账户管理</button>
+                <button class="tab-button" onclick="switchTab('api')">📚 API文档</button>
+                <button class="tab-button" onclick="switchTab('config')">⚙️ 系统配置</button>
             </div>
 
-            <div class="section">
-                <div class="section-title">环境变量配置</div>
-                <div class="grid-env">
-                    <div class="stack-col">
-                        <div class="card">
-                            <h3>必需变量 <span class="badge badge-required">REQUIRED</span></h3>
+            <!-- Tab 1: 账户管理 -->
+            <div id="tab-accounts" class="tab-content active">
+                {api_key_status}
+                {error_alert}
+                {api_info_tip}
+
+                <div class="section">
+                    <div class="section-title">账户状态 ({len(multi_account_mgr.accounts)} 个)</div>
+                    <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
+                        默认过期时间12小时 • 批量上传格式：<code style="font-size: 11px;">[{{"secure_c_ses": "...", "csesidx": "...", "config_id": "...", "id": "account_1"}}]</code>（id可选）
+                    </div>
+                    {accounts_html}
+                </div>
+            </div>
+
+            <!-- Tab 2: API文档 -->
+            <div id="tab-api" class="tab-content">
+                <div class="section">
+                    <div class="section-title">API 端点列表</div>
+
+                    <div class="current-url-row">
+                        <span style="font-size:12px; font-weight:600; color:#0071e3; margin-right:8px;">当前页面:</span>
+                        <code style="background:none; padding:0; color:#1d1d1f;">{current_url}</code>
+                    </div>
+
+                    <table class="ep-table">
+                        <tr>
+                            <td width="70"><span class="method m-post">POST</span></td>
+                            <td><span class="ep-path">/{api_path_segment}v1/chat/completions</span></td>
+                            <td><span class="ep-desc">OpenAI 兼容对话接口</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{api_path_segment}v1/models</span></td>
+                            <td><span class="ep-desc">获取模型列表</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}</span></td>
+                            <td><span class="ep-desc">管理首页 (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}/health</span></td>
+                            <td><span class="ep-desc">健康检查 (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}/accounts</span></td>
+                            <td><span class="ep-desc">账户状态 JSON (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}/log</span></td>
+                            <td><span class="ep-desc">获取日志 JSON (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}/log/html</span></td>
+                            <td><span class="ep-desc">日志查看器 HTML (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-del">DEL</span></td>
+                            <td><span class="ep-path">/{admin_path_segment}/log?confirm=yes</span></td>
+                            <td><span class="ep-desc">清空系统日志 (需登录)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/public/stats</span></td>
+                            <td><span class="ep-desc">公开统计数据</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/public/log</span></td>
+                            <td><span class="ep-desc">公开日志 (JSON, 脱敏)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/public/log/html</span></td>
+                            <td><span class="ep-desc">公开日志查看器 (HTML)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/public/uptime</span></td>
+                            <td><span class="ep-desc">实时状态监控 (JSON)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/public/uptime/html</span></td>
+                            <td><span class="ep-desc">实时状态监控页面 (HTML)</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/docs</span></td>
+                            <td><span class="ep-desc">Swagger API 文档</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method m-get">GET</span></td>
+                            <td><span class="ep-path">/redoc</span></td>
+                            <td><span class="ep-desc">ReDoc API 文档</span></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Tab 3: 系统配置 -->
+            <div id="tab-config" class="tab-content">
+                <div class="section">
+                    <div class="section-title">环境变量配置</div>
+                    <div class="grid-env">
+                        <div class="stack-col">
+                            <div class="card">
+                                <h3>必需变量 <span class="badge badge-required">REQUIRED</span></h3>
                             <div style="margin-top: 12px;">
                                 <div class="env-var">
                                     <div><div class="env-name">ACCOUNTS_CONFIG</div><div class="env-desc">JSON格式账户列表</div></div>
@@ -859,9 +1011,8 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 </div>
             </div>
 
-            <div class="section">
-                <div class="section-title">服务信息</div>
-                <div class="grid-3">
+                <div class="section">
+                    <div class="section-title">服务信息</div>
                     <div class="card">
                         <h3>支持的模型</h3>
                         <div class="model-grid">
@@ -880,93 +1031,6 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                                 类型: {'<span style="color: #34c759; font-weight: 600;">持久化（重启保留）</span>' if main.IMAGE_DIR == '/data/images' else '<span style="color: #ff3b30; font-weight: 600;">临时（重启丢失）</span>'}
                             </div>
                         </div>
-                    </div>
-
-                    <div class="card" style="grid-column: span 2;">
-                        <h3>API 端点</h3>
-
-                        <div class="current-url-row">
-                            <span style="font-size:12px; font-weight:600; color:#0071e3; margin-right:8px;">当前页面:</span>
-                            <code style="background:none; padding:0; color:#1d1d1f;">{current_url}</code>
-                        </div>
-
-                        <table class="ep-table">
-                            <tr>
-                                <td width="70"><span class="method m-post">POST</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/v1/chat/completions</span></td>
-                                <td><span class="ep-desc">OpenAI 兼容对话接口</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/v1/models</span></td>
-                                <td><span class="ep-desc">获取模型列表</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}</span></td>
-                                <td><span class="ep-desc">管理首页 (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/health</span></td>
-                                <td><span class="ep-desc">健康检查 (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/accounts</span></td>
-                                <td><span class="ep-desc">账户状态 JSON (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/log</span></td>
-                                <td><span class="ep-desc">获取日志 JSON (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/log/html</span></td>
-                                <td><span class="ep-desc">日志查看器 HTML (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-del">DEL</span></td>
-                                <td><span class="ep-path">/{admin_path_segment}/log?confirm=yes</span></td>
-                                <td><span class="ep-desc">清空系统日志 (需登录)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/public/stats</span></td>
-                                <td><span class="ep-desc">公开统计数据</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/public/log</span></td>
-                                <td><span class="ep-desc">公开日志 (JSON, 脱敏)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/public/log/html</span></td>
-                                <td><span class="ep-desc">公开日志查看器 (HTML)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/public/uptime</span></td>
-                                <td><span class="ep-desc">实时状态监控 (JSON)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/public/uptime/html</span></td>
-                                <td><span class="ep-desc">实时状态监控页面 (HTML)</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/docs</span></td>
-                                <td><span class="ep-desc">Swagger API 文档</span></td>
-                            </tr>
-                            <tr>
-                                <td><span class="method m-get">GET</span></td>
-                                <td><span class="ep-path">/redoc</span></td>
-                                <td><span class="ep-desc">ReDoc API 文档</span></td>
-                            </tr>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -997,6 +1061,23 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
 
         <script>
             let currentConfig = null;
+
+            // 标签页切换函数
+            function switchTab(tabName) {{
+                // 隐藏所有标签页内容
+                document.querySelectorAll('.tab-content').forEach(content => {{
+                    content.classList.remove('active');
+                }});
+                // 移除所有标签按钮的active状态
+                document.querySelectorAll('.tab-button').forEach(button => {{
+                    button.classList.remove('active');
+                }});
+
+                // 显示选中的标签页
+                document.getElementById('tab-' + tabName).classList.add('active');
+                // 激活对应的按钮
+                event.target.classList.add('active');
+            }}
 
             // 统一的页面刷新函数（避免缓存）
             function refreshPage() {{

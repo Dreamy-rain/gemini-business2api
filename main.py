@@ -1267,118 +1267,6 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
     return file_ids, session_name
 
 
-async def get_session_file_metadata(account_mgr: AccountManager, session_name: str, request_id: str = "") -> dict:
-    """获取session中的文件元数据，包括正确的session路径"""
-    body = {
-        "configId": account_mgr.config.config_id,
-        "additionalParams": {"token": "-"},
-        "listSessionFileMetadataRequest": {
-            "name": session_name,
-            "filter": "file_origin_type = AI_GENERATED"
-        }
-    }
-
-    resp = await make_request_with_jwt_retry(
-        account_mgr,
-        "POST",
-        "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetListSessionFileMetadata",
-        request_id,
-        json=body
-    )
-
-    if resp.status_code != 200:
-        logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 获取文件元数据失败: {resp.status_code}")
-        return {}
-
-    data = resp.json()
-    result = {}
-    file_metadata_list = data.get("listSessionFileMetadataResponse", {}).get("fileMetadata", [])
-    for fm in file_metadata_list:
-        fid = fm.get("fileId")
-        if fid:
-            result[fid] = fm
-
-    return result
-
-
-def build_image_download_url(session_name: str, file_id: str) -> str:
-    """构造图片下载URL"""
-    return f"https://biz-discoveryengine.googleapis.com/v1alpha/{session_name}:downloadFile?fileId={file_id}&alt=media"
-
-
-async def download_image_with_jwt(account_mgr: AccountManager, session_name: str, file_id: str, request_id: str = "", max_retries: int = 3) -> bytes:
-    """
-    使用JWT认证下载图片（带超时和重试机制）
-
-    Args:
-        account_mgr: 账户管理器
-        session_name: Session名称
-        file_id: 文件ID
-        request_id: 请求ID
-        max_retries: 最大重试次数（默认3次）
-
-    Returns:
-        图片字节数据
-
-    Raises:
-        HTTPException: 下载失败
-        asyncio.TimeoutError: 超时
-    """
-    url = build_image_download_url(session_name, file_id)
-    logger.info(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 开始下载图片: {file_id[:8]}...")
-
-    for attempt in range(max_retries):
-        try:
-            # 3分钟超时（180秒）
-            async with asyncio.timeout(180):
-                # 使用通用JWT刷新函数
-                resp = await make_request_with_jwt_retry(
-                    account_mgr,
-                    "GET",
-                    url,
-                    request_id,
-                    follow_redirects=True
-                )
-
-                resp.raise_for_status()
-                logger.info(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载成功: {file_id[:8]}... ({len(resp.content)} bytes)")
-                return resp.content
-
-        except asyncio.TimeoutError:
-            logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载超时 (尝试 {attempt + 1}/{max_retries}): {file_id[:8]}...")
-            if attempt == max_retries - 1:
-                raise HTTPException(504, f"Image download timeout after {max_retries} attempts")
-            await asyncio.sleep(2 ** attempt)  # 指数退避：2s, 4s, 8s
-
-        except httpx.HTTPError as e:
-            logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载失败 (尝试 {attempt + 1}/{max_retries}): {type(e).__name__}")
-            if attempt == max_retries - 1:
-                raise HTTPException(500, f"Image download failed: {str(e)[:100]}")
-            await asyncio.sleep(2 ** attempt)  # 指数退避
-
-        except Exception as e:
-            logger.error(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载异常: {type(e).__name__}: {str(e)[:100]}")
-            raise
-
-    # 不应该到达这里
-    raise HTTPException(500, "Image download failed unexpectedly")
-
-
-
-def save_image_to_hf(image_data: bytes, chat_id: str, file_id: str, mime_type: str, base_url: str) -> str:
-    """保存图片到持久化存储,返回完整的公开URL"""
-    ext_map = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
-    ext = ext_map.get(mime_type, ".png")
-
-    filename = f"{chat_id}_{file_id}{ext}"
-    save_path = os.path.join(IMAGE_DIR, filename)
-
-    # 目录已在启动时创建(Line 635),无需重复创建
-    with open(save_path, "wb") as f:
-        f.write(image_data)
-
-    return f"{base_url}/images/{filename}"
-
 async def stream_chat_generator(session: str, text_content: str, file_ids: List[str], model_name: str, chat_id: str, created_time: int, account_manager: AccountManager, is_stream: bool = True, request_id: str = "", request: Request = None):
     start_time = time.time()
 
@@ -1389,7 +1277,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 附带文件: {len(file_ids)}个")
 
     jwt = await account_manager.get_jwt(request_id)
-    headers = get_common_headers(jwt)
+    headers = get_common_headers(jwt, USER_AGENT)
 
     body = {
         "configId": account_manager.config.config_id,
@@ -1466,7 +1354,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
 
                     try:
                         base_url = get_base_url(request) if request else ""
-                        file_metadata = await get_session_file_metadata(account_manager, session_name, request_id)
+                        file_metadata = await get_session_file_metadata(account_manager, session_name, http_client, USER_AGENT, request_id)
 
                         # 并行下载所有图片
                         download_tasks = []
@@ -1475,7 +1363,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                             mime = file_info["mimeType"]
                             meta = file_metadata.get(fid, {})
                             correct_session = meta.get("session") or session_name
-                            task = download_image_with_jwt(account_manager, correct_session, fid, request_id)
+                            task = download_image_with_jwt(account_manager, correct_session, fid, http_client, USER_AGENT, request_id)
                             download_tasks.append((fid, mime, task))
 
                         results = await asyncio.gather(*[task for _, _, task in download_tasks], return_exceptions=True)
@@ -1486,7 +1374,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                                 logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}")
                                 continue
 
-                            image_url = save_image_to_hf(result, chat_id, fid, mime, base_url)
+                            image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
                             logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
 
                             markdown = f"\n\n![生成的图片]({image_url})\n\n"

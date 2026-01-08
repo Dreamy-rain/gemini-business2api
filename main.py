@@ -42,8 +42,9 @@ from core.account import (
     format_account_expiration,
     load_multi_account_config,
     load_accounts_from_source,
-    save_accounts_to_file,
-    get_account_id
+    update_accounts_config as _update_accounts_config,
+    delete_account as _delete_account,
+    update_account_disabled_status as _update_account_disabled_status
 )
 
 # 导入 Uptime 追踪器
@@ -201,58 +202,6 @@ multi_account_mgr = load_multi_account_config(
     SESSION_CACHE_TTL_SECONDS,
     global_stats
 )
-
-# ---------- 配置文件管理 ----------
-# (MultiAccountManager和配置管理函数已移至 core/account.py)
-
-def reload_accounts():
-    """重新加载账户配置（清空缓存并重新加载）"""
-    global multi_account_mgr
-    multi_account_mgr.global_session_cache.clear()
-    multi_account_mgr = load_multi_account_config()
-    logger.info(f"[CONFIG] 配置已重载，当前账户数: {len(multi_account_mgr.accounts)}")
-
-def update_accounts_config(accounts_data: list):
-    """更新账户配置（保存到文件并重新加载）"""
-    save_accounts_to_file(accounts_data)
-    reload_accounts()
-
-def delete_account(account_id: str):
-    """删除单个账户"""
-    accounts_data = load_accounts_from_source()
-
-    # 过滤掉要删除的账户
-    filtered = [
-        acc for i, acc in enumerate(accounts_data, 1)
-        if get_account_id(acc, i) != account_id
-    ]
-
-    if len(filtered) == len(accounts_data):
-        raise ValueError(f"账户 {account_id} 不存在")
-
-    save_accounts_to_file(filtered)
-    reload_accounts()
-
-def update_account_disabled_status(account_id: str, disabled: bool):
-    """更新账户的禁用状态"""
-    accounts_data = load_accounts_from_source()
-
-    # 查找并更新账户
-    found = False
-    for i, acc in enumerate(accounts_data, 1):
-        if get_account_id(acc, i) == account_id:
-            acc["disabled"] = disabled
-            found = True
-            break
-
-    if not found:
-        raise ValueError(f"账户 {account_id} 不存在")
-
-    save_accounts_to_file(accounts_data)
-    reload_accounts()
-
-    status_text = "已禁用" if disabled else "已启用"
-    logger.info(f"[CONFIG] 账户 {account_id} {status_text}")
 
 # 验证必需的环境变量
 if not PATH_PREFIX:
@@ -715,8 +664,13 @@ async def admin_get_config(path_prefix: str, key: str = None, authorization: str
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_update_config(path_prefix: str, accounts_data: list = Body(...), key: str = None, authorization: str = Header(None)):
     """更新整个账户配置"""
+    global multi_account_mgr
     try:
-        update_accounts_config(accounts_data)
+        multi_account_mgr = _update_accounts_config(
+            accounts_data, multi_account_mgr, http_client, USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS, global_stats
+        )
         return {"status": "success", "message": "配置已更新", "account_count": len(multi_account_mgr.accounts)}
     except Exception as e:
         logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
@@ -726,8 +680,13 @@ async def admin_update_config(path_prefix: str, accounts_data: list = Body(...),
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_delete_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
     """删除单个账户"""
+    global multi_account_mgr
     try:
-        delete_account(account_id)
+        multi_account_mgr = _delete_account(
+            account_id, multi_account_mgr, http_client, USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS, global_stats
+        )
         return {"status": "success", "message": f"账户 {account_id} 已删除", "account_count": len(multi_account_mgr.accounts)}
     except Exception as e:
         logger.error(f"[CONFIG] 删除账户失败: {str(e)}")
@@ -737,8 +696,13 @@ async def admin_delete_account(path_prefix: str, account_id: str, key: str = Non
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_disable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
     """手动禁用账户"""
+    global multi_account_mgr
     try:
-        update_account_disabled_status(account_id, True)
+        multi_account_mgr = _update_account_disabled_status(
+            account_id, True, multi_account_mgr, http_client, USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS, global_stats
+        )
         return {"status": "success", "message": f"账户 {account_id} 已禁用", "account_count": len(multi_account_mgr.accounts)}
     except Exception as e:
         logger.error(f"[CONFIG] 禁用账户失败: {str(e)}")
@@ -748,8 +712,13 @@ async def admin_disable_account(path_prefix: str, account_id: str, key: str = No
 @require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
 async def admin_enable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
     """启用账户"""
+    global multi_account_mgr
     try:
-        update_account_disabled_status(account_id, False)
+        multi_account_mgr = _update_account_disabled_status(
+            account_id, False, multi_account_mgr, http_client, USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS, global_stats
+        )
         return {"status": "success", "message": f"账户 {account_id} 已启用", "account_count": len(multi_account_mgr.accounts)}
     except Exception as e:
         logger.error(f"[CONFIG] 启用账户失败: {str(e)}")

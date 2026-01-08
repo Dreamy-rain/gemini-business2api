@@ -1073,10 +1073,9 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         body: JSON.stringify(data)
                     }});
 
-                    const result = await handleApiResponse(response);
-                    alert(`配置已更新！\\n当前账户数: ${{result.account_count}}`);
+                    await handleApiResponse(response);
                     closeModal();
-                    setTimeout(refreshPage, 1000);
+                    refreshPage();
                 }} catch (error) {{
                     console.error('保存失败:', error);
                     alert('更新失败: ' + error.message);
@@ -1091,8 +1090,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         method: 'DELETE'
                     }});
 
-                    const result = await handleApiResponse(response);
-                    alert(`账户已删除！\\n剩余账户数: ${{result.account_count}}`);
+                    await handleApiResponse(response);
                     refreshPage();
                 }} catch (error) {{
                     console.error('删除失败:', error);
@@ -1101,15 +1099,12 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             }}
 
             async function disableAccount(accountId) {{
-                if (!confirm(`确定禁用账户 ${{accountId}}？`)) return;
-
                 try {{
                     const response = await fetch('/{admin_path_segment}/accounts/' + accountId + '/disable', {{
                         method: 'PUT'
                     }});
 
-                    const result = await handleApiResponse(response);
-                    alert(`账户已禁用！`);
+                    await handleApiResponse(response);
                     refreshPage();
                 }} catch (error) {{
                     console.error('禁用失败:', error);
@@ -1118,15 +1113,12 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             }}
 
             async function enableAccount(accountId) {{
-                if (!confirm(`确定启用账户 ${{accountId}}？`)) return;
-
                 try {{
                     const response = await fetch('/{admin_path_segment}/accounts/' + accountId + '/enable', {{
                         method: 'PUT'
                     }});
 
-                    const result = await handleApiResponse(response);
-                    alert(`账户已启用！`);
+                    await handleApiResponse(response);
                     refreshPage();
                 }} catch (error) {{
                     console.error('启用失败:', error);
@@ -1207,10 +1199,9 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         body: JSON.stringify(existing)
                     }});
 
-                    const result = await handleApiResponse(response);
-                    alert(`导入完成！\\n新增: ${{added}} 个\\n覆盖: ${{updated}} 个\\n当前账户数: ${{result.account_count}}`);
+                    await handleApiResponse(response);
                     event.target.value = '';
-                    setTimeout(refreshPage, 1000);
+                    refreshPage();
                 }} catch (error) {{
                     console.error('导入失败:', error);
                     alert('导入失败: ' + error.message);

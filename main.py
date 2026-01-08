@@ -6,16 +6,17 @@ from dotenv import load_dotenv
 
 import httpx
 import aiofiles
-from fastapi import FastAPI, HTTPException, Header, Request, Body
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Header, Request, Body, Form
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
 
-# 导入认证装饰器
-from core.auth import require_path_prefix, require_admin_auth, require_path_and_admin
+# 导入认证模块
+from core.auth import verify_api_key
+from core.session_auth import is_logged_in, login_user, logout_user, require_login, generate_session_secret
 
 # 导入核心模块
 from core.message import (
@@ -120,16 +121,17 @@ load_dotenv()
 # ---------- 配置 ----------
 PROXY        = os.getenv("PROXY", "")
 TIMEOUT_SECONDS = 600
-API_KEY      = os.getenv("API_KEY", "")  # API 访问密钥（可选）
-PATH_PREFIX  = os.getenv("PATH_PREFIX")      # 路径前缀（必需，用于隐藏端点）
-ADMIN_KEY    = os.getenv("ADMIN_KEY")        # 管理员密钥（必需，用于访问管理端点）
-BASE_URL     = os.getenv("BASE_URL", "")         # 服务器完整URL（可选，用于图片URL生成）
+API_KEY      = os.getenv("API_KEY", "")           # API 访问密钥（可选，用于保护API端点）
+PATH_PREFIX  = os.getenv("PATH_PREFIX", "")       # 路径前缀（可选，用于隐藏端点路径）
+ADMIN_KEY    = os.getenv("ADMIN_KEY", "")         # 管理员密钥（必需，用于登录）
+BASE_URL     = os.getenv("BASE_URL", "")          # 服务器完整URL（可选，用于图片URL生成）
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", generate_session_secret())  # Session加密密钥（自动生成）
+SESSION_EXPIRE_HOURS = int(os.getenv("SESSION_EXPIRE_HOURS", "24"))  # Session过期时间（默认24小时）
 
 # ---------- 公开展示配置 ----------
 LOGO_URL     = os.getenv("LOGO_URL", "")  # Logo URL（公开，为空则不显示）
 CHAT_URL     = os.getenv("CHAT_URL", "")  # 开始对话链接（公开，为空则不显示）
 MODEL_NAME   = os.getenv("MODEL_NAME", "gemini-business")  # 模型名称（公开）
-HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "").lower() == "true"  # 是否隐藏首页（默认不隐藏）
 
 # ---------- 图片存储配置 ----------
 if os.path.exists("/data"):
@@ -199,21 +201,22 @@ multi_account_mgr = load_multi_account_config(
 )
 
 # 验证必需的环境变量
-if not PATH_PREFIX:
-    logger.error("[SYSTEM] 未配置 PATH_PREFIX 环境变量，请设置后重启")
-    import sys
-    sys.exit(1)
-
 if not ADMIN_KEY:
     logger.error("[SYSTEM] 未配置 ADMIN_KEY 环境变量，请设置后重启")
     import sys
     sys.exit(1)
 
 # 启动日志
-logger.info(f"[SYSTEM] 路径前缀已配置: {PATH_PREFIX[:4]}****")
-logger.info(f"[SYSTEM] 用户端点: /{PATH_PREFIX}/v1/chat/completions")
-logger.info(f"[SYSTEM] 管理端点: /{PATH_PREFIX}/admin/")
-logger.info("[SYSTEM] 公开端点: /public/log/html")
+if PATH_PREFIX:
+    logger.info(f"[SYSTEM] 路径前缀已配置: {PATH_PREFIX[:4]}****")
+    logger.info(f"[SYSTEM] API端点: /{PATH_PREFIX}/v1/chat/completions")
+    logger.info(f"[SYSTEM] 管理端点: /{PATH_PREFIX}/")
+else:
+    logger.info("[SYSTEM] 未配置路径前缀，使用默认路径")
+    logger.info("[SYSTEM] API端点: /v1/chat/completions")
+    logger.info("[SYSTEM] 管理端点: /admin/")
+logger.info("[SYSTEM] 公开端点: /public/log/html, /public/stats, /public/uptime/html")
+logger.info(f"[SYSTEM] Session过期时间: {SESSION_EXPIRE_HOURS}小时")
 logger.info("[SYSTEM] 系统初始化完成")
 
 # ---------- JWT 管理 ----------
@@ -227,6 +230,16 @@ logger.info("[SYSTEM] 系统初始化完成")
 
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
+
+# ---------- Session 中间件配置 ----------
+from starlette.middleware.sessions import SessionMiddleware
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    max_age=SESSION_EXPIRE_HOURS * 3600,  # 转换为秒
+    same_site="lax",
+    https_only=False  # 本地开发可设为False，生产环境建议True
+)
 
 # ---------- Uptime 追踪中间件 ----------
 @app.middleware("http")
@@ -530,99 +543,106 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
     }
     return json.dumps(chunk)
 
-# ---------- API Key 验证 ----------
-def verify_api_key(authorization: str = None):
-    """验证 API Key（如果配置了 API_KEY）"""
-    # 如果未配置 API_KEY，则跳过验证
-    if not API_KEY:
-        return True
-
-    # 检查 Authorization header
-    if not authorization:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing Authorization header"
-        )
-
-    # 支持两种格式：
-    # 1. Bearer YOUR_API_KEY
-    # 2. YOUR_API_KEY
-    token = authorization
-    if authorization.startswith("Bearer "):
-        token = authorization[7:]
-
-    if token != API_KEY:
-        logger.warning(f"[AUTH] API Key 验证失败")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API Key"
-        )
-
-    return True
-
 @app.get("/")
 async def home(request: Request):
-    """首页 - 默认显示管理面板（可通过环境变量隐藏）"""
-    # 检查是否隐藏首页
-    if HIDE_HOME_PAGE:
+    """首页 - 根据PATH_PREFIX配置决定行为"""
+    if PATH_PREFIX:
+        # 如果设置了PATH_PREFIX（隐藏模式），首页返回404，不暴露任何信息
         raise HTTPException(404, "Not Found")
+    else:
+        # 未设置PATH_PREFIX（公开模式），根据登录状态重定向
+        if is_logged_in(request):
+            return RedirectResponse(url="/admin", status_code=302)
+        else:
+            return RedirectResponse(url="/admin/login", status_code=302)
 
-    # 显示管理页面（带隐藏提示）
-    html_content = templates.generate_admin_html(request, multi_account_mgr, show_hide_tip=True)
-    return HTMLResponse(content=html_content)
+# ---------- 登录/登出端点（支持可选PATH_PREFIX） ----------
 
-@app.get("/{path_prefix}/admin")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_home(path_prefix: str, request: Request, key: str = None, authorization: str = Header(None)):
-    """管理首页 - 显示API信息和错误提醒"""
-    # 显示管理页面（不显示隐藏提示）
+# 不带PATH_PREFIX的登录端点
+@app.get("/admin/login")
+async def admin_login_get(request: Request, error: str = None):
+    """登录页面"""
+    return await templates.get_login_html(request, error)
+
+@app.post("/admin/login")
+async def admin_login_post(request: Request, admin_key: str = Form(...)):
+    """处理登录表单提交"""
+    if admin_key == ADMIN_KEY:
+        login_user(request)
+        logger.info(f"[AUTH] 管理员登录成功")
+        return RedirectResponse(url="/admin", status_code=302)
+    else:
+        logger.warning(f"[AUTH] 登录失败 - 密钥错误")
+        return await templates.get_login_html(request, error="密钥错误，请重试")
+
+@app.post("/admin/logout")
+@require_login(redirect_to_login=False)
+async def admin_logout(request: Request):
+    """登出"""
+    logout_user(request)
+    logger.info(f"[AUTH] 管理员已登出")
+    return RedirectResponse(url="/admin/login", status_code=302)
+
+# 带PATH_PREFIX的登录端点（如果配置了PATH_PREFIX）
+if PATH_PREFIX:
+    @app.get(f"/{PATH_PREFIX}/login")
+    async def admin_login_get_prefixed(request: Request, error: str = None):
+        """登录页面（带前缀）"""
+        return await templates.get_login_html(request, error)
+
+    @app.post(f"/{PATH_PREFIX}/login")
+    async def admin_login_post_prefixed(request: Request, admin_key: str = Form(...)):
+        """处理登录表单提交（带前缀）"""
+        if admin_key == ADMIN_KEY:
+            login_user(request)
+            logger.info(f"[AUTH] 管理员登录成功")
+            return RedirectResponse(url=f"/{PATH_PREFIX}", status_code=302)
+        else:
+            logger.warning(f"[AUTH] 登录失败 - 密钥错误")
+            return await templates.get_login_html(request, error="密钥错误，请重试")
+
+    @app.post(f"/{PATH_PREFIX}/logout")
+    @require_login(redirect_to_login=False)
+    async def admin_logout_prefixed(request: Request):
+        """登出（带前缀）"""
+        logout_user(request)
+        logger.info(f"[AUTH] 管理员已登出")
+        return RedirectResponse(url=f"/{PATH_PREFIX}/login", status_code=302)
+
+# ---------- 管理端点（需要登录） ----------
+
+# 不带PATH_PREFIX的管理端点
+@app.get("/admin")
+@require_login()
+async def admin_home_no_prefix(request: Request):
+    """管理首页"""
     html_content = templates.generate_admin_html(request, multi_account_mgr, show_hide_tip=False)
     return HTMLResponse(content=html_content)
 
-@app.get("/{path_prefix}/v1/models")
-@require_path_prefix(PATH_PREFIX)
-async def list_models(path_prefix: str, authorization: str = Header(None)):
-    # 验证 API Key
-    verify_api_key(authorization)
+# 带PATH_PREFIX的管理端点（如果配置了PATH_PREFIX）
+if PATH_PREFIX:
+    @app.get(f"/{PATH_PREFIX}")
+    @require_login()
+    async def admin_home_prefixed(request: Request):
+        """管理首页（带前缀）"""
+        return await admin_home_no_prefix(request=request)
 
-    data = []
-    now = int(time.time())
-    for m in MODEL_MAPPING.keys():
-        data.append({
-            "id": m,
-            "object": "model",
-            "created": now,
-            "owned_by": "google",
-            "permission": []
-        })
-    return {"object": "list", "data": data}
+# ---------- 管理API端点（需要登录） ----------
 
-@app.get("/{path_prefix}/v1/models/{model_id}")
-@require_path_prefix(PATH_PREFIX)
-async def get_model(path_prefix: str, model_id: str, authorization: str = Header(None)):
-    # 验证 API Key
-    verify_api_key(authorization)
-
-    return {"id": model_id, "object": "model"}
-
-@app.get("/{path_prefix}/admin/health")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_health(path_prefix: str, key: str = None, authorization: str = Header(None)):
+@app.get("/admin/health")
+@require_login()
+async def admin_health(request: Request):
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
-@app.get("/{path_prefix}/admin/accounts")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_get_accounts(path_prefix: str, key: str = None, authorization: str = Header(None)):
+@app.get("/admin/accounts")
+@require_login()
+async def admin_get_accounts(request: Request):
     """获取所有账户的状态信息"""
     accounts_info = []
     for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
-
-        # 使用统一的格式化函数
         status, status_color, remaining_display = format_account_expiration(remaining_hours)
-
-        # 使用AccountManager的方法获取冷却信息
         cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
 
         accounts_info.append({
@@ -633,20 +653,17 @@ async def admin_get_accounts(path_prefix: str, key: str = None, authorization: s
             "remaining_display": remaining_display,
             "is_available": account_manager.is_available,
             "error_count": account_manager.error_count,
-            "disabled": config.disabled,  # 添加手动禁用状态
-            "cooldown_seconds": cooldown_seconds,  # 冷却剩余秒数
-            "cooldown_reason": cooldown_reason,  # 冷却原因
-            "conversation_count": account_manager.conversation_count  # 累计对话次数
+            "disabled": config.disabled,
+            "cooldown_seconds": cooldown_seconds,
+            "cooldown_reason": cooldown_reason,
+            "conversation_count": account_manager.conversation_count
         })
 
-    return {
-        "total": len(accounts_info),
-        "accounts": accounts_info
-    }
+    return {"total": len(accounts_info), "accounts": accounts_info}
 
-@app.get("/{path_prefix}/admin/accounts-config")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_get_config(path_prefix: str, key: str = None, authorization: str = Header(None)):
+@app.get("/admin/accounts-config")
+@require_login()
+async def admin_get_config(request: Request):
     """获取完整账户配置"""
     try:
         accounts_data = load_accounts_from_source()
@@ -655,9 +672,9 @@ async def admin_get_config(path_prefix: str, key: str = None, authorization: str
         logger.error(f"[CONFIG] 获取配置失败: {str(e)}")
         raise HTTPException(500, f"获取失败: {str(e)}")
 
-@app.put("/{path_prefix}/admin/accounts-config")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_update_config(path_prefix: str, accounts_data: list = Body(...), key: str = None, authorization: str = Header(None)):
+@app.put("/admin/accounts-config")
+@require_login()
+async def admin_update_config(request: Request, accounts_data: list = Body(...)):
     """更新整个账户配置"""
     global multi_account_mgr
     try:
@@ -671,9 +688,9 @@ async def admin_update_config(path_prefix: str, accounts_data: list = Body(...),
         logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
         raise HTTPException(500, f"更新失败: {str(e)}")
 
-@app.delete("/{path_prefix}/admin/accounts/{account_id}")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_delete_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+@app.delete("/admin/accounts/{account_id}")
+@require_login()
+async def admin_delete_account(request: Request, account_id: str):
     """删除单个账户"""
     global multi_account_mgr
     try:
@@ -687,9 +704,9 @@ async def admin_delete_account(path_prefix: str, account_id: str, key: str = Non
         logger.error(f"[CONFIG] 删除账户失败: {str(e)}")
         raise HTTPException(500, f"删除失败: {str(e)}")
 
-@app.put("/{path_prefix}/admin/accounts/{account_id}/disable")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_disable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+@app.put("/admin/accounts/{account_id}/disable")
+@require_login()
+async def admin_disable_account(request: Request, account_id: str):
     """手动禁用账户"""
     global multi_account_mgr
     try:
@@ -703,9 +720,9 @@ async def admin_disable_account(path_prefix: str, account_id: str, key: str = No
         logger.error(f"[CONFIG] 禁用账户失败: {str(e)}")
         raise HTTPException(500, f"禁用失败: {str(e)}")
 
-@app.put("/{path_prefix}/admin/accounts/{account_id}/enable")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_enable_account(path_prefix: str, account_id: str, key: str = None, authorization: str = Header(None)):
+@app.put("/admin/accounts/{account_id}/enable")
+@require_login()
+async def admin_enable_account(request: Request, account_id: str):
     """启用账户"""
     global multi_account_mgr
     try:
@@ -719,135 +736,186 @@ async def admin_enable_account(path_prefix: str, account_id: str, key: str = Non
         logger.error(f"[CONFIG] 启用账户失败: {str(e)}")
         raise HTTPException(500, f"启用失败: {str(e)}")
 
-@app.get("/{path_prefix}/admin/log")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
+@app.get("/admin/log")
+@require_login()
 async def admin_get_logs(
-    path_prefix: str,
+    request: Request,
     limit: int = 1500,
-    key: str = None,
-    authorization: str = Header(None),
     level: str = None,
     search: str = None,
     start_time: str = None,
     end_time: str = None
 ):
-    """
-    获取系统日志（包含统计信息）
-
-    参数:
-    - limit: 返回最近 N 条日志 (默认 1500, 最大 3000)
-    - level: 过滤日志级别 (INFO, WARNING, ERROR, DEBUG)
-    - search: 搜索关键词（在消息中搜索）
-    - start_time: 开始时间 (格式: 2025-12-17 10:00:00)
-    - end_time: 结束时间 (格式: 2025-12-17 11:00:00)
-    """
     with log_lock:
         logs = list(log_buffer)
 
-    # 计算统计信息（在过滤前）
     stats_by_level = {}
     error_logs = []
     chat_count = 0
     for log in logs:
         level_name = log.get("level", "INFO")
         stats_by_level[level_name] = stats_by_level.get(level_name, 0) + 1
-
-        # 收集错误日志
         if level_name in ["ERROR", "CRITICAL"]:
             error_logs.append(log)
-
-        # 统计对话次数（匹配包含"收到请求"的日志）
         if "收到请求" in log.get("message", ""):
             chat_count += 1
 
-    # 按级别过滤
     if level:
         level = level.upper()
         logs = [log for log in logs if log["level"] == level]
-
-    # 按关键词搜索
     if search:
         logs = [log for log in logs if search.lower() in log["message"].lower()]
-
-    # 按时间范围过滤
     if start_time:
         logs = [log for log in logs if log["time"] >= start_time]
     if end_time:
         logs = [log for log in logs if log["time"] <= end_time]
 
-    # 限制数量（返回最近的）
     limit = min(limit, 3000)
     filtered_logs = logs[-limit:]
 
     return {
         "total": len(filtered_logs),
         "limit": limit,
-        "filters": {
-            "level": level,
-            "search": search,
-            "start_time": start_time,
-            "end_time": end_time
-        },
+        "filters": {"level": level, "search": search, "start_time": start_time, "end_time": end_time},
         "logs": filtered_logs,
         "stats": {
-            "memory": {
-                "total": len(log_buffer),
-                "by_level": stats_by_level,
-                "capacity": log_buffer.maxlen
-            },
-            "errors": {
-                "count": len(error_logs),
-                "recent": error_logs[-10:]  # 最近10条错误
-            },
+            "memory": {"total": len(log_buffer), "by_level": stats_by_level, "capacity": log_buffer.maxlen},
+            "errors": {"count": len(error_logs), "recent": error_logs[-10:]},
             "chat_count": chat_count
         }
     }
 
-@app.delete("/{path_prefix}/admin/log")
-@require_path_and_admin(PATH_PREFIX, ADMIN_KEY)
-async def admin_clear_logs(path_prefix: str, confirm: str = None, key: str = None, authorization: str = Header(None)):
-    """
-    清空所有日志（内存缓冲 + 文件）
-
-    参数:
-    - confirm: 必须传入 "yes" 才能清空
-    """
+@app.delete("/admin/log")
+@require_login()
+async def admin_clear_logs(request: Request, confirm: str = None):
     if confirm != "yes":
-        raise HTTPException(
-            status_code=400,
-            detail="需要 confirm=yes 参数确认清空操作"
-        )
-
-    # 清空内存缓冲
+        raise HTTPException(400, "需要 confirm=yes 参数确认清空操作")
     with log_lock:
         cleared_count = len(log_buffer)
         log_buffer.clear()
-
     logger.info("[LOG] 日志已清空")
+    return {"status": "success", "message": "已清空内存日志", "cleared_count": cleared_count}
 
-    return {
-        "status": "success",
-        "message": "已清空内存日志",
-        "cleared_count": cleared_count
-    }
-
-@app.get("/{path_prefix}/admin/log/html")
-async def admin_logs_html_route(path_prefix: str, key: str = None, authorization: str = Header(None)):
+@app.get("/admin/log/html")
+@require_login()
+async def admin_logs_html_route(request: Request):
     """返回美化的 HTML 日志查看界面"""
-    return await templates.admin_logs_html(path_prefix, key, authorization)
+    return await templates.admin_logs_html_no_auth(request)
 
-@app.post("/{path_prefix}/v1/chat/completions")
-@require_path_prefix(PATH_PREFIX)
+# 带PATH_PREFIX的管理API端点（如果配置了PATH_PREFIX）
+if PATH_PREFIX:
+    @app.get(f"/{PATH_PREFIX}/health")
+    @require_login()
+    async def admin_health_prefixed(request: Request):
+        return await admin_health(request=request)
+
+    @app.get(f"/{PATH_PREFIX}/accounts")
+    @require_login()
+    async def admin_get_accounts_prefixed(request: Request):
+        return await admin_get_accounts(request=request)
+
+    @app.get(f"/{PATH_PREFIX}/accounts-config")
+    @require_login()
+    async def admin_get_config_prefixed(request: Request):
+        return await admin_get_config(request=request)
+
+    @app.put(f"/{PATH_PREFIX}/accounts-config")
+    @require_login()
+    async def admin_update_config_prefixed(request: Request, accounts_data: list = Body(...)):
+        return await admin_update_config(request=request, accounts_data=accounts_data)
+
+    @app.delete(f"/{PATH_PREFIX}/accounts/{{account_id}}")
+    @require_login()
+    async def admin_delete_account_prefixed(request: Request, account_id: str):
+        return await admin_delete_account(request=request, account_id=account_id)
+
+    @app.put(f"/{PATH_PREFIX}/accounts/{{account_id}}/disable")
+    @require_login()
+    async def admin_disable_account_prefixed(request: Request, account_id: str):
+        return await admin_disable_account(request=request, account_id=account_id)
+
+    @app.put(f"/{PATH_PREFIX}/accounts/{{account_id}}/enable")
+    @require_login()
+    async def admin_enable_account_prefixed(request: Request, account_id: str):
+        return await admin_enable_account(request=request, account_id=account_id)
+
+    @app.get(f"/{PATH_PREFIX}/log")
+    @require_login()
+    async def admin_get_logs_prefixed(
+        request: Request,
+        limit: int = 1500,
+        level: str = None,
+        search: str = None,
+        start_time: str = None,
+        end_time: str = None
+    ):
+        return await admin_get_logs(request=request, limit=limit, level=level, search=search, start_time=start_time, end_time=end_time)
+
+    @app.delete(f"/{PATH_PREFIX}/log")
+    @require_login()
+    async def admin_clear_logs_prefixed(request: Request, confirm: str = None):
+        return await admin_clear_logs(request=request, confirm=confirm)
+
+    @app.get(f"/{PATH_PREFIX}/log/html")
+    @require_login()
+    async def admin_logs_html_route_prefixed(request: Request):
+        return await admin_logs_html_route(request=request)
+
+# ---------- API端点（API Key认证） ----------
+
+@app.get("/v1/models")
+async def list_models(authorization: str = Header(None)):
+    verify_api_key(API_KEY, authorization)
+    data = []
+    now = int(time.time())
+    for m in MODEL_MAPPING.keys():
+        data.append({"id": m, "object": "model", "created": now, "owned_by": "google", "permission": []})
+    return {"object": "list", "data": data}
+
+@app.get("/v1/models/{model_id}")
+async def get_model(model_id: str, authorization: str = Header(None)):
+    verify_api_key(API_KEY, authorization)
+    return {"id": model_id, "object": "model"}
+
+# 带PATH_PREFIX的API端点（如果配置了PATH_PREFIX）
+if PATH_PREFIX:
+    @app.get(f"/{PATH_PREFIX}/v1/models")
+    async def list_models_prefixed(authorization: str = Header(None)):
+        return await list_models(authorization)
+
+    @app.get(f"/{PATH_PREFIX}/v1/models/{{model_id}}")
+    async def get_model_prefixed(model_id: str, authorization: str = Header(None)):
+        return await get_model(model_id, authorization)
+
+# ---------- 聊天API端点 ----------
+
+@app.post("/v1/chat/completions")
 async def chat(
-    path_prefix: str,
     req: ChatRequest,
     request: Request,
     authorization: Optional[str] = Header(None)
 ):
-    # 1. API Key 验证
-    verify_api_key(authorization)
+    # API Key 验证
+    verify_api_key(API_KEY, authorization)
+    # ... (保留原有的chat逻辑)
+    return await chat_impl(req, request, authorization)
 
-    # 1. 生成请求ID（最优先，用于所有日志追踪）
+if PATH_PREFIX:
+    @app.post(f"/{PATH_PREFIX}/v1/chat/completions")
+    async def chat_prefixed(
+        req: ChatRequest,
+        request: Request,
+        authorization: Optional[str] = Header(None)
+    ):
+        return await chat(req, request, authorization)
+
+# chat实现函数
+async def chat_impl(
+    req: ChatRequest,
+    request: Request,
+    authorization: Optional[str]
+):
+    # 生成请求ID（最优先，用于所有日志追踪）
     request_id = str(uuid.uuid4())[:6]
 
     # 获取客户端IP（用于会话隔离）

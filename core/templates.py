@@ -1000,7 +1000,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
 
             // 统一的页面刷新函数（避免缓存）
             function refreshPage() {{
-                window.location.href = window.location.pathname + '?t=' + Date.now();
+                window.location.reload();
             }}
 
             // 统一的错误处理函数

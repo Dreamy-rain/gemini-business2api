@@ -95,12 +95,12 @@ logger.addHandler(memory_handler)
 
 load_dotenv()
 # ---------- 配置 ----------
-PROXY        = os.getenv("PROXY") or None
+PROXY        = os.getenv("PROXY", "")
 TIMEOUT_SECONDS = 600
-API_KEY      = os.getenv("API_KEY") or None  # API 访问密钥（可选）
+API_KEY      = os.getenv("API_KEY", "")  # API 访问密钥（可选）
 PATH_PREFIX  = os.getenv("PATH_PREFIX")      # 路径前缀（必需，用于隐藏端点）
 ADMIN_KEY    = os.getenv("ADMIN_KEY")        # 管理员密钥（必需，用于访问管理端点）
-BASE_URL     = os.getenv("BASE_URL")         # 服务器完整URL（可选，用于图片URL生成）
+BASE_URL     = os.getenv("BASE_URL", "")         # 服务器完整URL（可选，用于图片URL生成）
 
 # ---------- 公开展示配置 ----------
 LOGO_URL     = os.getenv("LOGO_URL", "")  # Logo URL（公开，为空则不显示）
@@ -133,7 +133,7 @@ MODEL_MAPPING = {
 
 # ---------- HTTP 客户端 ----------
 http_client = httpx.AsyncClient(
-    proxy=PROXY,
+    proxy=PROXY or None,
     verify=False,
     http2=False,
     timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
@@ -177,6 +177,54 @@ def get_common_headers(jwt: str) -> dict:
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "cross-site",
     }
+
+async def make_request_with_jwt_retry(
+    account_mgr,
+    method: str,
+    url: str,
+    request_id: str = "",
+    **kwargs
+) -> httpx.Response:
+    """通用HTTP请求，自动处理JWT过期重试
+
+    Args:
+        account_mgr: AccountManager实例
+        method: HTTP方法 (GET/POST)
+        url: 请求URL
+        request_id: 请求ID（用于日志）
+        **kwargs: 传递给httpx的其他参数（如json, headers等）
+
+    Returns:
+        httpx.Response对象
+    """
+    jwt = await account_mgr.get_jwt(request_id)
+    headers = get_common_headers(jwt)
+
+    # 合并用户提供的headers（如果有）
+    if "headers" in kwargs:
+        headers.update(kwargs.pop("headers"))
+
+    # 发起请求
+    if method.upper() == "GET":
+        resp = await http_client.get(url, headers=headers, **kwargs)
+    elif method.upper() == "POST":
+        resp = await http_client.post(url, headers=headers, **kwargs)
+    else:
+        raise ValueError(f"Unsupported HTTP method: {method}")
+
+    # 如果401，刷新JWT后重试一次
+    if resp.status_code == 401:
+        jwt = await account_mgr.get_jwt(request_id)
+        headers = get_common_headers(jwt)
+        if "headers" in kwargs:
+            headers.update(kwargs["headers"])
+
+        if method.upper() == "GET":
+            resp = await http_client.get(url, headers=headers, **kwargs)
+        elif method.upper() == "POST":
+            resp = await http_client.post(url, headers=headers, **kwargs)
+
+    return resp
 
 def urlsafe_b64encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
@@ -737,17 +785,21 @@ async def upload_context_file(session_name: str, mime_type: str, base64_content:
     return file_id
 
 # ---------- 消息处理逻辑 ----------
-def get_conversation_key(messages: List[dict]) -> str:
+def get_conversation_key(messages: List[dict], client_identifier: str = "") -> str:
     """
-    生成对话指纹（使用前3条消息，平衡唯一性和Session复用）
+    生成对话指纹（使用前3条消息+客户端标识，确保唯一性）
 
     策略：
     1. 使用前3条消息生成指纹（而非仅第1条）
-    2. 大幅降低不同用户共享Session的概率
-    3. 保持Session复用能力（后续消息仍能找到同一Session）
+    2. 加入客户端标识（IP或request_id）避免不同用户冲突
+    3. 保持Session复用能力（同一用户的后续消息仍能找到同一Session）
+
+    Args:
+        messages: 消息列表
+        client_identifier: 客户端标识（如IP地址或request_id），用于区分不同用户
     """
     if not messages:
-        return "empty"
+        return f"{client_identifier}:empty" if client_identifier else "empty"
 
     # 提取前3条消息的关键信息（角色+内容）
     message_fingerprints = []
@@ -768,8 +820,11 @@ def get_conversation_key(messages: List[dict]) -> str:
         # 组合角色和内容
         message_fingerprints.append(f"{role}:{text}")
 
-    # 使用前3条消息生成指纹
+    # 使用前3条消息+客户端标识生成指纹
     conversation_prefix = "|".join(message_fingerprints)
+    if client_identifier:
+        conversation_prefix = f"{client_identifier}|{conversation_prefix}"
+
     return hashlib.md5(conversation_prefix.encode()).hexdigest()
 
 def extract_text_from_content(content) -> str:
@@ -1159,7 +1214,7 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
 def verify_api_key(authorization: str = None):
     """验证 API Key（如果配置了 API_KEY）"""
     # 如果未配置 API_KEY，则跳过验证
-    if API_KEY is None:
+    if not API_KEY:
         return True
 
     # 检查 Authorization header
@@ -1455,6 +1510,13 @@ async def chat(
     # 1. 生成请求ID（最优先，用于所有日志追踪）
     request_id = str(uuid.uuid4())[:6]
 
+    # 获取客户端IP（用于会话隔离）
+    client_ip = request.headers.get("x-forwarded-for")
+    if client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    else:
+        client_ip = request.client.host if request.client else "unknown"
+
     # 记录请求统计
     async with stats_lock:
         global_stats["total_requests"] += 1
@@ -1473,7 +1535,7 @@ async def chat(
     request.state.model = req.model
 
     # 3. 生成会话指纹，获取Session锁（防止同一对话的并发请求冲突）
-    conv_key = get_conversation_key([m.dict() for m in req.messages])
+    conv_key = get_conversation_key([m.dict() for m in req.messages], client_ip)
     session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
 
     # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）
@@ -1806,8 +1868,6 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
 
 async def get_session_file_metadata(account_mgr: AccountManager, session_name: str, request_id: str = "") -> dict:
     """获取session中的文件元数据，包括正确的session路径"""
-    jwt = await account_mgr.get_jwt(request_id)
-    headers = get_common_headers(jwt)
     body = {
         "configId": account_mgr.config.config_id,
         "additionalParams": {"token": "-"},
@@ -1817,21 +1877,13 @@ async def get_session_file_metadata(account_mgr: AccountManager, session_name: s
         }
     }
 
-    resp = await http_client.post(
+    resp = await make_request_with_jwt_retry(
+        account_mgr,
+        "POST",
         "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetListSessionFileMetadata",
-        headers=headers,
+        request_id,
         json=body
     )
-
-    if resp.status_code == 401:
-        # JWT过期，刷新后重试
-        jwt = await account_mgr.get_jwt(request_id)
-        headers = get_common_headers(jwt)
-        resp = await http_client.post(
-            "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetListSessionFileMetadata",
-            headers=headers,
-            json=body
-        )
 
     if resp.status_code != 200:
         logger.warning(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 获取文件元数据失败: {resp.status_code}")
@@ -1878,17 +1930,14 @@ async def download_image_with_jwt(account_mgr: AccountManager, session_name: str
         try:
             # 3分钟超时（180秒）
             async with asyncio.timeout(180):
-                jwt = await account_mgr.get_jwt(request_id)
-                headers = get_common_headers(jwt)
-
-                # 复用全局http_client
-                resp = await http_client.get(url, headers=headers, follow_redirects=True)
-
-                if resp.status_code == 401:
-                    # JWT过期，刷新后重试
-                    jwt = await account_mgr.get_jwt(request_id)
-                    headers = get_common_headers(jwt)
-                    resp = await http_client.get(url, headers=headers, follow_redirects=True)
+                # 使用通用JWT刷新函数
+                resp = await make_request_with_jwt_retry(
+                    account_mgr,
+                    "GET",
+                    url,
+                    request_id,
+                    follow_redirects=True
+                )
 
                 resp.raise_for_status()
                 logger.info(f"[IMAGE] [{account_mgr.config.account_id}] [req_{request_id}] 图片下载成功: {file_id[:8]}... ({len(resp.content)} bytes)")
@@ -2142,8 +2191,10 @@ async def get_public_logs(request: Request, limit: int = 100):
             # 记录新访问（24小时内同一IP只计数一次）
             if client_ip not in global_stats["visitor_ips"]:
                 global_stats["visitor_ips"][client_ip] = current_time
-                global_stats["total_visitors"] = len(global_stats["visitor_ips"])
-                await save_stats(global_stats)
+
+            # 同步访问者计数（清理后的实际数量）
+            global_stats["total_visitors"] = len(global_stats["visitor_ips"])
+            await save_stats(global_stats)
 
         sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
         return {

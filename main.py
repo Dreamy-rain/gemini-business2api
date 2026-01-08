@@ -43,11 +43,8 @@ from core.account import (
     MultiAccountManager,
     format_account_expiration,
     load_multi_account_config,
-    reload_accounts,
-    update_accounts_config,
-    delete_account,
-    update_account_disabled_status,
     load_accounts_from_source,
+    save_accounts_to_file,
     get_account_id
 )
 
@@ -206,26 +203,6 @@ multi_account_mgr = load_multi_account_config(
     SESSION_CACHE_TTL_SECONDS,
     global_stats
 )
-
-def format_account_expiration(remaining_hours: Optional[float]) -> tuple:
-    """
-    格式化账户过期时间显示（基于12小时过期周期）
-
-    Args:
-        remaining_hours: 剩余小时数（None表示未设置过期时间）
-
-    Returns:
-        (status, status_color, expire_display) 元组
-    """
-    if remaining_hours is None:
-        # 未设置过期时间时显示为"未设置"
-        return ("未设置", "#9e9e9e", "未设置")
-    elif remaining_hours <= 0:
-        return ("已过期", "#f44336", "已过期")
-    elif remaining_hours < 3:  # 少于3小时
-        return ("即将过期", "#ff9800", f"{remaining_hours:.1f} 小时")
-    else:  # 3小时及以上，统一显示小时
-        return ("正常", "#4caf50", f"{remaining_hours:.1f} 小时")
 
 # ---------- 配置文件管理 ----------
 # (MultiAccountManager和配置管理函数已移至 core/account.py)

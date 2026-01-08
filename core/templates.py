@@ -68,6 +68,9 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
     admin_path_segment = f"{main.PATH_PREFIX}" if main.PATH_PREFIX else "admin"
     api_path_segment = f"{main.PATH_PREFIX}/" if main.PATH_PREFIX else ""
 
+    # 构建不同客户端需要的接口
+    api_base_url = f"{current_url}/{api_path_segment.rstrip('/')}" if api_path_segment else current_url
+    api_base_v1 = f"{current_url}/{api_path_segment}v1"
     api_endpoint = f"{current_url}/{api_path_segment}v1/chat/completions"
     api_key_display = main.API_KEY if main.API_KEY else '<span style="color: #ff9500;">未设置（公开访问）</span>'
 
@@ -78,7 +81,15 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             <strong>API 接口信息</strong>
             <div style="margin-top: 10px;">
                 <div style="margin-bottom: 12px;">
-                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">聊天接口</div>
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">基础端点（部分客户端）</div>
+                    <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{api_base_url}</code>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">API Base（OpenAI SDK 等）</div>
+                    <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{api_base_v1}</code>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">完整聊天接口（直接调用）</div>
                     <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{api_endpoint}</code>
                 </div>
                 <div style="margin-bottom: 12px;">

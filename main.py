@@ -303,186 +303,8 @@ logger.info("[SYSTEM] 系统初始化完成")
 # ---------- Session & File 管理 ----------
 # (Google API函数已移至 core/google_api.py)
 
-async def create_google_session(account_manager: AccountManager, request_id: str = "") -> str:
-    jwt = await account_manager.get_jwt(request_id)
-    headers = get_common_headers(jwt)
-    body = {
-        "configId": account_manager.config.config_id,
-        "additionalParams": {"token": "-"},
-        "createSessionRequest": {
-            "session": {"name": "", "displayName": ""}
-        }
-    }
-
-    req_tag = f"[req_{request_id}] " if request_id else ""
-    r = await http_client.post(
-        "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetCreateSession",
-        headers=headers,
-        json=body,
-    )
-    if r.status_code != 200:
-        logger.error(f"[SESSION] [{account_manager.config.account_id}] {req_tag}Session 创建失败: {r.status_code}")
-        raise HTTPException(r.status_code, "createSession failed")
-    sess_name = r.json()["session"]["name"]
-    logger.info(f"[SESSION] [{account_manager.config.account_id}] {req_tag}创建成功: {sess_name[-12:]}")
-    return sess_name
-
-async def upload_context_file(session_name: str, mime_type: str, base64_content: str, account_manager: AccountManager, request_id: str = "") -> str:
-    """上传文件到指定 Session，返回 fileId"""
-    jwt = await account_manager.get_jwt(request_id)
-    headers = get_common_headers(jwt)
-
-    # 生成随机文件名
-    ext = mime_type.split('/')[-1] if '/' in mime_type else "bin"
-    file_name = f"upload_{int(time.time())}_{uuid.uuid4().hex[:6]}.{ext}"
-
-    body = {
-        "configId": account_manager.config.config_id,
-        "additionalParams": {"token": "-"},
-        "addContextFileRequest": {
-            "name": session_name,
-            "fileName": file_name,
-            "mimeType": mime_type,
-            "fileContents": base64_content
-        }
-    }
-
-    r = await http_client.post(
-        "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetAddContextFile",
-        headers=headers,
-        json=body,
-    )
-
-    req_tag = f"[req_{request_id}] " if request_id else ""
-    if r.status_code != 200:
-        logger.error(f"[FILE] [{account_manager.config.account_id}] {req_tag}文件上传失败: {r.status_code}")
-        raise HTTPException(r.status_code, f"Upload failed: {r.text}")
-
-    data = r.json()
-    file_id = data.get("addContextFileResponse", {}).get("fileId")
-    logger.info(f"[FILE] [{account_manager.config.account_id}] {req_tag}文件上传成功: {mime_type}")
-    return file_id
-
 # ---------- 消息处理逻辑 ----------
-def get_conversation_key(messages: List[dict], client_identifier: str = "") -> str:
-    """
-    生成对话指纹（使用前3条消息+客户端标识，确保唯一性）
-
-    策略：
-    1. 使用前3条消息生成指纹（而非仅第1条）
-    2. 加入客户端标识（IP或request_id）避免不同用户冲突
-    3. 保持Session复用能力（同一用户的后续消息仍能找到同一Session）
-
-    Args:
-        messages: 消息列表
-        client_identifier: 客户端标识（如IP地址或request_id），用于区分不同用户
-    """
-    if not messages:
-        return f"{client_identifier}:empty" if client_identifier else "empty"
-
-    # 提取前3条消息的关键信息（角色+内容）
-    message_fingerprints = []
-    for msg in messages[:3]:  # 只取前3条
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-
-        # 统一处理内容格式（字符串或数组）
-        if isinstance(content, list):
-            # 多模态消息：只提取文本部分
-            text = extract_text_from_content(content)
-        else:
-            text = str(content)
-
-        # 标准化：去除首尾空白，转小写
-        text = text.strip().lower()
-
-        # 组合角色和内容
-        message_fingerprints.append(f"{role}:{text}")
-
-    # 使用前3条消息+客户端标识生成指纹
-    conversation_prefix = "|".join(message_fingerprints)
-    if client_identifier:
-        conversation_prefix = f"{client_identifier}|{conversation_prefix}"
-
-    return hashlib.md5(conversation_prefix.encode()).hexdigest()
-
-def extract_text_from_content(content) -> str:
-    """
-    从消息 content 中提取文本内容
-    统一处理字符串和多模态数组格式
-    """
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        # 多模态消息：只提取文本部分
-        return "".join([x.get("text", "") for x in content if x.get("type") == "text"])
-    else:
-        return str(content)
-
-async def parse_last_message(messages: List['Message'], request_id: str = ""):
-    """解析最后一条消息，分离文本和文件（支持图片、PDF、文档等，base64 和 URL）"""
-    if not messages:
-        return "", []
-
-    last_msg = messages[-1]
-    content = last_msg.content
-
-    text_content = ""
-    images = [] # List of {"mime": str, "data": str_base64} - 兼容变量名，实际支持所有文件
-    image_urls = []  # 需要下载的 URL - 兼容变量名，实际支持所有文件
-
-    if isinstance(content, str):
-        text_content = content
-    elif isinstance(content, list):
-        for part in content:
-            if part.get("type") == "text":
-                text_content += part.get("text", "")
-            elif part.get("type") == "image_url":
-                url = part.get("image_url", {}).get("url", "")
-                # 解析 Data URI: data:mime/type;base64,xxxxxx (支持所有 MIME 类型)
-                match = re.match(r"data:([^;]+);base64,(.+)", url)
-                if match:
-                    images.append({"mime": match.group(1), "data": match.group(2)})
-                elif url.startswith(("http://", "https://")):
-                    image_urls.append(url)
-                else:
-                    logger.warning(f"[FILE] [req_{request_id}] 不支持的文件格式: {url[:30]}...")
-
-    # 并行下载所有 URL 文件（支持图片、PDF、文档等）
-    if image_urls:
-        async def download_url(url: str):
-            try:
-                resp = await http_client.get(url, timeout=30, follow_redirects=True)
-                resp.raise_for_status()
-                content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0]
-                # 移除图片类型限制，支持所有文件类型
-                b64 = base64.b64encode(resp.content).decode()
-                logger.info(f"[FILE] [req_{request_id}] URL文件下载成功: {url[:50]}... ({len(resp.content)} bytes, {content_type})")
-                return {"mime": content_type, "data": b64}
-            except Exception as e:
-                logger.warning(f"[FILE] [req_{request_id}] URL文件下载失败: {url[:50]}... - {e}")
-                return None
-
-        results = await asyncio.gather(*[download_url(u) for u in image_urls])
-        images.extend([r for r in results if r])
-
-    return text_content, images
-
-def build_full_context_text(messages: List['Message']) -> str:
-    """仅拼接历史文本，图片只处理当次请求的"""
-    prompt = ""
-    for msg in messages:
-        role = "User" if msg.role in ["user", "system"] else "Assistant"
-        content_str = extract_text_from_content(msg.content)
-
-        # 为多模态消息添加图片标记
-        if isinstance(msg.content, list):
-            image_count = sum(1 for part in msg.content if part.get("type") == "image_url")
-            if image_count > 0:
-                content_str += "[图片]" * image_count
-
-        prompt += f"{role}: {content_str}\n\n"
-    return prompt
+# (消息处理函数已移至 core/message.py)
 
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
@@ -1136,7 +958,7 @@ async def chat(
             for attempt in range(max_account_tries):
                 try:
                     account_manager = await multi_account_mgr.get_account(None, request_id)
-                    google_session = await create_google_session(account_manager, request_id)
+                    google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                     # 线程安全地绑定账户到此对话
                     await multi_account_mgr.set_session_cache(
                         conv_key,
@@ -1182,7 +1004,7 @@ async def chat(
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 用户消息: {preview}")
 
     # 3. 解析请求内容
-    last_text, current_images = await parse_last_message(req.messages, request_id)
+    last_text, current_images = await parse_last_message(req.messages, http_client, request_id)
 
     # 4. 准备文本内容
     if is_new_conversation:
@@ -1222,7 +1044,7 @@ async def chat(
                 cached = multi_account_mgr.global_session_cache.get(conv_key)
                 if not cached:
                     logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 缓存已清理，重建Session")
-                    new_sess = await create_google_session(account_manager, request_id)
+                    new_sess = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                     await multi_account_mgr.set_session_cache(
                         conv_key,
                         account_manager.config.account_id,
@@ -1238,7 +1060,7 @@ async def chat(
                 # 注意：每次重试如果是新 Session，都需要重新上传图片
                 if current_images and not current_file_ids:
                     for img in current_images:
-                        fid = await upload_context_file(current_session, img["mime"], img["data"], account_manager, request_id)
+                        fid = await upload_context_file(current_session, img["mime"], img["data"], account_manager, http_client, USER_AGENT, request_id)
                         current_file_ids.append(fid)
 
                 # B. 准备文本 (重试模式下发全文)
@@ -1338,7 +1160,7 @@ async def chat(
                         logger.info(f"[CHAT] [req_{request_id}] 切换账户: {account_manager.config.account_id} -> {new_account.config.account_id}")
 
                         # 创建新 Session
-                        new_sess = await create_google_session(new_account, request_id)
+                        new_sess = await create_google_session(new_account, http_client, USER_AGENT, request_id)
 
                         # 更新缓存绑定到新账户
                         await multi_account_mgr.set_session_cache(

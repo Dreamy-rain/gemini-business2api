@@ -624,7 +624,7 @@ Deno.serve(handler);
 ### 7. API_KEY 和 ADMIN_KEY 的区别?
 
 - **API_KEY**: 保护聊天接口 (`/v1/chat/completions`)
-- **ADMIN_KEY**: 保护管理面板 (`/admin`)
+- **ADMIN_KEY**: 保护管理面板 (`/` 或 `/{PATH_PREFIX}`)
 
 可以设置相同的值，也可以分开
 

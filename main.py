@@ -943,7 +943,7 @@ async def chat_impl(
     request.state.model = req.model
 
     # 3. 生成会话指纹，获取Session锁（防止同一对话的并发请求冲突）
-    conv_key = get_conversation_key([m.dict() for m in req.messages], client_ip)
+    conv_key = get_conversation_key([m.model_dump() for m in req.messages], client_ip)
     session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
 
     # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）

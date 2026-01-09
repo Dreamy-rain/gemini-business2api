@@ -6,3 +6,4 @@ aiofiles==24.1.0
 python-dotenv==1.0.1
 itsdangerous==2.1.2
 python-multipart==0.0.6
+pyyaml>=6.0

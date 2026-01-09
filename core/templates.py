@@ -2094,12 +2094,51 @@ async def get_login_html(request: Request, error: str = None) -> HTMLResponse:
                 line-height: 1.5;
             }}
 
+            .iframe-hint {{
+                margin-top: 16px;
+                padding: 12px 14px;
+                background: #fff4e6;
+                border: 1px solid #ffd666;
+                border-radius: 8px;
+                font-size: 13px;
+                color: #d46b08;
+                line-height: 1.5;
+                display: none;
+            }}
+
+            .iframe-hint a {{
+                color: #0071e3;
+                text-decoration: none;
+                font-weight: 600;
+            }}
+
+            .iframe-hint a:hover {{
+                text-decoration: underline;
+            }}
+
             @media (max-width: 480px) {{
                 .container {{
                     padding: 32px 24px;
                 }}
             }}
         </style>
+        <script>
+            // 检测是否在 iframe 内
+            if (window.self !== window.top) {{
+                document.addEventListener('DOMContentLoaded', function() {{
+                    const hint = document.getElementById('iframe-hint');
+                    if (hint) {{
+                        hint.style.display = 'block';
+                        // 获取当前完整 URL（去掉 iframe 参数）
+                        const currentUrl = window.location.href.replace(/[?&]__theme=.*?(&|$)/, '');
+                        const link = document.getElementById('direct-link');
+                        if (link) {{
+                            link.href = currentUrl;
+                        }}
+                    }}
+                }});
+            }}
+        </script>
     </head>
     <body>
         <div class="container">
@@ -2125,6 +2164,10 @@ async def get_login_html(request: Request, error: str = None) -> HTMLResponse:
 
             <div class="hint">
                 会话保持 24 小时
+            </div>
+
+            <div id="iframe-hint" class="iframe-hint">
+                ⚠️ HuggingFace 内部无法登录，<a id="direct-link" href="#" target="_blank">点我跳转</a>
             </div>
         </div>
     </body>

@@ -274,7 +274,7 @@ ACCOUNTS_CONFIG='[
 - ADMIN_KEY: `my_admin_key`
 
 则访问地址为：
-- **管理面板**: `https://your-space.hf.space/my_prefix/admin?key=my_admin_key`
+- **管理面板**: `https://your-space.hf.space/my_prefix?key=my_admin_key`
 - **公开日志**: `https://your-space.hf.space/public/log/html`
 - **API 端点**: `https://your-space.hf.space/my_prefix/v1/chat/completions`
 
@@ -631,7 +631,7 @@ Deno.serve(handler);
 ### 8. 如何查看日志?
 
 - **公开日志**: 访问 `/public/log/html` (无需密钥)
-- **管理面板**: 访问 `/admin?key=YOUR_ADMIN_KEY`
+- **管理面板**: 访问 `/?key=YOUR_ADMIN_KEY` 或 `/{PATH_PREFIX}?key=YOUR_ADMIN_KEY`
 
 日志系统说明：
 - 内存存储最多 3000 条日志

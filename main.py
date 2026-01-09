@@ -552,36 +552,36 @@ async def home(request: Request):
     else:
         # 未设置PATH_PREFIX（公开模式），根据登录状态重定向
         if is_logged_in(request):
-            return RedirectResponse(url="/admin", status_code=302)
+            return await generate_admin_html(request, multi_account_mgr)
         else:
-            return RedirectResponse(url="/admin/login", status_code=302)
+            return RedirectResponse(url="/login", status_code=302)
 
 # ---------- 登录/登出端点（支持可选PATH_PREFIX） ----------
 
 # 不带PATH_PREFIX的登录端点
-@app.get("/admin/login")
+@app.get("/login")
 async def admin_login_get(request: Request, error: str = None):
     """登录页面"""
     return await templates.get_login_html(request, error)
 
-@app.post("/admin/login")
+@app.post("/login")
 async def admin_login_post(request: Request, admin_key: str = Form(...)):
     """处理登录表单提交"""
     if admin_key == ADMIN_KEY:
         login_user(request)
         logger.info(f"[AUTH] 管理员登录成功")
-        return RedirectResponse(url="/admin", status_code=302)
+        return RedirectResponse(url="/", status_code=302)
     else:
         logger.warning(f"[AUTH] 登录失败 - 密钥错误")
         return await templates.get_login_html(request, error="密钥错误，请重试")
 
-@app.post("/admin/logout")
+@app.post("/logout")
 @require_login(redirect_to_login=False)
 async def admin_logout(request: Request):
     """登出"""
     logout_user(request)
     logger.info(f"[AUTH] 管理员已登出")
-    return RedirectResponse(url="/admin/login", status_code=302)
+    return RedirectResponse(url="/login", status_code=302)
 
 # 带PATH_PREFIX的登录端点（如果配置了PATH_PREFIX）
 if PATH_PREFIX:

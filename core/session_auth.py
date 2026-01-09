@@ -53,7 +53,7 @@ def require_login(redirect_to_login: bool = True):
                     if prefix:
                         login_url = f"/{prefix}/login"
                     else:
-                        login_url = "/admin/login"
+                        login_url = "/login"
 
                     return RedirectResponse(url=login_url, status_code=302)
                 else:

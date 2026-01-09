@@ -311,37 +311,25 @@ def save_accounts_to_file(accounts_data: list):
 
 
 def load_accounts_from_source() -> list:
-    """优先从文件加载，否则从环境变量加载"""
-    # 优先从文件加载
+    """从文件加载账户配置，文件不存在则创建空配置"""
+    # 从文件加载
     if os.path.exists(ACCOUNTS_FILE):
         try:
             with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
                 accounts_data = json.load(f)
-            logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}")
+            if accounts_data:
+                logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}，共 {len(accounts_data)} 个账户")
+            else:
+                logger.warning(f"[CONFIG] 账户配置为空，请在管理面板添加账户或编辑 {ACCOUNTS_FILE}")
             return accounts_data
         except Exception as e:
-            logger.warning(f"[CONFIG] 文件加载失败，尝试环境变量: {str(e)}")
+            logger.warning(f"[CONFIG] 文件加载失败: {str(e)}，创建空配置")
 
-    # 从环境变量加载
-    accounts_json = os.getenv("ACCOUNTS_CONFIG")
-    if not accounts_json:
-        raise ValueError(
-            "未找到配置文件或 ACCOUNTS_CONFIG 环境变量。\n"
-            "请在环境变量中配置 JSON 格式的账户列表，格式示例：\n"
-            '[{"id":"account_1","csesidx":"xxx","config_id":"yyy","secure_c_ses":"zzz","host_c_oses":null,"expires_at":"2025-12-23 10:59:21"}]'
-        )
-
-    try:
-        accounts_data = json.loads(accounts_json)
-        if not isinstance(accounts_data, list):
-            raise ValueError("ACCOUNTS_CONFIG 必须是 JSON 数组格式")
-        # 首次从环境变量加载后，保存到文件
-        save_accounts_to_file(accounts_data)
-        logger.info(f"[CONFIG] 从环境变量加载配置并保存到文件")
-        return accounts_data
-    except json.JSONDecodeError as e:
-        logger.error(f"[CONFIG] ACCOUNTS_CONFIG JSON 解析失败: {str(e)}")
-        raise ValueError(f"ACCOUNTS_CONFIG 格式错误: {str(e)}")
+    # 文件不存在，创建空配置
+    logger.warning(f"[CONFIG] 未找到 {ACCOUNTS_FILE}，已创建空配置文件")
+    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或直接编辑 {ACCOUNTS_FILE}，或使用批量上传功能")
+    save_accounts_to_file([])
+    return []
 
 
 def get_account_id(acc: dict, index: int) -> str:

@@ -36,6 +36,7 @@ ENV/
 .env
 *.log
 data/stats.json
+data/settings.yaml
 accounts.json
 
 # Generated files

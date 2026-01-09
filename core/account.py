@@ -311,7 +311,20 @@ def save_accounts_to_file(accounts_data: list):
 
 
 def load_accounts_from_source() -> list:
-    """从文件加载账户配置，文件不存在则创建空配置"""
+    """从环境变量或文件加载账户配置，优先使用环境变量"""
+    # 优先从环境变量加载
+    env_accounts = os.environ.get('ACCOUNTS_CONFIG')
+    if env_accounts:
+        try:
+            accounts_data = json.loads(env_accounts)
+            if accounts_data:
+                logger.info(f"[CONFIG] 从环境变量加载配置，共 {len(accounts_data)} 个账户")
+            else:
+                logger.warning(f"[CONFIG] 环境变量 ACCOUNTS_CONFIG 为空")
+            return accounts_data
+        except Exception as e:
+            logger.error(f"[CONFIG] 环境变量加载失败: {str(e)}，尝试从文件加载")
+
     # 从文件加载
     if os.path.exists(ACCOUNTS_FILE):
         try:
@@ -327,7 +340,7 @@ def load_accounts_from_source() -> list:
 
     # 文件不存在，创建空配置
     logger.warning(f"[CONFIG] 未找到 {ACCOUNTS_FILE}，已创建空配置文件")
-    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或直接编辑 {ACCOUNTS_FILE}，或使用批量上传功能")
+    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或直接编辑 {ACCOUNTS_FILE}，或使用批量上传功能，或设置环境变量 ACCOUNTS_CONFIG")
     save_accounts_to_file([])
     return []
 
@@ -375,9 +388,9 @@ def load_multi_account_config(
         manager.add_account(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds, global_stats)
 
     if not manager.accounts:
-        raise ValueError("没有有效的账户配置（可能全部已过期）")
-
-    logger.info(f"[CONFIG] 成功加载 {len(manager.accounts)} 个账户")
+        logger.warning(f"[CONFIG] 没有有效的账户配置，服务将启动但无法处理请求，请在管理面板添加账户")
+    else:
+        logger.info(f"[CONFIG] 成功加载 {len(manager.accounts)} 个账户")
     return manager
 
 

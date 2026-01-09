@@ -1103,6 +1103,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                             </div>
                         </div>
                     </div>
+                        </div>
                 </div>
             </div>
 
@@ -2458,7 +2459,6 @@ async def get_login_html(request: Request, error: str = None) -> HTMLResponse:
 async def admin_logs_html_no_auth(request):
     """返回美化的 HTML 日志查看界面（无需认证）"""
     from fastapi.responses import HTMLResponse
-
     html_content = r"""
     <!DOCTYPE html>
     <html>
@@ -2468,54 +2468,608 @@ async def admin_logs_html_no_auth(request):
         <title>日志查看器</title>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { height: 100%; overflow: hidden; }
             body {
-                font-family: "Consolas", "Monaco", monospace;
+                font-family: 'Consolas', 'Monaco', monospace;
                 background: #fafaf9;
-                padding: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 15px;
             }
             .container {
+                width: 100%;
                 max-width: 1400px;
-                margin: 0 auto;
+                height: calc(100vh - 30px);
                 background: white;
                 border-radius: 16px;
                 padding: 30px;
                 box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                display: flex;
+                flex-direction: column;
             }
-            h1 { color: #1a1a1a; font-size: 22px; margin-bottom: 20px; }
-            .log-item { padding: 10px; border-bottom: 1px solid #e5e5e5; font-size: 12px; }
-            .log-time { color: #6b6b6b; margin-right: 10px; }
-            .log-level { padding: 2px 6px; border-radius: 4px; margin-right: 10px; }
+            h1 { color: #1a1a1a; font-size: 22px; font-weight: 600; margin-bottom: 20px; text-align: center; }
+            .stats {
+                display: grid;
+                grid-template-columns: repeat(6, 1fr);
+                gap: 12px;
+                margin-bottom: 16px;
+            }
+            .stat {
+                background: #fafaf9;
+                padding: 12px;
+                border: 1px solid #e5e5e5;
+                border-radius: 8px;
+                text-align: center;
+                transition: all 0.15s ease;
+            }
+            .stat:hover { border-color: #d4d4d4; }
+            .stat-label { color: #6b6b6b; font-size: 11px; margin-bottom: 4px; }
+            .stat-value { color: #1a1a1a; font-size: 18px; font-weight: 600; }
+            .controls {
+                display: flex;
+                gap: 8px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .controls input, .controls select, .controls button {
+                padding: 6px 10px;
+                border: 1px solid #e5e5e5;
+                border-radius: 8px;
+                font-size: 13px;
+            }
+            .controls select {
+                appearance: none;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                background-image: url("data:image/svg+xml,%3Csvg width='12' height='12' viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5L6 8L9 5' stroke='%236b6b6b' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: right 12px center;
+                padding-right: 32px;
+            }
+            .controls input[type="text"] { flex: 1; min-width: 150px; }
+            .controls button {
+                background: #1a73e8;
+                color: white;
+                border: none;
+                cursor: pointer;
+                font-weight: 500;
+                transition: background 0.15s ease;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .controls button:hover { background: #1557b0; }
+            .controls button.danger { background: #dc2626; }
+            .controls button.danger:hover { background: #b91c1c; }
+            .controls button svg { flex-shrink: 0; }
+            .log-container {
+                flex: 1;
+                background: #fafaf9;
+                border: 1px solid #e5e5e5;
+                border-radius: 8px;
+                padding: 12px;
+                overflow-y: auto;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(0,0,0,0.15) transparent;
+            }
+            /* Webkit 滚动条样式 - 更窄且不占位 */
+            .log-container::-webkit-scrollbar {
+                width: 4px;
+            }
+            .log-container::-webkit-scrollbar-track {
+                background: transparent;
+            }
+            .log-container::-webkit-scrollbar-thumb {
+                background: rgba(0,0,0,0.15);
+                border-radius: 2px;
+            }
+            .log-container::-webkit-scrollbar-thumb:hover {
+                background: rgba(0,0,0,0.3);
+            }
+            .log-entry {
+                padding: 8px 10px;
+                margin-bottom: 4px;
+                background: white;
+                border-radius: 6px;
+                border: 1px solid #e5e5e5;
+                font-size: 12px;
+                color: #1a1a1a;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                word-break: break-word;
+            }
+            .log-entry > div:first-child {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .log-message {
+                flex: 1;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .log-entry:hover { border-color: #d4d4d4; }
+            .log-time { color: #6b6b6b; }
+            .log-level {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            .log-level::before {
+                content: '';
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+            }
             .log-level.INFO { background: #e3f2fd; color: #1976d2; }
+            .log-level.INFO::before { background: #1976d2; }
             .log-level.WARNING { background: #fff3e0; color: #f57c00; }
-            .log-level.ERROR { background: #ffebee; color: #c62828; }
+            .log-level.WARNING::before { background: #f57c00; }
+            .log-level.ERROR { background: #ffebee; color: #d32f2f; }
+            .log-level.ERROR::before { background: #d32f2f; }
+            .log-level.DEBUG { background: #f3e5f5; color: #7b1fa2; }
+            .log-level.DEBUG::before { background: #7b1fa2; }
+            .log-group {
+                margin-bottom: 8px;
+                border: 1px solid #e5e5e5;
+                border-radius: 8px;
+                background: white;
+            }
+            .log-group-header {
+                padding: 10px 12px;
+                background: #f9f9f9;
+                border-radius: 8px 8px 0 0;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                transition: background 0.15s ease;
+            }
+            .log-group-header:hover {
+                background: #f0f0f0;
+            }
+            .log-group-content {
+                padding: 8px;
+            }
+            .log-group .log-entry {
+                margin-bottom: 4px;
+            }
+            .log-group .log-entry:last-child {
+                margin-bottom: 0;
+            }
+            .toggle-icon {
+                display: inline-block;
+                transition: transform 0.2s ease;
+            }
+            .toggle-icon.collapsed {
+                transform: rotate(-90deg);
+            }
+            @media (max-width: 768px) {
+                body { padding: 0; }
+                .container { padding: 15px; height: 100vh; border-radius: 0; max-width: 100%; }
+                h1 { font-size: 18px; margin-bottom: 12px; }
+                .stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+                .stat { padding: 8px; }
+                .controls { gap: 6px; }
+                .controls input, .controls select { min-height: 38px; }
+                .controls select { flex: 0 0 auto; }
+                .controls input[type="text"] { flex: 1 1 auto; min-width: 80px; }
+                .controls input[type="number"] { flex: 0 0 60px; }
+                .controls button { padding: 10px 8px; font-size: 12px; flex: 1 1 22%; justify-content: center; min-height: 38px; }
+                .log-entry {
+                    font-size: 12px;
+                    padding: 10px;
+                    gap: 8px;
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+                .log-entry > div:first-child {
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    width: 100%;
+                    flex-wrap: wrap;
+                }
+                .log-time { font-size: 11px; color: #9e9e9e; }
+                .log-level { font-size: 10px; }
+                .log-message {
+                    width: 100%;
+                    white-space: normal;
+                    word-break: break-word;
+                    line-height: 1.5;
+                    margin-top: 4px;
+                }
+            }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>📋 系统日志</h1>
-            <div id="logs">加载中...</div>
+            <h1>Gemini API 日志查看器</h1>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-label">总数</div>
+                    <div class="stat-value" id="total-count">-</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">对话</div>
+                    <div class="stat-value" id="chat-count">-</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">INFO</div>
+                    <div class="stat-value" id="info-count">-</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">WARNING</div>
+                    <div class="stat-value" id="warning-count">-</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">ERROR</div>
+                    <div class="stat-value" id="error-count">-</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-label">更新</div>
+                    <div class="stat-value" id="last-update" style="font-size: 11px;">-</div>
+                </div>
+            </div>
+            <div class="controls">
+                <select id="level-filter">
+                    <option value="">全部</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                </select>
+                <input type="text" id="search-input" placeholder="搜索...">
+                <input type="number" id="limit-input" value="1500" min="10" max="3000" step="100" style="width: 80px;">
+                <button onclick="loadLogs()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    查询
+                </button>
+                <button onclick="exportJSON()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    导出
+                </button>
+                <button id="auto-refresh-btn" onclick="toggleAutoRefresh()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    自动刷新
+                </button>
+                <button onclick="clearAllLogs()" class="danger">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    清空
+                </button>
+            </div>
+            <div class="log-container" id="log-container">
+                <div style="color: #6b6b6b;">正在加载...</div>
+            </div>
         </div>
         <script>
+            let autoRefreshTimer = null;
             async function loadLogs() {
+                const level = document.getElementById('level-filter').value;
+                const search = document.getElementById('search-input').value;
+                const limit = document.getElementById('limit-input').value;
+                // 从当前 URL 获取 key 参数
+                const urlParams = new URLSearchParams(window.location.search);
+                const key = urlParams.get('key');
+                // 构建 API URL（直接使用 /admin/log）
+                let url = `/admin/log?limit=${limit}`;
+                if (key) url += `&key=${key}`;
+                if (level) url += `&level=${level}`;
+                if (search) url += `&search=${encodeURIComponent(search)}`;
                 try {
-                    const path = window.location.pathname.replace("/log/html", "/log");
-                    const res = await fetch(path);
-                    const data = await res.json();
-                    let html = "";
-                    for (const log of data.logs.reverse()) {
-                        html += `<div class="log-item">
-                            <span class="log-time">${log.time}</span>
-                            <span class="log-level ${log.level}">${log.level}</span>
-                            <span>${log.message}</span>
-                        </div>`;
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
                     }
-                    document.getElementById("logs").innerHTML = html || "暂无日志";
-                } catch (e) {
-                    document.getElementById("logs").innerHTML = "加载失败";
+                    const data = await response.json();
+                    if (data && data.logs) {
+                        displayLogs(data.logs);
+                        updateStats(data.stats);
+                        document.getElementById('last-update').textContent = new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'});
+                    } else {
+                        throw new Error('Invalid data format');
+                    }
+                } catch (error) {
+                    document.getElementById('log-container').innerHTML = '<div class="log-entry ERROR">加载失败: ' + error.message + '</div>';
                 }
             }
-            loadLogs();
-            setInterval(loadLogs, 5000);
+            function updateStats(stats) {
+                document.getElementById('total-count').textContent = stats.memory.total;
+                document.getElementById('info-count').textContent = stats.memory.by_level.INFO || 0;
+                document.getElementById('warning-count').textContent = stats.memory.by_level.WARNING || 0;
+                const errorCount = document.getElementById('error-count');
+                errorCount.textContent = stats.memory.by_level.ERROR || 0;
+                if (stats.errors && stats.errors.count > 0) errorCount.style.color = '#dc2626';
+                document.getElementById('chat-count').textContent = stats.chat_count || 0;
+            }
+            // 分类颜色配置（提取到外部避免重复定义）
+            const CATEGORY_COLORS = {
+                'SYSTEM': '#9e9e9e',
+                'CONFIG': '#607d8b',
+                'LOG': '#9e9e9e',
+                'AUTH': '#4caf50',
+                'SESSION': '#00bcd4',
+                'FILE': '#ff9800',
+                'CHAT': '#2196f3',
+                'API': '#8bc34a',
+                'CACHE': '#9c27b0',
+                'ACCOUNT': '#f44336',
+                'MULTI': '#673ab7'
+            };
+
+            // 账户颜色配置（提取到外部避免重复定义）
+            const ACCOUNT_COLORS = {
+                'account_1': '#9c27b0',
+                'account_2': '#e91e63',
+                'account_3': '#00bcd4',
+                'account_4': '#4caf50',
+                'account_5': '#ff9800'
+            };
+
+            function getCategoryColor(category) {
+                return CATEGORY_COLORS[category] || '#757575';
+            }
+
+            function getAccountColor(accountId) {
+                return ACCOUNT_COLORS[accountId] || '#757575';
+            }
+
+            function displayLogs(logs) {
+                const container = document.getElementById('log-container');
+                if (logs.length === 0) {
+                    container.innerHTML = '<div class="log-entry">暂无日志</div>';
+                    return;
+                }
+
+                // 按请求ID分组
+                const groups = {};
+                const ungrouped = [];
+
+                logs.forEach(log => {
+                    const msg = escapeHtml(log.message);
+                    const reqMatch = msg.match(/\[req_([a-z0-9]+)\]/);
+
+                    if (reqMatch) {
+                        const reqId = reqMatch[1];
+                        if (!groups[reqId]) {
+                            groups[reqId] = [];
+                        }
+                        groups[reqId].push(log);
+                    } else {
+                        ungrouped.push(log);
+                    }
+                });
+
+                // 渲染分组
+                let html = '';
+
+                // 先渲染未分组的日志
+                ungrouped.forEach(log => {
+                    html += renderLogEntry(log);
+                });
+
+                // 读取折叠状态
+                const foldState = JSON.parse(localStorage.getItem('log-fold-state') || '{}');
+
+                // 按请求ID分组渲染（最新的组在下面）
+                Object.keys(groups).forEach(reqId => {
+                    const groupLogs = groups[reqId];
+                    const firstLog = groupLogs[0];
+                    const lastLog = groupLogs[groupLogs.length - 1];
+
+                    // 判断状态
+                    let status = 'in_progress';
+                    let statusColor = '#ff9800';
+                    let statusText = '进行中';
+
+                    if (lastLog.message.includes('响应完成') || lastLog.message.includes('非流式响应完成')) {
+                        status = 'success';
+                        statusColor = '#4caf50';
+                        statusText = '成功';
+                    } else if (lastLog.level === 'ERROR' || lastLog.message.includes('失败')) {
+                        status = 'error';
+                        statusColor = '#f44336';
+                        statusText = '失败';
+                    } else {
+                        // 检查超时（最后日志超过 5 分钟）
+                        const lastLogTime = new Date(lastLog.time);
+                        const now = new Date();
+                        const diffMinutes = (now - lastLogTime) / 1000 / 60;
+                        if (diffMinutes > 5) {
+                            status = 'timeout';
+                            statusColor = '#ffc107';
+                            statusText = '超时';
+                        }
+                    }
+
+                    // 提取账户ID和模型
+                    const accountMatch = firstLog.message.match(/\[account_(\d+)\]/);
+                    const modelMatch = firstLog.message.match(/收到请求: ([^ ]+)/);
+                    const accountId = accountMatch ? `account_${accountMatch[1]}` : '';
+                    const model = modelMatch ? modelMatch[1] : '';
+
+                    // 检查折叠状态
+                    const isCollapsed = foldState[reqId] === true;
+                    const contentStyle = isCollapsed ? 'style="display: none;"' : '';
+                    const iconClass = isCollapsed ? 'class="toggle-icon collapsed"' : 'class="toggle-icon"';
+
+                    html += `
+                        <div class="log-group" data-req-id="${reqId}">
+                            <div class="log-group-header" onclick="toggleGroup('${reqId}')">
+                                <span style="color: ${statusColor}; font-weight: 600; font-size: 11px;">⬤ ${statusText}</span>
+                                <span style="color: #666; font-size: 11px; margin-left: 8px;">req_${reqId}</span>
+                                ${accountId ? `<span style="color: ${getAccountColor(accountId)}; font-size: 11px; margin-left: 8px;">${accountId}</span>` : ''}
+                                ${model ? `<span style="color: #999; font-size: 11px; margin-left: 8px;">${model}</span>` : ''}
+                                <span style="color: #999; font-size: 11px; margin-left: 8px;">${groupLogs.length}条日志</span>
+                                <span ${iconClass} style="margin-left: auto; color: #999;">▼</span>
+                            </div>
+                            <div class="log-group-content" ${contentStyle}>
+                                ${groupLogs.map(log => renderLogEntry(log)).join('')}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+
+                // 自动滚动到底部，显示最新日志
+                container.scrollTop = container.scrollHeight;
+            }
+
+            function renderLogEntry(log) {
+                const msg = escapeHtml(log.message);
+                let displayMsg = msg;
+                let categoryTags = [];
+                let accountId = null;
+
+                // 解析所有标签：[CATEGORY1] [CATEGORY2] [account_X] [req_X] message
+                let remainingMsg = msg;
+                const tagRegex = /^\[([A-Z_a-z0-9]+)\]/;
+
+                while (true) {
+                    const match = remainingMsg.match(tagRegex);
+                    if (!match) break;
+
+                    const tag = match[1];
+                    remainingMsg = remainingMsg.substring(match[0].length).trim();
+
+                    // 跳过req_标签（已在组头部显示）
+                    if (tag.startsWith('req_')) {
+                        continue;
+                    }
+                    // 判断是否为账户ID
+                    else if (tag.startsWith('account_')) {
+                        accountId = tag;
+                    } else {
+                        // 普通分类标签
+                        categoryTags.push(tag);
+                    }
+                }
+
+                displayMsg = remainingMsg;
+
+                // 生成分类标签HTML
+                const categoryTagsHtml = categoryTags.map(cat =>
+                    `<span class="log-category" style="background: ${getCategoryColor(cat)}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-left: 2px;">${cat}</span>`
+                ).join('');
+
+                // 生成账户标签HTML
+                const accountTagHtml = accountId
+                    ? `<span style="color: ${getAccountColor(accountId)}; font-size: 11px; font-weight: 600; margin-left: 2px;">${accountId}</span>`
+                    : '';
+
+                return `
+                    <div class="log-entry ${log.level}">
+                        <div>
+                            <span class="log-time">${log.time}</span>
+                            <span class="log-level ${log.level}">${log.level}</span>
+                            ${categoryTagsHtml}
+                            ${accountTagHtml}
+                        </div>
+                        <div class="log-message">${displayMsg}</div>
+                    </div>
+                `;
+            }
+
+            function toggleGroup(reqId) {
+                const group = document.querySelector(`.log-group[data-req-id="${reqId}"]`);
+                const content = group.querySelector('.log-group-content');
+                const icon = group.querySelector('.toggle-icon');
+
+                const isCollapsed = content.style.display === 'none';
+                if (isCollapsed) {
+                    content.style.display = 'block';
+                    icon.classList.remove('collapsed');
+                } else {
+                    content.style.display = 'none';
+                    icon.classList.add('collapsed');
+                }
+
+                // 保存折叠状态到 localStorage
+                const foldState = JSON.parse(localStorage.getItem('log-fold-state') || '{}');
+                foldState[reqId] = !isCollapsed;
+                localStorage.setItem('log-fold-state', JSON.stringify(foldState));
+            }
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            async function exportJSON() {
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const key = urlParams.get('key');
+                    let url = `/admin/log?limit=3000`;
+                    if (key) url += `&key=${key}`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    const blob = new Blob([JSON.stringify({exported_at: new Date().toISOString(), logs: data.logs}, null, 2)], {type: 'application/json'});
+                    const blobUrl = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = blobUrl;
+                    a.download = 'logs_' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.json';
+                    a.click();
+                    URL.revokeObjectURL(blobUrl);
+                    alert('导出成功');
+                } catch (error) {
+                    alert('导出失败: ' + error.message);
+                }
+            }
+            async function clearAllLogs() {
+                if (!confirm('确定清空所有日志？')) return;
+                try {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const key = urlParams.get('key');
+                    let url = `/admin/log?confirm=yes`;
+                    if (key) url += `&key=${key}`;
+                    const response = await fetch(url, {method: 'DELETE'});
+                    if (response.ok) {
+                        alert('已清空');
+                        loadLogs();
+                    } else {
+                        alert('清空失败');
+                    }
+                } catch (error) {
+                    alert('清空失败: ' + error.message);
+                }
+            }
+            let autoRefreshEnabled = true;
+            function toggleAutoRefresh() {
+                autoRefreshEnabled = !autoRefreshEnabled;
+                const btn = document.getElementById('auto-refresh-btn');
+                if (autoRefreshEnabled) {
+                    btn.style.background = '#1a73e8';
+                    autoRefreshTimer = setInterval(loadLogs, 5000);
+                } else {
+                    btn.style.background = '#6b6b6b';
+                    if (autoRefreshTimer) {
+                        clearInterval(autoRefreshTimer);
+                        autoRefreshTimer = null;
+                    }
+                }
+            }
+            document.addEventListener('DOMContentLoaded', () => {
+                loadLogs();
+                autoRefreshTimer = setInterval(loadLogs, 5000);
+                document.getElementById('search-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') loadLogs();
+                });
+                document.getElementById('level-filter').addEventListener('change', loadLogs);
+                document.getElementById('limit-input').addEventListener('change', loadLogs);
+            });
         </script>
     </body>
     </html>

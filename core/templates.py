@@ -103,15 +103,13 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                         <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-flash</span>
                         <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-pro</span>
                         <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-flash-preview</span>
-                        <span style="background: #eef7ff; color: #0071e3; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; border: 1px solid #dcebfb; font-weight: 500;">gemini-3-pro-preview</span>
+                        <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-pro-preview</span>
                     </div>
                 </div>
                 <div style="background: rgba(0,0,0,0.03); padding: 10px; border-radius: 6px;">
-                    <div style="font-size: 11px; color: #1d1d1f; margin-bottom: 4px; font-weight: 600;">📸 图片生成说明</div>
+                    <div style="font-size: 11px; color: #1d1d1f; margin-bottom: 4px; font-weight: 600;">📸 图片生成</div>
                     <div style="font-size: 11px; color: #86868b; line-height: 1.6;">
-                        • 仅 <code style="font-size: 10px; background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px;">gemini-3-pro-preview</code> 支持绘图<br>
-                        • 存储路径：<code style="font-size: 10px; background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 3px;">./images</code><br>
-                        • 存储类型：临时（服务重启后丢失）
+                        可在"系统设置"标签页自定义配置
                     </div>
                 </div>
             </div>
@@ -435,6 +433,11 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 border-bottom: 2px solid transparent;
                 position: relative;
                 top: 1px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+                line-height: 1.5;
+                display: flex;
+                align-items: center;
+                gap: 6px;
             }}
             .tab-button:hover {{
                 color: #1d1d1f;
@@ -561,7 +564,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 width: 100%;
                 flex: 1;
                 min-height: 300px;
-                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
                 font-size: 13px;
                 padding: 16px;
                 border: 1px solid #e5e5e5;
@@ -569,6 +572,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 background: #fafaf9;
                 color: #1a1a1a;
                 line-height: 1.6;
+                letter-spacing: 0.3px;
                 overflow-y: auto;
                 resize: none;
                 scrollbar-width: thin;
@@ -611,20 +615,62 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             }}
             .btn-secondary:hover {{ background: #e5e5e5; }}
 
-            .env-var {{ display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f5f5f5; }}
+            .env-var {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 0;
+                border-bottom: 1px solid #f5f5f5;
+            }}
             .env-var:last-child {{ border-bottom: none; }}
-            .env-name {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-main); font-weight: 600; }}
-            .env-desc {{ font-size: 11px; color: var(--text-sec); margin-top: 2px; }}
-            .env-value {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-sec); text-align: right; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+            .env-name {{
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
+                font-size: 12px;
+                color: var(--text-main);
+                font-weight: 600;
+                letter-spacing: 0.3px;
+                line-height: 1.5;
+            }}
+            .env-desc {{
+                font-size: 11px;
+                color: var(--text-sec);
+                margin-top: 3px;
+                line-height: 1.4;
+            }}
+            .env-value {{
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
+                font-size: 12px;
+                color: var(--text-sec);
+                text-align: right;
+                max-width: 50%;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                letter-spacing: 0.3px;
+                line-height: 1.5;
+            }}
 
             .badge {{ display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; vertical-align: middle; margin-left: 6px; }}
             .badge-required {{ background: #ffebeb; color: #c62828; }}
             .badge-optional {{ background: #e8f5e9; color: #2e7d32; }}
 
-            code {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; background: #f5f5f7; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: var(--blue); }}
+            code {{
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
+                background: #f5f5f7;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-size: 12px;
+                color: var(--blue);
+                letter-spacing: 0.3px;
+                line-height: 1.5;
+            }}
             a {{ color: var(--blue); text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
-            .font-mono {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; }}
+            .font-mono {{
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
+                letter-spacing: 0.3px;
+                line-height: 1.5;
+            }}
 
             /* --- Service Info Styles --- */
             .model-grid {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }}
@@ -634,14 +680,47 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 padding: 4px 10px;
                 border-radius: 6px;
                 font-size: 12px;
-                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
                 border: 1px solid transparent;
+                letter-spacing: 0.3px;
+                line-height: 1.5;
             }}
             .model-tag.highlight {{ background: #eef7ff; color: #0071e3; border-color: #dcebfb; font-weight: 500; }}
 
             .info-box {{ background: #f9f9f9; border: 1px solid #e5e5ea; border-radius: 8px; padding: 14px; }}
             .info-box-title {{ font-weight: 600; font-size: 12px; color: #1d1d1f; margin-bottom: 6px; }}
             .info-box-text {{ font-size: 12px; color: #86868b; line-height: 1.5; }}
+
+            /* Settings Form Styles */
+            .setting-item {{
+                margin-bottom: 14px;
+            }}
+            .setting-item label {{
+                display: block;
+                font-size: 12px;
+                font-weight: 600;
+                color: #1d1d1f;
+                margin-bottom: 6px;
+            }}
+            .setting-item input[type="text"],
+            .setting-item input[type="password"],
+            .setting-item input[type="number"] {{
+                width: 100%;
+                padding: 8px 12px;
+                border: 1px solid #d4d4d4;
+                border-radius: 6px;
+                font-size: 13px;
+                color: #1d1d1f;
+                background: #fff;
+                transition: border-color 0.15s;
+            }}
+            .setting-item input:focus {{
+                outline: none;
+                border-color: #0071e3;
+            }}
+            .setting-item input::placeholder {{
+                color: #c7c7cc;
+            }}
 
             .ep-table {{
                 width: 100%;
@@ -671,7 +750,14 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             .m-get {{ background: #eff6ff; color: #1e40af; border: 1px solid #dbeafe; }}
             .m-del {{ background: #fef2f2; color: #991b1b; border: 1px solid #fee2e2; }}
 
-            .ep-path {{ font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; color: #1d1d1f; margin-right: 8px; font-size: 12px; }}
+            .ep-path {{
+                font-family: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Courier New", monospace;
+                color: #1d1d1f;
+                margin-right: 8px;
+                font-size: 12px;
+                letter-spacing: 0.3px;
+                line-height: 1.5;
+            }}
             .ep-desc {{ color: #86868b; font-size: 12px; margin-left: auto; }}
 
             .current-url-row {{
@@ -704,6 +790,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                     min-width: 100px;
                     padding: 10px 16px;
                     font-size: 13px;
+                    justify-content: center;
                 }}
 
                 /* Account Table Mobile - Card Layout */
@@ -826,6 +913,7 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 <button class="tab-button active" onclick="switchTab('accounts')">📋 账户管理</button>
                 <button class="tab-button" onclick="switchTab('api')">📚 API文档</button>
                 <button class="tab-button" onclick="switchTab('config')">⚙️ 系统配置</button>
+                <button class="tab-button" onclick="switchTab('settings')">🔧 系统设置</button>
             </div>
 
             <!-- Tab 1: 账户管理 -->
@@ -936,109 +1024,208 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
             <!-- Tab 3: 系统配置 -->
             <div id="tab-config" class="tab-content">
                 <div class="section">
-                    <div class="section-title">环境变量配置</div>
+                    <div class="section-title">当前配置状态</div>
                     <div class="grid-env">
                         <div class="stack-col">
                             <div class="card">
-                                <h3>必需变量 <span class="badge badge-required">REQUIRED</span></h3>
+                                <h3>环境变量 <span class="badge badge-required">ENV</span></h3>
                             <div style="margin-top: 12px;">
-                                <div class="env-var">
-                                    <div><div class="env-name">ACCOUNTS_CONFIG</div><div class="env-desc">JSON格式账户列表</div></div>
-                                </div>
-                                <div class="env-var">
-                                    <div><div class="env-name">PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
-                                    <div class="env-value">当前: {main.PATH_PREFIX}</div>
-                                </div>
                                 <div class="env-var">
                                     <div><div class="env-name">ADMIN_KEY</div><div class="env-desc">管理员密钥</div></div>
                                     <div class="env-value">已设置</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">PATH_PREFIX</div><div class="env-desc">API路径前缀</div></div>
+                                    <div class="env-value">{main.PATH_PREFIX or '未设置'}</div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="card">
-                            <h3>重试配置 <span class="badge badge-optional">OPTIONAL</span></h3>
+                            <h3>基础配置 <span class="badge badge-optional">YAML</span></h3>
                             <div style="margin-top: 12px;">
                                 <div class="env-var">
-                                    <div><div class="env-name">MAX_NEW_SESSION_TRIES</div><div class="env-desc">新会话尝试账户数</div></div>
-                                    <div class="env-value">{main.MAX_NEW_SESSION_TRIES}</div>
+                                    <div><div class="env-name">API_KEY</div><div class="env-desc">API访问密钥</div></div>
+                                    <div class="env-value">{'已设置' if main.API_KEY else '未设置（公开访问）'}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">MAX_REQUEST_RETRIES</div><div class="env-desc">请求失败重试次数</div></div>
-                                    <div class="env-value">{main.MAX_REQUEST_RETRIES}</div>
+                                    <div><div class="env-name">BASE_URL</div><div class="env-desc">服务器URL</div></div>
+                                    <div class="env-value">{'已设置' if main.BASE_URL else '自动检测'}</div>
                                 </div>
                                 <div class="env-var">
-                                    <div><div class="env-name">MAX_ACCOUNT_SWITCH_TRIES</div><div class="env-desc">每次重试查找账户次数</div></div>
-                                    <div class="env-value">{main.MAX_ACCOUNT_SWITCH_TRIES}</div>
-                                </div>
-                                <div class="env-var">
-                                    <div><div class="env-name">ACCOUNT_FAILURE_THRESHOLD</div><div class="env-desc">账户失败阈值</div></div>
-                                    <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
-                                </div>
-                                <div class="env-var">
-                                    <div><div class="env-name">RATE_LIMIT_COOLDOWN_SECONDS</div><div class="env-desc">429限流冷却时间</div></div>
-                                    <div class="env-value">{main.RATE_LIMIT_COOLDOWN_SECONDS} 秒</div>
+                                    <div><div class="env-name">PROXY</div><div class="env-desc">代理地址</div></div>
+                                    <div class="env-value">{'已设置' if main.PROXY else '未设置'}</div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
+                        <div class="card">
+                            <h3>重试策略 <span class="badge badge-optional">YAML</span></h3>
+                            <div style="margin-top: 12px;">
+                                <div class="env-var">
+                                    <div><div class="env-name">max_new_session_tries</div><div class="env-desc">新会话尝试数</div></div>
+                                    <div class="env-value">{main.MAX_NEW_SESSION_TRIES}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">max_request_retries</div><div class="env-desc">请求重试次数</div></div>
+                                    <div class="env-value">{main.MAX_REQUEST_RETRIES}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">max_account_switch_tries</div><div class="env-desc">账户切换次数</div></div>
+                                    <div class="env-value">{main.MAX_ACCOUNT_SWITCH_TRIES}</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">account_failure_threshold</div><div class="env-desc">失败阈值</div></div>
+                                    <div class="env-value">{main.ACCOUNT_FAILURE_THRESHOLD} 次</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">rate_limit_cooldown_seconds</div><div class="env-desc">429冷却时间</div></div>
+                                    <div class="env-value">{main.RATE_LIMIT_COOLDOWN_SECONDS} 秒</div>
+                                </div>
+                                <div class="env-var">
+                                    <div><div class="env-name">session_cache_ttl_seconds</div><div class="env-desc">会话缓存时间</div></div>
+                                    <div class="env-value">{main.SESSION_CACHE_TTL_SECONDS} 秒</div>
+                                </div>
+                            </div>
+                        </div>
+
                     <div class="card">
-                        <h3>可选变量 <span class="badge badge-optional">OPTIONAL</span></h3>
+                        <h3>公开展示 <span class="badge badge-optional">YAML</span></h3>
                         <div style="margin-top: 12px;">
                             <div class="env-var">
-                                <div><div class="env-name">API_KEY</div><div class="env-desc">API访问密钥</div></div>
-                                <div class="env-value">{'已设置' if main.API_KEY else '未设置'}</div>
-                            </div>
-                            <div class="env-var">
-                                <div><div class="env-name">BASE_URL</div><div class="env-desc">图片URL生成（推荐设置）</div></div>
-                                <div class="env-value">{'已设置' if main.BASE_URL else '未设置（自动检测）'}</div>
-                            </div>
-                            <div class="env-var">
-                                <div><div class="env-name">PROXY</div><div class="env-desc">代理地址</div></div>
-                                <div class="env-value">{'已设置' if main.PROXY else '未设置'}</div>
-                            </div>
-                            <div class="env-var">
-                                <div><div class="env-name">SESSION_CACHE_TTL_SECONDS</div><div class="env-desc">会话缓存过期时间</div></div>
-                                <div class="env-value">{main.SESSION_CACHE_TTL_SECONDS} 秒</div>
-                            </div>
-                            <div class="env-var">
-                                <div><div class="env-name">LOGO_URL</div><div class="env-desc">Logo URL（公开，为空则不显示）</div></div>
+                                <div><div class="env-name">LOGO_URL</div><div class="env-desc">Logo图片</div></div>
                                 <div class="env-value">{'已设置' if main.LOGO_URL else '未设置'}</div>
                             </div>
                             <div class="env-var">
-                                <div><div class="env-name">CHAT_URL</div><div class="env-desc">开始对话链接（公开，为空则不显示）</div></div>
+                                <div><div class="env-name">CHAT_URL</div><div class="env-desc">对话链接</div></div>
                                 <div class="env-value">{'已设置' if main.CHAT_URL else '未设置'}</div>
-                            </div>
-                            <div class="env-var">
-                                <div><div class="env-name">MODEL_NAME</div><div class="env-desc">模型名称（公开）</div></div>
-                                <div class="env-value">{main.MODEL_NAME}</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- Tab 4: 系统设置 -->
+            <div id="tab-settings" class="tab-content">
                 <div class="section">
-                    <div class="section-title">服务信息</div>
-                    <div class="card">
-                        <h3>支持的模型</h3>
-                        <div class="model-grid">
-                            <span class="model-tag">gemini-auto</span>
-                            <span class="model-tag">gemini-2.5-flash</span>
-                            <span class="model-tag">gemini-2.5-pro</span>
-                            <span class="model-tag">gemini-3-flash-preview</span>
-                            <span class="model-tag highlight">gemini-3-pro-preview</span>
-                        </div>
+                    <div class="section-title">系统设置</div>
+                    <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 16px; padding-left: 4px;">
+                        ✅ 所有配置修改后<strong>立即生效</strong>，无需重启服务。配置保存在 <code>data/settings.yaml</code><br>
+                        ⚠️ 页面显示需要重启服务后才会更新
+                    </div>
 
-                        <div class="info-box">
-                            <div class="info-box-title">📸 图片生成说明</div>
-                            <div class="info-box-text">
-                                仅 <code style="background:none;padding:0;color:#0071e3;">gemini-3-pro-preview</code> 支持绘图。<br>
-                                路径: <code>{main.IMAGE_DIR}</code><br>
-                                类型: {'<span style="color: #34c759; font-weight: 600;">持久化（重启保留）</span>' if main.IMAGE_DIR == '/data/images' else '<span style="color: #ff3b30; font-weight: 600;">临时（重启丢失）</span>'}
+                    <div class="grid-env">
+                        <div class="stack-col">
+                            <!-- 基础配置 -->
+                            <div class="card">
+                                <h3>基础配置</h3>
+                                <div style="margin-top: 12px;">
+                                    <div class="setting-item">
+                                        <label>API 访问密钥</label>
+                                        <input type="text" id="setting-api-key" placeholder="留空则公开访问" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>服务器 URL</label>
+                                        <input type="text" id="setting-base-url" placeholder="留空则自动检测" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>代理地址</label>
+                                        <input type="text" id="setting-proxy" placeholder="如 http://127.0.0.1:7890" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 图片生成配置 -->
+                            <div class="card">
+                                <h3>📸 图片生成配置</h3>
+                                <div style="margin-top: 12px;">
+                                    <div class="setting-item">
+                                        <label style="display: flex; align-items: center; gap: 8px;">
+                                            <input type="checkbox" id="setting-image-enabled" style="width: auto;" />
+                                            启用图片生成
+                                        </label>
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>支持的模型</label>
+                                        <div id="setting-image-models" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                                            <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 12px;">
+                                                <input type="checkbox" value="gemini-3-pro-preview" style="width: auto;" /> gemini-3-pro-preview
+                                            </label>
+                                            <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 12px;">
+                                                <input type="checkbox" value="gemini-2.5-pro" style="width: auto;" /> gemini-2.5-pro
+                                            </label>
+                                            <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 12px;">
+                                                <input type="checkbox" value="gemini-2.5-flash" style="width: auto;" /> gemini-2.5-flash
+                                            </label>
+                                            <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 12px;">
+                                                <input type="checkbox" value="gemini-3-flash-preview" style="width: auto;" /> gemini-3-flash-preview
+                                            </label>
+                                            <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 12px;">
+                                                <input type="checkbox" value="gemini-auto" style="width: auto;" /> gemini-auto
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
+
+                        <div class="stack-col">
+                            <!-- 重试策略配置 -->
+                            <div class="card">
+                                <h3>🔄 重试策略配置</h3>
+                                <div style="margin-top: 12px;">
+                                    <div class="setting-item">
+                                        <label>新会话尝试账户数</label>
+                                        <input type="number" id="setting-max-new-session" min="1" max="20" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>请求失败重试次数</label>
+                                        <input type="number" id="setting-max-retries" min="1" max="10" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>账户切换尝试次数</label>
+                                        <input type="number" id="setting-max-switch" min="1" max="20" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>账户失败阈值（次）</label>
+                                        <input type="number" id="setting-failure-threshold" min="1" max="10" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>429 冷却时间（秒）</label>
+                                        <input type="number" id="setting-cooldown" min="60" max="3600" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>会话缓存时间（秒）</label>
+                                        <input type="number" id="setting-cache-ttl" min="300" max="86400" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 公开展示配置 -->
+                            <div class="card">
+                                <h3>🎨 公开展示配置</h3>
+                                <div style="margin-top: 12px;">
+                                    <div class="setting-item">
+                                        <label>Logo URL</label>
+                                        <input type="text" id="setting-logo-url" placeholder="留空则不显示" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>开始对话链接</label>
+                                        <input type="text" id="setting-chat-url" placeholder="留空则不显示" />
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>Session 过期时间（小时）</label>
+                                        <input type="number" id="setting-session-hours" min="1" max="168" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
+                        <button class="btn btn-secondary" onclick="loadSettings()">重置</button>
+                        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
                     </div>
                 </div>
             </div>
@@ -1303,6 +1490,98 @@ def generate_admin_html(request: Request, multi_account_mgr, show_hide_tip: bool
                 if (e.target === this) {{
                     closeModal();
                 }}
+            }});
+
+            // ========== 系统设置相关函数 ==========
+            async function loadSettings() {{
+                try {{
+                    const response = await fetch('/{admin_path_segment}/settings');
+                    const settings = await handleApiResponse(response);
+
+                    // 基础配置
+                    document.getElementById('setting-api-key').value = settings.basic?.api_key || '';
+                    document.getElementById('setting-base-url').value = settings.basic?.base_url || '';
+                    document.getElementById('setting-proxy').value = settings.basic?.proxy || '';
+
+                    // 图片生成配置
+                    document.getElementById('setting-image-enabled').checked = settings.image_generation?.enabled ?? true;
+                    const supportedModels = settings.image_generation?.supported_models || [];
+                    document.querySelectorAll('#setting-image-models input[type="checkbox"]').forEach(cb => {{
+                        cb.checked = supportedModels.includes(cb.value);
+                    }});
+
+                    // 重试策略配置
+                    document.getElementById('setting-max-new-session').value = settings.retry?.max_new_session_tries || 5;
+                    document.getElementById('setting-max-retries').value = settings.retry?.max_request_retries || 3;
+                    document.getElementById('setting-max-switch').value = settings.retry?.max_account_switch_tries || 5;
+                    document.getElementById('setting-failure-threshold').value = settings.retry?.account_failure_threshold || 3;
+                    document.getElementById('setting-cooldown').value = settings.retry?.rate_limit_cooldown_seconds || 600;
+                    document.getElementById('setting-cache-ttl').value = settings.retry?.session_cache_ttl_seconds || 3600;
+
+                    // 公开展示配置
+                    document.getElementById('setting-logo-url').value = settings.public_display?.logo_url || '';
+                    document.getElementById('setting-chat-url').value = settings.public_display?.chat_url || '';
+                    document.getElementById('setting-session-hours').value = settings.session?.expire_hours || 24;
+                }} catch (error) {{
+                    console.error('加载设置失败:', error);
+                    alert('加载设置失败: ' + error.message);
+                }}
+            }}
+
+            async function saveSettings() {{
+                try {{
+                    // 收集图片生成支持的模型
+                    const supportedModels = [];
+                    document.querySelectorAll('#setting-image-models input[type="checkbox"]:checked').forEach(cb => {{
+                        supportedModels.push(cb.value);
+                    }});
+
+                    const settings = {{
+                        basic: {{
+                            api_key: document.getElementById('setting-api-key').value,
+                            base_url: document.getElementById('setting-base-url').value,
+                            proxy: document.getElementById('setting-proxy').value
+                        }},
+                        image_generation: {{
+                            enabled: document.getElementById('setting-image-enabled').checked,
+                            supported_models: supportedModels
+                        }},
+                        retry: {{
+                            max_new_session_tries: parseInt(document.getElementById('setting-max-new-session').value) || 5,
+                            max_request_retries: parseInt(document.getElementById('setting-max-retries').value) || 3,
+                            max_account_switch_tries: parseInt(document.getElementById('setting-max-switch').value) || 5,
+                            account_failure_threshold: parseInt(document.getElementById('setting-failure-threshold').value) || 3,
+                            rate_limit_cooldown_seconds: parseInt(document.getElementById('setting-cooldown').value) || 600,
+                            session_cache_ttl_seconds: parseInt(document.getElementById('setting-cache-ttl').value) || 3600
+                        }},
+                        public_display: {{
+                            logo_url: document.getElementById('setting-logo-url').value,
+                            chat_url: document.getElementById('setting-chat-url').value
+                        }},
+                        session: {{
+                            expire_hours: parseInt(document.getElementById('setting-session-hours').value) || 24
+                        }}
+                    }};
+
+                    const response = await fetch('/{admin_path_segment}/settings', {{
+                        method: 'PUT',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(settings)
+                    }});
+
+                    await handleApiResponse(response);
+
+                    // 直接刷新页面，不显示弹窗
+                    window.location.reload();
+                }} catch (error) {{
+                    console.error('保存设置失败:', error);
+                    alert('保存设置失败: ' + error.message);
+                }}
+            }}
+
+            // 页面加载时自动加载设置
+            document.addEventListener('DOMContentLoaded', function() {{
+                loadSettings();
             }});
         </script>
     </body>

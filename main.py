@@ -186,7 +186,7 @@ settings = load_settings()
 # ---------- 配置（从 settings.yaml 读取）----------
 PROXY = settings["basic"]["proxy"]
 TIMEOUT_SECONDS = 600
-API_KEY = settings["basic"]["api_key"]
+API_KEY = os.getenv("API_KEY", settings["basic"]["api_key"])  # 优先使用环境变量
 PATH_PREFIX = os.getenv("PATH_PREFIX", "")  # 路径前缀保留环境变量（影响路由注册）
 ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # 管理员密钥保留环境变量（安全相关）
 BASE_URL = settings["basic"]["base_url"]

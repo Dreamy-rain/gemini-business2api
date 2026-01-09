@@ -1,6 +1,7 @@
-import json, time, os, asyncio, uuid, ssl, re
+import json, time, os, asyncio, uuid, ssl, re, yaml
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
+from pathlib import Path
 import logging
 from dotenv import load_dotenv
 
@@ -118,20 +119,87 @@ memory_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(m
 logger.addHandler(memory_handler)
 
 load_dotenv()
-# ---------- 配置 ----------
-PROXY        = os.getenv("PROXY", "")
+
+# ---------- YAML 配置系统 ----------
+SETTINGS_FILE = "data/settings.yaml"
+
+# 默认配置
+DEFAULT_SETTINGS = {
+    "basic": {
+        "api_key": "",
+        "base_url": "",
+        "proxy": ""
+    },
+    "image_generation": {
+        "enabled": True,
+        "supported_models": ["gemini-3-pro-preview"],
+        "last_updated": None
+    },
+    "retry": {
+        "max_new_session_tries": 5,
+        "max_request_retries": 3,
+        "max_account_switch_tries": 5,
+        "account_failure_threshold": 3,
+        "rate_limit_cooldown_seconds": 600,
+        "session_cache_ttl_seconds": 3600
+    },
+    "public_display": {
+        "logo_url": "",
+        "chat_url": ""
+    },
+    "session": {
+        "expire_hours": 24
+    }
+}
+
+def load_settings() -> dict:
+    """加载 YAML 配置"""
+    Path("data").mkdir(exist_ok=True)
+    if Path(SETTINGS_FILE).exists():
+        try:
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                settings = yaml.safe_load(f) or {}
+                # 合并默认配置（确保新增配置项有默认值）
+                for key, value in DEFAULT_SETTINGS.items():
+                    if key not in settings:
+                        settings[key] = value
+                    elif isinstance(value, dict):
+                        for k, v in value.items():
+                            if k not in settings[key]:
+                                settings[key][k] = v
+                return settings
+        except Exception as e:
+            print(f"[WARN] 加载配置文件失败: {e}，使用默认配置")
+    # 创建默认配置文件
+    save_settings(DEFAULT_SETTINGS)
+    return DEFAULT_SETTINGS.copy()
+
+def save_settings(settings: dict):
+    """保存 YAML 配置"""
+    Path("data").mkdir(exist_ok=True)
+    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        yaml.dump(settings, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+# 加载配置
+settings = load_settings()
+
+# ---------- 配置（从 settings.yaml 读取）----------
+PROXY = settings["basic"]["proxy"]
 TIMEOUT_SECONDS = 600
-API_KEY      = os.getenv("API_KEY", "")           # API 访问密钥（可选，用于保护API端点）
-PATH_PREFIX  = os.getenv("PATH_PREFIX", "")       # 路径前缀（可选，用于隐藏端点路径）
-ADMIN_KEY    = os.getenv("ADMIN_KEY", "")         # 管理员密钥（必需，用于登录）
-BASE_URL     = os.getenv("BASE_URL", "")          # 服务器完整URL（可选，用于图片URL生成）
-SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", generate_session_secret())  # Session加密密钥（自动生成）
-SESSION_EXPIRE_HOURS = int(os.getenv("SESSION_EXPIRE_HOURS", "24"))  # Session过期时间（默认24小时）
+API_KEY = settings["basic"]["api_key"]
+PATH_PREFIX = os.getenv("PATH_PREFIX", "")  # 路径前缀保留环境变量（影响路由注册）
+ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # 管理员密钥保留环境变量（安全相关）
+BASE_URL = settings["basic"]["base_url"]
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", generate_session_secret())  # 自动生成
+SESSION_EXPIRE_HOURS = settings["session"]["expire_hours"]
 
 # ---------- 公开展示配置 ----------
-LOGO_URL     = os.getenv("LOGO_URL", "")  # Logo URL（公开，为空则不显示）
-CHAT_URL     = os.getenv("CHAT_URL", "")  # 开始对话链接（公开，为空则不显示）
-MODEL_NAME   = os.getenv("MODEL_NAME", "gemini-business")  # 模型名称（公开）
+LOGO_URL = settings["public_display"]["logo_url"]
+CHAT_URL = settings["public_display"]["chat_url"]
+
+# ---------- 图片生成配置 ----------
+IMAGE_GENERATION_ENABLED = settings["image_generation"]["enabled"]
+IMAGE_GENERATION_MODELS = settings["image_generation"]["supported_models"]
 
 # ---------- 图片存储配置 ----------
 if os.path.exists("/data"):
@@ -139,13 +207,13 @@ if os.path.exists("/data"):
 else:
     IMAGE_DIR = "./data/images"  # 本地持久化存储
 
-# ---------- 重试配置 ----------
-MAX_NEW_SESSION_TRIES = int(os.getenv("MAX_NEW_SESSION_TRIES", "5"))  # 新会话创建最多尝试账户数（默认5）
-MAX_REQUEST_RETRIES = int(os.getenv("MAX_REQUEST_RETRIES", "3"))      # 请求失败最多重试次数（默认3）
-MAX_ACCOUNT_SWITCH_TRIES = int(os.getenv("MAX_ACCOUNT_SWITCH_TRIES", "5"))  # 每次重试找账户的最大尝试次数（默认5）
-ACCOUNT_FAILURE_THRESHOLD = int(os.getenv("ACCOUNT_FAILURE_THRESHOLD", "3"))  # 账户连续失败阈值（默认3次）
-RATE_LIMIT_COOLDOWN_SECONDS = int(os.getenv("RATE_LIMIT_COOLDOWN_SECONDS", "600"))  # 429错误冷却时间（默认600秒=10分钟）
-SESSION_CACHE_TTL_SECONDS = int(os.getenv("SESSION_CACHE_TTL_SECONDS", "3600"))  # 会话缓存过期时间（默认3600秒=1小时）
+# ---------- 重试配置（从 settings.yaml 读取）----------
+MAX_NEW_SESSION_TRIES = settings["retry"]["max_new_session_tries"]
+MAX_REQUEST_RETRIES = settings["retry"]["max_request_retries"]
+MAX_ACCOUNT_SWITCH_TRIES = settings["retry"]["max_account_switch_tries"]
+ACCOUNT_FAILURE_THRESHOLD = settings["retry"]["account_failure_threshold"]
+RATE_LIMIT_COOLDOWN_SECONDS = settings["retry"]["rate_limit_cooldown_seconds"]
+SESSION_CACHE_TTL_SECONDS = settings["retry"]["session_cache_ttl_seconds"]
 
 # ---------- 模型映射配置 ----------
 MODEL_MAPPING = {
@@ -552,7 +620,7 @@ async def home(request: Request):
     else:
         # 未设置PATH_PREFIX（公开模式），根据登录状态重定向
         if is_logged_in(request):
-            return await generate_admin_html(request, multi_account_mgr)
+            return HTMLResponse(content=templates.generate_admin_html(request, multi_account_mgr))
         else:
             return RedirectResponse(url="/login", status_code=302)
 
@@ -736,6 +804,98 @@ async def admin_enable_account(request: Request, account_id: str):
         logger.error(f"[CONFIG] 启用账户失败: {str(e)}")
         raise HTTPException(500, f"启用失败: {str(e)}")
 
+# ---------- 系统设置 API ----------
+@app.get("/admin/settings")
+@require_login()
+async def admin_get_settings(request: Request):
+    """获取系统设置"""
+    return settings
+
+@app.put("/admin/settings")
+@require_login()
+async def admin_update_settings(request: Request, new_settings: dict = Body(...)):
+    """更新系统设置"""
+    global settings, API_KEY, PROXY, BASE_URL, LOGO_URL, CHAT_URL
+    global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
+    global MAX_NEW_SESSION_TRIES, MAX_REQUEST_RETRIES, MAX_ACCOUNT_SWITCH_TRIES
+    global ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS
+    global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client
+
+    try:
+        # 合并设置（保留未修改的项）
+        for key, value in new_settings.items():
+            if key in settings and isinstance(value, dict):
+                settings[key].update(value)
+            else:
+                settings[key] = value
+
+        # 添加更新时间
+        if "image_generation" in settings:
+            settings["image_generation"]["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 保存到文件
+        save_settings(settings)
+
+        # 保存旧配置用于对比
+        old_proxy = PROXY
+        old_retry_config = {
+            "account_failure_threshold": ACCOUNT_FAILURE_THRESHOLD,
+            "rate_limit_cooldown_seconds": RATE_LIMIT_COOLDOWN_SECONDS,
+            "session_cache_ttl_seconds": SESSION_CACHE_TTL_SECONDS
+        }
+
+        # 更新全局变量（实时生效）
+        API_KEY = settings["basic"]["api_key"]
+        PROXY = settings["basic"]["proxy"]
+        BASE_URL = settings["basic"]["base_url"]
+        LOGO_URL = settings["public_display"]["logo_url"]
+        CHAT_URL = settings["public_display"]["chat_url"]
+        IMAGE_GENERATION_ENABLED = settings["image_generation"]["enabled"]
+        IMAGE_GENERATION_MODELS = settings["image_generation"]["supported_models"]
+        MAX_NEW_SESSION_TRIES = settings["retry"]["max_new_session_tries"]
+        MAX_REQUEST_RETRIES = settings["retry"]["max_request_retries"]
+        MAX_ACCOUNT_SWITCH_TRIES = settings["retry"]["max_account_switch_tries"]
+        ACCOUNT_FAILURE_THRESHOLD = settings["retry"]["account_failure_threshold"]
+        RATE_LIMIT_COOLDOWN_SECONDS = settings["retry"]["rate_limit_cooldown_seconds"]
+        SESSION_CACHE_TTL_SECONDS = settings["retry"]["session_cache_ttl_seconds"]
+        SESSION_EXPIRE_HOURS = settings["session"]["expire_hours"]
+
+        # 检查是否需要重建 HTTP 客户端（代理变化）
+        if old_proxy != PROXY:
+            logger.info(f"[CONFIG] 代理配置已变化，重建 HTTP 客户端")
+            await http_client.aclose()  # 关闭旧客户端
+            http_client = httpx.AsyncClient(
+                proxy=PROXY or None,
+                verify=False,
+                http2=False,
+                timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
+                limits=httpx.Limits(
+                    max_keepalive_connections=100,
+                    max_connections=200
+                )
+            )
+
+        # 检查是否需要更新账户管理器配置（重试策略变化）
+        retry_changed = (
+            old_retry_config["account_failure_threshold"] != ACCOUNT_FAILURE_THRESHOLD or
+            old_retry_config["rate_limit_cooldown_seconds"] != RATE_LIMIT_COOLDOWN_SECONDS or
+            old_retry_config["session_cache_ttl_seconds"] != SESSION_CACHE_TTL_SECONDS
+        )
+
+        if retry_changed:
+            logger.info(f"[CONFIG] 重试策略已变化，更新账户管理器配置")
+            # 更新所有账户管理器的配置
+            multi_account_mgr.session_cache_ttl_seconds = SESSION_CACHE_TTL_SECONDS
+            for account_id, account_mgr in multi_account_mgr.accounts.items():
+                account_mgr.account_failure_threshold = ACCOUNT_FAILURE_THRESHOLD
+                account_mgr.rate_limit_cooldown_seconds = RATE_LIMIT_COOLDOWN_SECONDS
+
+        logger.info(f"[CONFIG] 系统设置已更新并实时生效")
+        return {"status": "success", "message": "设置已保存并实时生效！"}
+    except Exception as e:
+        logger.error(f"[CONFIG] 更新设置失败: {str(e)}")
+        raise HTTPException(500, f"更新失败: {str(e)}")
+
 @app.get("/admin/log")
 @require_login()
 async def admin_get_logs(
@@ -860,6 +1020,16 @@ if PATH_PREFIX:
     @require_login()
     async def admin_logs_html_route_prefixed(request: Request):
         return await admin_logs_html_route(request=request)
+
+    @app.get(f"/{PATH_PREFIX}/settings")
+    @require_login()
+    async def admin_get_settings_prefixed(request: Request):
+        return await admin_get_settings(request=request)
+
+    @app.put(f"/{PATH_PREFIX}/settings")
+    @require_login()
+    async def admin_update_settings_prefixed(request: Request, new_settings: dict = Body(...)):
+        return await admin_update_settings(request=request, new_settings=new_settings)
 
 # ---------- API端点（API Key认证） ----------
 
@@ -1286,6 +1456,16 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     jwt = await account_manager.get_jwt(request_id)
     headers = get_common_headers(jwt, USER_AGENT)
 
+    # 构建 toolsSpec（根据配置决定是否启用图片生成）
+    tools_spec = {
+        "webGroundingSpec": {},
+        "toolRegistry": "default_tool_registry",
+    }
+    # 只在启用且模型支持时添加图片生成
+    if IMAGE_GENERATION_ENABLED and model_name in IMAGE_GENERATION_MODELS:
+        tools_spec["imageGenerationSpec"] = {}
+        tools_spec["videoGenerationSpec"] = {}
+
     body = {
         "configId": account_manager.config.config_id,
         "additionalParams": {"token": "-"},
@@ -1295,12 +1475,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             "filter": "",
             "fileIds": file_ids, # 注入文件 ID
             "answerGenerationMode": "NORMAL",
-            "toolsSpec": {
-                "webGroundingSpec": {},
-                "toolRegistry": "default_tool_registry",
-                "imageGenerationSpec": {},
-                "videoGenerationSpec": {}
-            },
+            "toolsSpec": tools_spec,
             "languageCode": "zh-CN",
             "userMetadata": {"timeZone": "Asia/Shanghai"},
             "assistSkippingMode": "REQUEST_ASSIST"

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "components/alerts.html" import api_key_status, error_alert %}
+{% from "components/alerts.html" import api_key_status, error_alert, no_accounts_alert %}
 {% from "components/account_table.html" import account_table %}
 
 {% block title %}系统管理 - Gemini Business API{% endblock %}
@@ -37,6 +37,9 @@
             <div id="tab-accounts" class="tab-content active">
                 {{ api_key_status(has_api_key) }}
                 {{ error_alert(error_count, admin_path_segment) }}
+                {% if multi_account_mgr.accounts|length == 0 %}
+                    {{ no_accounts_alert() }}
+                {% endif %}
 
                 <div class="alert alert-primary">
                     <div class="alert-icon">🔗</div>

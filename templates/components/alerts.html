@@ -33,3 +33,19 @@
 </div>
 {% endif %}
 {% endmacro %}
+
+{# 无账户提示 #}
+{% macro no_accounts_alert() %}
+<div class="alert alert-info">
+    <div class="alert-icon">💡</div>
+    <div class="alert-content">
+        <strong>暂无账户配置</strong>
+        <div class="alert-desc" style="margin-top: 8px; line-height: 1.6;">
+            请添加 Gemini Business 账户以开始使用 API 服务。支持以下方式：<br>
+            <strong style="margin-top: 6px; display: inline-block;">1. 使用浏览器脚本自动提取</strong> - 安装 <code style="font-size: 11px;">script/copy-config.js</code> 或 <code style="font-size: 11px;">script/download-config.js</code> 到 Tampermonkey，访问 Gemini Business 页面自动提取配置<br>
+            <strong>2. 批量上传</strong> - 点击上方"📥 批量上传"按钮，上传 JSON 配置文件<br>
+            <strong>3. 手动编辑</strong> - 点击上方"✏️ 编辑配置"按钮，直接编辑 JSON 配置
+        </div>
+    </div>
+</div>
+{% endmacro %}

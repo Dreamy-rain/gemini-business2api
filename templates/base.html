@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Gemini Business API{% endblock %}</title>
+
+    <!-- 页面特定样式 -->
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    {% block content %}{% endblock %}
+
+    <!-- 共享脚本 -->
+    <script src="/static/js/api.js"></script>
+
+    <!-- 页面特定脚本 -->
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

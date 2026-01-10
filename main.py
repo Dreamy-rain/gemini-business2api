@@ -47,6 +47,14 @@ from core.account import (
 # 导入 Uptime 追踪器
 import uptime_tracker
 
+# 导入配置管理和模板系统
+from fastapi.templating import Jinja2Templates
+from config import config_manager, config
+from template_helpers import prepare_admin_template_data
+
+# 导入旧模板模块（用于登录页面等）
+from core import templates as old_templates
+
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 3000 条日志，重启后清空)
@@ -118,88 +126,24 @@ memory_handler = MemoryLogHandler()
 memory_handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S"))
 logger.addHandler(memory_handler)
 
-load_dotenv()
-
-# ---------- YAML 配置系统 ----------
-SETTINGS_FILE = "data/settings.yaml"
-
-# 默认配置
-DEFAULT_SETTINGS = {
-    "basic": {
-        "api_key": "",
-        "base_url": "",
-        "proxy": ""
-    },
-    "image_generation": {
-        "enabled": True,
-        "supported_models": ["gemini-3-pro-preview"],
-        "last_updated": None
-    },
-    "retry": {
-        "max_new_session_tries": 5,
-        "max_request_retries": 3,
-        "max_account_switch_tries": 5,
-        "account_failure_threshold": 3,
-        "rate_limit_cooldown_seconds": 600,
-        "session_cache_ttl_seconds": 3600
-    },
-    "public_display": {
-        "logo_url": "",
-        "chat_url": ""
-    },
-    "session": {
-        "expire_hours": 24
-    }
-}
-
-def load_settings() -> dict:
-    """加载 YAML 配置"""
-    Path("data").mkdir(exist_ok=True)
-    if Path(SETTINGS_FILE).exists():
-        try:
-            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-                settings = yaml.safe_load(f) or {}
-                # 合并默认配置（确保新增配置项有默认值）
-                for key, value in DEFAULT_SETTINGS.items():
-                    if key not in settings:
-                        settings[key] = value
-                    elif isinstance(value, dict):
-                        for k, v in value.items():
-                            if k not in settings[key]:
-                                settings[key][k] = v
-                return settings
-        except Exception as e:
-            print(f"[WARN] 加载配置文件失败: {e}，使用默认配置")
-    # 创建默认配置文件
-    save_settings(DEFAULT_SETTINGS)
-    return DEFAULT_SETTINGS.copy()
-
-def save_settings(settings: dict):
-    """保存 YAML 配置"""
-    Path("data").mkdir(exist_ok=True)
-    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-        yaml.dump(settings, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-
-# 加载配置
-settings = load_settings()
-
-# ---------- 配置（从 settings.yaml 读取）----------
-PROXY = settings["basic"]["proxy"]
+# ---------- 配置管理（使用统一配置系统）----------
+# 所有配置通过 config_manager 访问，优先级：环境变量 > YAML > 默认值
 TIMEOUT_SECONDS = 600
-API_KEY = os.getenv("API_KEY", settings["basic"]["api_key"])  # 优先使用环境变量
-PATH_PREFIX = os.getenv("PATH_PREFIX", "")  # 路径前缀保留环境变量（影响路由注册）
-ADMIN_KEY = os.getenv("ADMIN_KEY", "")  # 管理员密钥保留环境变量（安全相关）
-BASE_URL = settings["basic"]["base_url"]
-SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", generate_session_secret())  # 自动生成
-SESSION_EXPIRE_HOURS = settings["session"]["expire_hours"]
+API_KEY = config.basic.api_key
+PATH_PREFIX = config.security.path_prefix
+ADMIN_KEY = config.security.admin_key
+PROXY = config.basic.proxy
+BASE_URL = config.basic.base_url
+SESSION_SECRET_KEY = config.security.session_secret_key
+SESSION_EXPIRE_HOURS = config.session.expire_hours
 
 # ---------- 公开展示配置 ----------
-LOGO_URL = settings["public_display"]["logo_url"]
-CHAT_URL = settings["public_display"]["chat_url"]
+LOGO_URL = config.public_display.logo_url
+CHAT_URL = config.public_display.chat_url
 
 # ---------- 图片生成配置 ----------
-IMAGE_GENERATION_ENABLED = settings["image_generation"]["enabled"]
-IMAGE_GENERATION_MODELS = settings["image_generation"]["supported_models"]
+IMAGE_GENERATION_ENABLED = config.image_generation.enabled
+IMAGE_GENERATION_MODELS = config.image_generation.supported_models
 
 # ---------- 图片存储配置 ----------
 if os.path.exists("/data"):
@@ -207,13 +151,13 @@ if os.path.exists("/data"):
 else:
     IMAGE_DIR = "./data/images"  # 本地持久化存储
 
-# ---------- 重试配置（从 settings.yaml 读取）----------
-MAX_NEW_SESSION_TRIES = settings["retry"]["max_new_session_tries"]
-MAX_REQUEST_RETRIES = settings["retry"]["max_request_retries"]
-MAX_ACCOUNT_SWITCH_TRIES = settings["retry"]["max_account_switch_tries"]
-ACCOUNT_FAILURE_THRESHOLD = settings["retry"]["account_failure_threshold"]
-RATE_LIMIT_COOLDOWN_SECONDS = settings["retry"]["rate_limit_cooldown_seconds"]
-SESSION_CACHE_TTL_SECONDS = settings["retry"]["session_cache_ttl_seconds"]
+# ---------- 重试配置 ----------
+MAX_NEW_SESSION_TRIES = config.retry.max_new_session_tries
+MAX_REQUEST_RETRIES = config.retry.max_request_retries
+MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
+ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
+RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
+SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
 
 # ---------- 模型映射配置 ----------
 MODEL_MAPPING = {
@@ -299,6 +243,17 @@ logger.info("[SYSTEM] 系统初始化完成")
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
 
+# ---------- 模板系统配置 ----------
+templates = Jinja2Templates(directory="templates")
+
+# 开发模式：支持热更新
+if os.getenv("ENV") == "development":
+    templates.env.auto_reload = True
+    logger.info("[SYSTEM] 模板热更新已启用（开发模式）")
+
+# 挂载静态文件
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # ---------- Session 中间件配置 ----------
 from starlette.middleware.sessions import SessionMiddleware
 app.add_middleware(
@@ -374,10 +329,6 @@ async def startup_event():
     # 启动 Uptime 数据聚合任务
     asyncio.create_task(uptime_tracker.uptime_aggregation_task())
     logger.info("[SYSTEM] Uptime 数据聚合任务已启动（间隔: 240秒）")
-
-# ---------- 导入模板模块 ----------
-# 注意：必须在所有全局变量初始化之后导入，避免循环依赖
-from core import templates
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:
@@ -611,6 +562,24 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
     }
     return json.dumps(chunk)
 
+# ---------- 辅助函数 ----------
+
+def get_admin_template_data(request: Request):
+    """获取管理页面模板数据（避免重复代码）"""
+    return prepare_admin_template_data(
+        request, multi_account_mgr, log_buffer, log_lock,
+        api_key=API_KEY, base_url=BASE_URL, proxy=PROXY,
+        logo_url=LOGO_URL, chat_url=CHAT_URL, path_prefix=PATH_PREFIX,
+        max_new_session_tries=MAX_NEW_SESSION_TRIES,
+        max_request_retries=MAX_REQUEST_RETRIES,
+        max_account_switch_tries=MAX_ACCOUNT_SWITCH_TRIES,
+        account_failure_threshold=ACCOUNT_FAILURE_THRESHOLD,
+        rate_limit_cooldown_seconds=RATE_LIMIT_COOLDOWN_SECONDS,
+        session_cache_ttl_seconds=SESSION_CACHE_TTL_SECONDS
+    )
+
+# ---------- 路由定义 ----------
+
 @app.get("/")
 async def home(request: Request):
     """首页 - 根据PATH_PREFIX配置决定行为"""
@@ -620,7 +589,8 @@ async def home(request: Request):
     else:
         # 未设置PATH_PREFIX（公开模式），根据登录状态重定向
         if is_logged_in(request):
-            return HTMLResponse(content=templates.generate_admin_html(request, multi_account_mgr))
+            template_data = get_admin_template_data(request)
+            return templates.TemplateResponse("admin/index.html", template_data)
         else:
             return RedirectResponse(url="/login", status_code=302)
 
@@ -630,7 +600,7 @@ async def home(request: Request):
 @app.get("/login")
 async def admin_login_get(request: Request, error: str = None):
     """登录页面"""
-    return await templates.get_login_html(request, error)
+    return await old_templates.get_login_html(request, error)
 
 @app.post("/login")
 async def admin_login_post(request: Request, admin_key: str = Form(...)):
@@ -641,7 +611,7 @@ async def admin_login_post(request: Request, admin_key: str = Form(...)):
         return RedirectResponse(url="/", status_code=302)
     else:
         logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-        return await templates.get_login_html(request, error="密钥错误，请重试")
+        return await old_templates.get_login_html(request, error="密钥错误，请重试")
 
 @app.post("/logout")
 @require_login(redirect_to_login=False)
@@ -656,7 +626,7 @@ if PATH_PREFIX:
     @app.get(f"/{PATH_PREFIX}/login")
     async def admin_login_get_prefixed(request: Request, error: str = None):
         """登录页面（带前缀）"""
-        return await templates.get_login_html(request, error)
+        return await old_templates.get_login_html(request, error)
 
     @app.post(f"/{PATH_PREFIX}/login")
     async def admin_login_post_prefixed(request: Request, admin_key: str = Form(...)):
@@ -667,7 +637,7 @@ if PATH_PREFIX:
             return RedirectResponse(url=f"/{PATH_PREFIX}", status_code=302)
         else:
             logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-            return await templates.get_login_html(request, error="密钥错误，请重试")
+            return await old_templates.get_login_html(request, error="密钥错误，请重试")
 
     @app.post(f"/{PATH_PREFIX}/logout")
     @require_login(redirect_to_login=False)
@@ -684,8 +654,8 @@ if PATH_PREFIX:
 @require_login()
 async def admin_home_no_prefix(request: Request):
     """管理首页"""
-    html_content = templates.generate_admin_html(request, multi_account_mgr, show_hide_tip=False)
-    return HTMLResponse(content=html_content)
+    template_data = get_admin_template_data(request)
+    return templates.TemplateResponse("admin/index.html", template_data)
 
 # 带PATH_PREFIX的管理端点（如果配置了PATH_PREFIX）
 if PATH_PREFIX:
@@ -809,33 +779,45 @@ async def admin_enable_account(request: Request, account_id: str):
 @require_login()
 async def admin_get_settings(request: Request):
     """获取系统设置"""
-    return settings
+    # 返回当前配置（转换为字典格式）
+    return {
+        "basic": {
+            "api_key": config.basic.api_key,
+            "base_url": config.basic.base_url,
+            "proxy": config.basic.proxy
+        },
+        "image_generation": {
+            "enabled": config.image_generation.enabled,
+            "supported_models": config.image_generation.supported_models
+        },
+        "retry": {
+            "max_new_session_tries": config.retry.max_new_session_tries,
+            "max_request_retries": config.retry.max_request_retries,
+            "max_account_switch_tries": config.retry.max_account_switch_tries,
+            "account_failure_threshold": config.retry.account_failure_threshold,
+            "rate_limit_cooldown_seconds": config.retry.rate_limit_cooldown_seconds,
+            "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds
+        },
+        "public_display": {
+            "logo_url": config.public_display.logo_url,
+            "chat_url": config.public_display.chat_url
+        },
+        "session": {
+            "expire_hours": config.session.expire_hours
+        }
+    }
 
 @app.put("/admin/settings")
 @require_login()
 async def admin_update_settings(request: Request, new_settings: dict = Body(...)):
     """更新系统设置"""
-    global settings, API_KEY, PROXY, BASE_URL, LOGO_URL, CHAT_URL
+    global API_KEY, PROXY, BASE_URL, LOGO_URL, CHAT_URL
     global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
     global MAX_NEW_SESSION_TRIES, MAX_REQUEST_RETRIES, MAX_ACCOUNT_SWITCH_TRIES
     global ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS
     global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client
 
     try:
-        # 合并设置（保留未修改的项）
-        for key, value in new_settings.items():
-            if key in settings and isinstance(value, dict):
-                settings[key].update(value)
-            else:
-                settings[key] = value
-
-        # 添加更新时间
-        if "image_generation" in settings:
-            settings["image_generation"]["last_updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # 保存到文件
-        save_settings(settings)
-
         # 保存旧配置用于对比
         old_proxy = PROXY
         old_retry_config = {
@@ -844,21 +826,27 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
             "session_cache_ttl_seconds": SESSION_CACHE_TTL_SECONDS
         }
 
+        # 保存到 YAML
+        config_manager.save_yaml(new_settings)
+
+        # 热更新配置
+        config_manager.reload()
+
         # 更新全局变量（实时生效）
-        API_KEY = settings["basic"]["api_key"]
-        PROXY = settings["basic"]["proxy"]
-        BASE_URL = settings["basic"]["base_url"]
-        LOGO_URL = settings["public_display"]["logo_url"]
-        CHAT_URL = settings["public_display"]["chat_url"]
-        IMAGE_GENERATION_ENABLED = settings["image_generation"]["enabled"]
-        IMAGE_GENERATION_MODELS = settings["image_generation"]["supported_models"]
-        MAX_NEW_SESSION_TRIES = settings["retry"]["max_new_session_tries"]
-        MAX_REQUEST_RETRIES = settings["retry"]["max_request_retries"]
-        MAX_ACCOUNT_SWITCH_TRIES = settings["retry"]["max_account_switch_tries"]
-        ACCOUNT_FAILURE_THRESHOLD = settings["retry"]["account_failure_threshold"]
-        RATE_LIMIT_COOLDOWN_SECONDS = settings["retry"]["rate_limit_cooldown_seconds"]
-        SESSION_CACHE_TTL_SECONDS = settings["retry"]["session_cache_ttl_seconds"]
-        SESSION_EXPIRE_HOURS = settings["session"]["expire_hours"]
+        API_KEY = config.basic.api_key
+        PROXY = config.basic.proxy
+        BASE_URL = config.basic.base_url
+        LOGO_URL = config.public_display.logo_url
+        CHAT_URL = config.public_display.chat_url
+        IMAGE_GENERATION_ENABLED = config.image_generation.enabled
+        IMAGE_GENERATION_MODELS = config.image_generation.supported_models
+        MAX_NEW_SESSION_TRIES = config.retry.max_new_session_tries
+        MAX_REQUEST_RETRIES = config.retry.max_request_retries
+        MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
+        ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
+        RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
+        SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
+        SESSION_EXPIRE_HOURS = config.session.expire_hours
 
         # 检查是否需要重建 HTTP 客户端（代理变化）
         if old_proxy != PROXY:
@@ -960,7 +948,7 @@ async def admin_clear_logs(request: Request, confirm: str = None):
 @require_login()
 async def admin_logs_html_route(request: Request):
     """返回美化的 HTML 日志查看界面"""
-    return await templates.admin_logs_html_no_auth(request)
+    return await old_templates.admin_logs_html_no_auth(request)
 
 # 带PATH_PREFIX的管理API端点（如果配置了PATH_PREFIX）
 if PATH_PREFIX:
@@ -1592,7 +1580,7 @@ async def get_public_uptime(days: int = 90):
 @app.get("/public/uptime/html")
 async def get_public_uptime_html():
     """Uptime 监控页面（类似 status.openai.com）"""
-    return await templates.get_uptime_html()
+    return await old_templates.get_uptime_html()
 
 @app.get("/public/stats")
 async def get_public_stats():
@@ -1679,7 +1667,7 @@ async def get_public_logs(request: Request, limit: int = 100):
 @app.get("/public/log/html")
 async def get_public_logs_html():
     """公开的脱敏日志查看器"""
-    return await templates.get_public_logs_html()
+    return await old_templates.get_public_logs_html()
 
 # ---------- 全局 404 处理（必须在最后） ----------
 

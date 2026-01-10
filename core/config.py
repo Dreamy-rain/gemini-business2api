@@ -87,7 +87,13 @@ class AppConfig(BaseModel):
 class ConfigManager:
     """配置管理器（单例）"""
 
-    def __init__(self, yaml_path: str = "data/settings.yaml"):
+    def __init__(self, yaml_path: str = None):
+        # 自动检测环境并设置默认路径
+        if yaml_path is None:
+            if os.path.exists("/data"):
+                yaml_path = "/data/settings.yaml"  # HF Pro 持久化
+            else:
+                yaml_path = "data/settings.yaml"  # 本地存储
         self.yaml_path = Path(yaml_path)
         self._config: Optional[AppConfig] = None
         self.load()

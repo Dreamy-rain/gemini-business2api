@@ -18,8 +18,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 配置文件路径
-ACCOUNTS_FILE = "accounts.json"
+# 配置文件路径 - 自动检测环境
+if os.path.exists("/data"):
+    ACCOUNTS_FILE = "/data/accounts.json"  # HF Pro 持久化
+else:
+    ACCOUNTS_FILE = "data/accounts.json"  # 本地存储（统一到 data 目录）
 
 
 @dataclass

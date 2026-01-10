@@ -1,4 +1,4 @@
-import json, time, os, asyncio, uuid, ssl, re, yaml
+import json, time, os, asyncio, uuid, ssl, re, yaml, shutil
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
 from pathlib import Path
@@ -14,6 +14,27 @@ from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
+
+# ---------- 数据目录配置 ----------
+# 自动检测环境：HF Spaces Pro 使用 /data，本地使用 ./data
+if os.path.exists("/data"):
+    DATA_DIR = "/data"  # HF Pro 持久化存储
+    logger_prefix = "[HF-PRO]"
+else:
+    DATA_DIR = "./data"  # 本地持久化存储
+    logger_prefix = "[LOCAL]"
+
+# 确保数据目录存在
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# 统一的数据文件路径
+ACCOUNTS_FILE = os.path.join(DATA_DIR, "accounts.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.yaml")
+STATS_FILE = os.path.join(DATA_DIR, "stats.json")
+IMAGE_DIR = os.path.join(DATA_DIR, "images")
+
+# 确保图片目录存在
+os.makedirs(IMAGE_DIR, exist_ok=True)
 
 # 导入认证模块
 from core.auth import verify_api_key
@@ -59,7 +80,6 @@ log_buffer = deque(maxlen=3000)
 log_lock = Lock()
 
 # 统计数据持久化
-STATS_FILE = "data/stats.json"
 stats_lock = asyncio.Lock()  # 改为异步锁
 
 async def load_stats():
@@ -141,12 +161,6 @@ CHAT_URL = config.public_display.chat_url
 # ---------- 图片生成配置 ----------
 IMAGE_GENERATION_ENABLED = config.image_generation.enabled
 IMAGE_GENERATION_MODELS = config.image_generation.supported_models
-
-# ---------- 图片存储配置 ----------
-if os.path.exists("/data"):
-    IMAGE_DIR = "/data/images"  # HF Pro持久化存储
-else:
-    IMAGE_DIR = "./data/images"  # 本地持久化存储
 
 # ---------- 重试配置 ----------
 MAX_NEW_SESSION_TRIES = config.retry.max_new_session_tries
@@ -314,6 +328,15 @@ else:
 async def startup_event():
     """应用启动时初始化后台任务"""
     global global_stats
+
+    # 文件迁移逻辑：将根目录的旧文件迁移到 data 目录
+    old_accounts = "accounts.json"
+    if os.path.exists(old_accounts) and not os.path.exists(ACCOUNTS_FILE):
+        try:
+            shutil.copy(old_accounts, ACCOUNTS_FILE)
+            logger.info(f"{logger_prefix} 已迁移 {old_accounts} -> {ACCOUNTS_FILE}")
+        except Exception as e:
+            logger.warning(f"{logger_prefix} 文件迁移失败: {e}")
 
     # 加载统计数据
     global_stats = await load_stats()

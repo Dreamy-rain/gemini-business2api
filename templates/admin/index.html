@@ -78,6 +78,19 @@
                                 </div>
                             </div>
                         </div>
+                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.06);">
+                            <div style="font-size: 11px; color: #6b6b6b; margin-bottom: 6px;">支持的模型</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                                <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-auto</span>
+                                <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-flash</span>
+                                <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-pro</span>
+                                <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-flash-preview</span>
+                                <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-pro-preview</span>
+                            </div>
+                            <div style="margin-top: 8px; font-size: 11px; color: #86868b;">
+                                📸 图片生成可在"系统设置"自定义配置
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -269,10 +282,17 @@
             <!-- Tab 4: 系统设置 -->
             <div id="tab-settings" class="tab-content">
                 <div class="section">
-                    <div class="section-title">系统设置</div>
-                    <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 16px; padding-left: 4px;">
-                        ✅ 所有配置修改后<strong>立即生效</strong>，无需重启服务。配置保存在 <code>data/settings.yaml</code><br>
-                        📋 配置优先级：<strong>YAML > 环境变量 > 默认值</strong>（安全配置除外，仅从环境变量读取）
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; gap: 16px; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <div class="section-title" style="margin-bottom: 4px;">系统设置</div>
+                            <div style="color: #6b6b6b; font-size: 11px; padding-left: 4px;">
+                                ✅ 配置修改后立即生效，无需重启 • 📋 优先级：YAML > 环境变量 > 默认值
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-shrink: 0;">
+                            <button class="btn" onclick="loadSettings()">重置</button>
+                            <button class="btn" onclick="saveSettings()">保存设置</button>
+                        </div>
                     </div>
 
                     <div class="grid-env">
@@ -381,11 +401,6 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: flex-end;">
-                        <button class="btn btn-secondary" onclick="loadSettings()">重置</button>
-                        <button class="btn btn-primary" onclick="saveSettings()">保存设置</button>
                     </div>
                 </div>
             </div>

@@ -406,7 +406,19 @@ def reload_accounts(
     session_cache_ttl_seconds: int,
     global_stats: dict
 ) -> MultiAccountManager:
-    """重新加载账户配置（清空缓存并重新加载）"""
+    """重新加载账户配置（保留现有账户的运行时状态）"""
+    # 保存现有账户的运行时状态
+    old_states = {}
+    for account_id, account_mgr in multi_account_mgr.accounts.items():
+        old_states[account_id] = {
+            "is_available": account_mgr.is_available,
+            "last_error_time": account_mgr.last_error_time,
+            "last_429_time": account_mgr.last_429_time,
+            "error_count": account_mgr.error_count,
+            "conversation_count": account_mgr.conversation_count
+        }
+
+    # 清空会话缓存并重新加载配置
     multi_account_mgr.global_session_cache.clear()
     new_mgr = load_multi_account_config(
         http_client,
@@ -416,6 +428,18 @@ def reload_accounts(
         session_cache_ttl_seconds,
         global_stats
     )
+
+    # 恢复现有账户的运行时状态
+    for account_id, state in old_states.items():
+        if account_id in new_mgr.accounts:
+            account_mgr = new_mgr.accounts[account_id]
+            account_mgr.is_available = state["is_available"]
+            account_mgr.last_error_time = state["last_error_time"]
+            account_mgr.last_429_time = state["last_429_time"]
+            account_mgr.error_count = state["error_count"]
+            account_mgr.conversation_count = state["conversation_count"]
+            logger.debug(f"[CONFIG] 账户 {account_id} 运行时状态已恢复")
+
     logger.info(f"[CONFIG] 配置已重载，当前账户数: {len(new_mgr.accounts)}")
     return new_mgr
 

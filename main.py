@@ -600,7 +600,7 @@ async def home(request: Request):
 @app.get("/login")
 async def admin_login_get(request: Request, error: str = None):
     """登录页面"""
-    return await old_templates.get_login_html(request, error)
+    return templates.TemplateResponse("auth/login.html", {"request": request, "error": error})
 
 @app.post("/login")
 async def admin_login_post(request: Request, admin_key: str = Form(...)):
@@ -611,7 +611,7 @@ async def admin_login_post(request: Request, admin_key: str = Form(...)):
         return RedirectResponse(url="/", status_code=302)
     else:
         logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-        return await old_templates.get_login_html(request, error="密钥错误，请重试")
+        return templates.TemplateResponse("auth/login.html", {"request": request, "error": "密钥错误，请重试"})
 
 @app.post("/logout")
 @require_login(redirect_to_login=False)
@@ -626,7 +626,7 @@ if PATH_PREFIX:
     @app.get(f"/{PATH_PREFIX}/login")
     async def admin_login_get_prefixed(request: Request, error: str = None):
         """登录页面（带前缀）"""
-        return await old_templates.get_login_html(request, error)
+        return templates.TemplateResponse("auth/login.html", {"request": request, "error": error})
 
     @app.post(f"/{PATH_PREFIX}/login")
     async def admin_login_post_prefixed(request: Request, admin_key: str = Form(...)):
@@ -637,7 +637,7 @@ if PATH_PREFIX:
             return RedirectResponse(url=f"/{PATH_PREFIX}", status_code=302)
         else:
             logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-            return await old_templates.get_login_html(request, error="密钥错误，请重试")
+            return templates.TemplateResponse("auth/login.html", {"request": request, "error": "密钥错误，请重试"})
 
     @app.post(f"/{PATH_PREFIX}/logout")
     @require_login(redirect_to_login=False)

@@ -52,9 +52,6 @@ from fastapi.templating import Jinja2Templates
 from core.config import config_manager, config
 from util.template_helpers import prepare_admin_template_data
 
-# 导入旧模板模块（用于登录页面等）
-from core import templates as old_templates
-
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 3000 条日志，重启后清空)
@@ -948,7 +945,7 @@ async def admin_clear_logs(request: Request, confirm: str = None):
 @require_login()
 async def admin_logs_html_route(request: Request):
     """返回美化的 HTML 日志查看界面"""
-    return await old_templates.admin_logs_html_no_auth(request)
+    return templates.TemplateResponse("admin/logs.html", {"request": request})
 
 # 带PATH_PREFIX的管理API端点（如果配置了PATH_PREFIX）
 if PATH_PREFIX:
@@ -1578,9 +1575,9 @@ async def get_public_uptime(days: int = 90):
     return await uptime_tracker.get_uptime_summary(days)
 
 @app.get("/public/uptime/html")
-async def get_public_uptime_html():
+async def get_public_uptime_html(request: Request):
     """Uptime 监控页面（类似 status.openai.com）"""
-    return await old_templates.get_uptime_html()
+    return templates.TemplateResponse("public/uptime.html", {"request": request})
 
 @app.get("/public/stats")
 async def get_public_stats():
@@ -1665,9 +1662,13 @@ async def get_public_logs(request: Request, limit: int = 100):
         return {"total": 0, "logs": [], "error": str(e)}
 
 @app.get("/public/log/html")
-async def get_public_logs_html():
+async def get_public_logs_html(request: Request):
     """公开的脱敏日志查看器"""
-    return await old_templates.get_public_logs_html()
+    return templates.TemplateResponse("public/logs.html", {
+        "request": request,
+        "logo_url": LOGO_URL,
+        "chat_url": CHAT_URL
+    })
 
 # ---------- 全局 404 处理（必须在最后） ----------
 

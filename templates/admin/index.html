@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% from "components/alerts.html" import api_key_status, error_alert %}
+{% from "components/account_table.html" import account_table %}
 
 {% block title %}系统管理 - Gemini Business API{% endblock %}
 
@@ -33,8 +35,8 @@
 
             <!-- Tab 1: 账户管理 -->
             <div id="tab-accounts" class="tab-content active">
-                {{ api_key_status|safe }}
-                {{ error_alert|safe }}
+                {{ api_key_status(has_api_key) }}
+                {{ error_alert(error_count) }}
 
                 <div class="alert alert-primary">
                     <div class="alert-icon">🔗</div>
@@ -82,7 +84,7 @@
                     <div style="color: #6b6b6b; font-size: 12px; margin-bottom: 12px; padding-left: 4px;">
                         默认过期时间12小时，注意北京时间 • 批量上传使用 <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px;">script/download-config.js</code> 油猴脚本
                     </div>
-                    {{ accounts_html|safe }}
+                    {{ account_table(accounts_data) }}
                 </div>
             </div>
 

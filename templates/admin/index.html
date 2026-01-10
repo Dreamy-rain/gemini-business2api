@@ -44,38 +44,37 @@
                 <div class="alert alert-primary">
                     <div class="alert-icon">🔗</div>
                     <div class="alert-content">
-                        <strong>API 接口信息</strong>
-                        <div style="margin-top: 10px;">
-                            <div style="margin-bottom: 12px;">
-                                <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">基础端点（部分客户端）</div>
-                                <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{{ api_base_url }}</code>
-                            </div>
-                            <div style="margin-bottom: 12px;">
-                                <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">API Base（OpenAI SDK 等）</div>
-                                <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{{ api_base_v1 }}</code>
-                            </div>
-                            <div style="margin-bottom: 12px;">
-                                <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">完整聊天接口（直接调用）</div>
-                                <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block; word-break: break-all;">{{ api_endpoint }}</code>
-                            </div>
-                            <div style="margin-bottom: 12px;">
-                                <div style="color: #86868b; font-size: 11px; margin-bottom: 4px;">API 密钥</div>
-                                <code style="font-size: 11px; background: rgba(0,0,0,0.05); padding: 4px 8px; border-radius: 4px; display: inline-block;">{% if main.API_KEY %}{{ main.API_KEY }}{% else %}<span style="color: #ff9500;">未设置（公开访问）</span>{% endif %}</code>
-                            </div>
-                            <div style="margin-bottom: 12px;">
-                                <div style="color: #86868b; font-size: 11px; margin-bottom: 6px;">支持的模型</div>
-                                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
-                                    <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-auto</span>
-                                    <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-flash</span>
-                                    <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-2.5-pro</span>
-                                    <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-flash-preview</span>
-                                    <span style="background: #f0f0f2; color: #1d1d1f; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;">gemini-3-pro-preview</span>
+                        <strong>API 接口</strong>
+                        <div style="margin-top: 6px; color: #86868b; font-size: 11px;">根据客户端选择对应接口</div>
+                        <div style="margin-top: 10px; display: grid; gap: 10px;">
+                            <div class="api-item">
+                                <span class="api-item-label">基础端点</span>
+                                <div class="api-item-content" style="display: flex; gap: 8px; flex: 1;">
+                                    <code class="api-item-code">{{ api_base_url }}</code>
+                                    <button class="btn-copy" onclick="navigator.clipboard.writeText('{{ api_base_url }}').then(() => { this.innerHTML = '✅'; setTimeout(() => this.innerHTML = '📋', 2000); })">📋</button>
                                 </div>
                             </div>
-                            <div style="background: rgba(0,0,0,0.03); padding: 10px; border-radius: 6px;">
-                                <div style="font-size: 11px; color: #1d1d1f; margin-bottom: 4px; font-weight: 600;">📸 图片生成</div>
-                                <div style="font-size: 11px; color: #86868b; line-height: 1.6;">
-                                    可在"系统设置"标签页自定义配置
+                            <div class="api-item">
+                                <span class="api-item-label">SDK 接口</span>
+                                <div class="api-item-content" style="display: flex; gap: 8px; flex: 1;">
+                                    <code class="api-item-code">{{ api_base_v1 }}</code>
+                                    <button class="btn-copy" onclick="navigator.clipboard.writeText('{{ api_base_v1 }}').then(() => { this.innerHTML = '✅'; setTimeout(() => this.innerHTML = '📋', 2000); })">📋</button>
+                                </div>
+                            </div>
+                            <div class="api-item">
+                                <span class="api-item-label">完整接口</span>
+                                <div class="api-item-content" style="display: flex; gap: 8px; flex: 1;">
+                                    <code class="api-item-code">{{ api_endpoint }}</code>
+                                    <button class="btn-copy" onclick="navigator.clipboard.writeText('{{ api_endpoint }}').then(() => { this.innerHTML = '✅'; setTimeout(() => this.innerHTML = '📋', 2000); })">📋</button>
+                                </div>
+                            </div>
+                            <div class="api-item">
+                                <span class="api-item-label">API 密钥</span>
+                                <div class="api-item-content" style="display: flex; gap: 8px; flex: 1;">
+                                    <code class="api-item-code">{% if main.API_KEY %}{{ main.API_KEY }}{% else %}<span style="color: #ff9500;">未设置</span>{% endif %}</code>
+                                    {% if main.API_KEY %}
+                                    <button class="btn-copy" onclick="navigator.clipboard.writeText('{{ main.API_KEY }}').then(() => { this.innerHTML = '✅'; setTimeout(() => this.innerHTML = '📋', 2000); })">📋</button>
+                                    {% endif %}
                                 </div>
                             </div>
                         </div>

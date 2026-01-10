@@ -41,7 +41,6 @@ accounts.json
 
 # Generated files
 data/images/
-static/
 logs/
 
 # OS

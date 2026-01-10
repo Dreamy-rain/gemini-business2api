@@ -1,0 +1,33 @@
+{# API 密钥状态提示 #}
+{% macro api_key_status(has_api_key) %}
+{% if has_api_key %}
+<div class="alert alert-success">
+    <div class="alert-icon">🔒</div>
+    <div class="alert-content">
+        <strong>API 安全模式已启用</strong>
+        <div class="alert-desc">API 端点需要携带 Authorization 密钥才能访问。</div>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-warning">
+    <div class="alert-icon">⚠️</div>
+    <div class="alert-content">
+        <strong>API 密钥未设置</strong>
+        <div class="alert-desc">API 端点当前允许公开访问。建议在 .env 文件中配置 <code>API_KEY</code> 环境变量以提升安全性。</div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{# 错误日志提示 #}
+{% macro error_alert(error_count) %}
+{% if error_count > 0 %}
+<div class="alert alert-error">
+    <div class="alert-icon">🚨</div>
+    <div class="alert-content">
+        <strong>检测到 {{ error_count }} 条错误日志</strong>
+        <a href="/public/log/html" class="alert-link">查看详情 &rarr;</a>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}

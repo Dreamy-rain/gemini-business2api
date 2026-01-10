@@ -20,14 +20,16 @@
 {% endmacro %}
 
 {# 错误日志提示 #}
-{% macro error_alert(error_count) %}
+{% macro error_alert(error_count, admin_path_segment) %}
 {% if error_count > 0 %}
-<div class="alert alert-error">
+<div class="alert alert-error" id="error-alert">
     <div class="alert-icon">🚨</div>
     <div class="alert-content">
         <strong>检测到 {{ error_count }} 条错误日志</strong>
-        <a href="/public/log/html" class="alert-link">查看详情 &rarr;</a>
+        <a href="/{{ admin_path_segment }}/log/html" class="alert-link" target="_blank">查看详情 &rarr;</a>
+        <div class="alert-desc">建议及时查看并处理错误日志，确保系统正常运行</div>
     </div>
+    <button class="alert-close" onclick="document.getElementById('error-alert').style.display='none'" title="关闭">&times;</button>
 </div>
 {% endif %}
 {% endmacro %}

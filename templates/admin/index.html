@@ -36,7 +36,7 @@
             <!-- Tab 1: 账户管理 -->
             <div id="tab-accounts" class="tab-content active">
                 {{ api_key_status(has_api_key) }}
-                {{ error_alert(error_count) }}
+                {{ error_alert(error_count, admin_path_segment) }}
 
                 <div class="alert alert-primary">
                     <div class="alert-icon">🔗</div>

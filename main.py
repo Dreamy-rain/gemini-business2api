@@ -45,12 +45,12 @@ from core.account import (
 )
 
 # 导入 Uptime 追踪器
-import uptime_tracker
+from core import uptime as uptime_tracker
 
 # 导入配置管理和模板系统
 from fastapi.templating import Jinja2Templates
-from config import config_manager, config
-from template_helpers import prepare_admin_template_data
+from core.config import config_manager, config
+from util.template_helpers import prepare_admin_template_data
 
 # 导入旧模板模块（用于登录页面等）
 from core import templates as old_templates

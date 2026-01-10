@@ -3,7 +3,7 @@
 用于为 Jinja2 模板准备数据（纯数据，不包含 HTML）
 """
 
-from config import config_manager, config
+from core.config import config_manager, config
 from core.account import format_account_expiration
 
 

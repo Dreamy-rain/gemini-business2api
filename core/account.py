@@ -257,6 +257,13 @@ class MultiAccountManager:
                 self._session_locks[conv_key] = asyncio.Lock()
             return self._session_locks[conv_key]
 
+    def update_http_client(self, http_client):
+        """更新所有账户使用的 http_client（用于代理变更后重建客户端）"""
+        for account_mgr in self.accounts.values():
+            account_mgr.http_client = http_client
+            if account_mgr.jwt_manager is not None:
+                account_mgr.jwt_manager.http_client = http_client
+
     def add_account(self, config: AccountConfig, http_client, user_agent: str, account_failure_threshold: int, rate_limit_cooldown_seconds: int, global_stats: dict):
         """添加账户"""
         manager = AccountManager(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds)

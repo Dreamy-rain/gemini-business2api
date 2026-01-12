@@ -882,6 +882,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
                     max_connections=200
                 )
             )
+            # 更新所有账户的 http_client 引用
+            multi_account_mgr.update_http_client(http_client)
 
         # 检查是否需要更新账户管理器配置（重试策略变化）
         retry_changed = (

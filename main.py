@@ -895,7 +895,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         if retry_changed:
             logger.info(f"[CONFIG] 重试策略已变化，更新账户管理器配置")
             # 更新所有账户管理器的配置
-            multi_account_mgr.session_cache_ttl_seconds = SESSION_CACHE_TTL_SECONDS
+            multi_account_mgr.cache_ttl = SESSION_CACHE_TTL_SECONDS
             for account_id, account_mgr in multi_account_mgr.accounts.items():
                 account_mgr.account_failure_threshold = ACCOUNT_FAILURE_THRESHOLD
                 account_mgr.rate_limit_cooldown_seconds = RATE_LIMIT_COOLDOWN_SECONDS

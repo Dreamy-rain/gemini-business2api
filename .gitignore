@@ -42,6 +42,7 @@ accounts.json
 # Generated files
 data/images/
 logs/
+test/
 
 # OS
 .DS_Store

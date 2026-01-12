@@ -1503,6 +1503,9 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         yield f"data: {chunk}\n\n"
 
     # 使用流式请求
+    json_objects = []  # 收集所有响应对象用于图片解析
+    file_ids_info = None  # 保存图片信息
+
     async with http_client.stream(
         "POST",
         "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetStreamAssist",
@@ -1514,7 +1517,6 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             raise HTTPException(status_code=r.status_code, detail=f"Upstream Error {error_text.decode()}")
 
         # 使用异步解析器处理 JSON 数组流
-        json_objects = []  # 收集所有响应对象用于图片解析
         try:
             async for json_obj in parse_json_array_stream_async(r.aiter_lines()):
                 json_objects.append(json_obj)  # 收集响应
@@ -1537,44 +1539,12 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                         chunk = create_chunk(chat_id, created_time, model_name, {"content": text}, None)
                         yield f"data: {chunk}\n\n"
 
-            # 处理图片生成
+            # 提取图片信息（在 async with 块内）
             if json_objects:
                 file_ids, session_name = parse_images_from_response(json_objects)
-
                 if file_ids and session_name:
+                    file_ids_info = (file_ids, session_name)
                     logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 检测到{len(file_ids)}张生成图片")
-
-                    try:
-                        base_url = get_base_url(request) if request else ""
-                        file_metadata = await get_session_file_metadata(account_manager, session_name, http_client, USER_AGENT, request_id)
-
-                        # 并行下载所有图片
-                        download_tasks = []
-                        for file_info in file_ids:
-                            fid = file_info["fileId"]
-                            mime = file_info["mimeType"]
-                            meta = file_metadata.get(fid, {})
-                            correct_session = meta.get("session") or session_name
-                            task = download_image_with_jwt(account_manager, correct_session, fid, http_client, USER_AGENT, request_id)
-                            download_tasks.append((fid, mime, task))
-
-                        results = await asyncio.gather(*[task for _, _, task in download_tasks], return_exceptions=True)
-
-                        # 处理下载结果
-                        for idx, ((fid, mime, _), result) in enumerate(zip(download_tasks, results), 1):
-                            if isinstance(result, Exception):
-                                logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}")
-                                continue
-
-                            image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
-                            logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
-
-                            markdown = f"\n\n![生成的图片]({image_url})\n\n"
-                            chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
-                            yield f"data: {chunk}\n\n"
-
-                    except Exception as e:
-                        logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片处理失败: {str(e)}")
 
         except ValueError as e:
             logger.error(f"[API] [{account_manager.config.account_id}] [req_{request_id}] JSON解析失败: {str(e)}")
@@ -1583,8 +1553,61 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             logger.error(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 流处理错误 ({error_type}): {str(e)}")
             raise
 
-        total_time = time.time() - start_time
-        logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 响应完成: {total_time:.2f}秒")
+    # 在 async with 块外处理图片下载（避免占用上游连接）
+    if file_ids_info:
+        file_ids, session_name = file_ids_info
+        try:
+            base_url = get_base_url(request) if request else ""
+            file_metadata = await get_session_file_metadata(account_manager, session_name, http_client, USER_AGENT, request_id)
+
+            # 并行下载所有图片
+            download_tasks = []
+            for file_info in file_ids:
+                fid = file_info["fileId"]
+                mime = file_info["mimeType"]
+                meta = file_metadata.get(fid, {})
+                correct_session = meta.get("session") or session_name
+                task = download_image_with_jwt(account_manager, correct_session, fid, http_client, USER_AGENT, request_id)
+                download_tasks.append((fid, mime, task))
+
+            results = await asyncio.gather(*[task for _, _, task in download_tasks], return_exceptions=True)
+
+            # 处理下载结果
+            success_count = 0
+            for idx, ((fid, mime, _), result) in enumerate(zip(download_tasks, results), 1):
+                if isinstance(result, Exception):
+                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}下载失败: {type(result).__name__}: {str(result)[:100]}")
+                    # 降级处理：返回错误提示而不是静默失败
+                    error_msg = f"\n\n⚠️ 图片 {idx} 下载失败\n\n"
+                    chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
+                    yield f"data: {chunk}\n\n"
+                    continue
+
+                try:
+                    image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
+                    logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
+                    success_count += 1
+
+                    markdown = f"\n\n![生成的图片]({image_url})\n\n"
+                    chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
+                    yield f"data: {chunk}\n\n"
+                except Exception as save_error:
+                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}保存失败: {str(save_error)[:100]}")
+                    error_msg = f"\n\n⚠️ 图片 {idx} 保存失败\n\n"
+                    chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
+                    yield f"data: {chunk}\n\n"
+
+            logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片处理完成: {success_count}/{len(file_ids)} 成功")
+
+        except Exception as e:
+            logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片处理失败: {type(e).__name__}: {str(e)[:100]}")
+            # 降级处理：通知用户图片处理失败
+            error_msg = f"\n\n⚠️ 图片处理失败: {type(e).__name__}\n\n"
+            chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
+            yield f"data: {chunk}\n\n"
+
+    total_time = time.time() - start_time
+    logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 响应完成: {total_time:.2f}秒")
     
     if is_stream:
         final_chunk = create_chunk(chat_id, created_time, model_name, {}, "stop")

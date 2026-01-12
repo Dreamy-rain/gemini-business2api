@@ -1,5 +1,6 @@
 import json
 from typing import Iterator, Dict, Any, Iterable, AsyncIterator
+from itertools import chain
 
 def parse_json_array_stream(line_iterator: Iterable[str]) -> Iterator[Dict[str, Any]]:
     """
@@ -30,13 +31,13 @@ def parse_json_array_stream(line_iterator: Iterable[str]) -> Iterator[Dict[str, 
         stripped_line = line.strip()
         if not stripped_line:
             continue
-        
+
         if stripped_line.startswith('['):
             in_array = True
             # 去掉起始的 '[' 字符，剩下的部分继续处理
             line = stripped_line[1:]
-            # 将剩余部分和后续的迭代器重新组合成一个新的迭代器
-            line_iterator = iter(list([line]) + list(line_iterator))
+            # 使用 chain 连接剩余行，避免转换为列表（内存优化）
+            line_iterator = chain([line], line_iterator)
             break
     
     if not in_array:

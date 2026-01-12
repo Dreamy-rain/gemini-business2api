@@ -69,8 +69,9 @@ async def make_request_with_jwt_retry(
     headers = get_common_headers(jwt, user_agent)
 
     # 合并用户提供的headers（如果有）
-    if "headers" in kwargs:
-        headers.update(kwargs.pop("headers"))
+    extra_headers = kwargs.pop("headers", None)
+    if extra_headers:
+        headers.update(extra_headers)
 
     # 发起请求
     if method.upper() == "GET":
@@ -84,8 +85,8 @@ async def make_request_with_jwt_retry(
     if resp.status_code == 401:
         jwt = await account_mgr.get_jwt(request_id)
         headers = get_common_headers(jwt, user_agent)
-        if "headers" in kwargs:
-            headers.update(kwargs["headers"])
+        if extra_headers:
+            headers.update(extra_headers)
 
         if method.upper() == "GET":
             resp = await http_client.get(url, headers=headers, **kwargs)

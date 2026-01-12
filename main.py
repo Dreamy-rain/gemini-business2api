@@ -781,7 +781,7 @@ async def admin_disable_account(request: Request, account_id: str):
 @app.put("/admin/accounts/{account_id}/enable")
 @require_login()
 async def admin_enable_account(request: Request, account_id: str):
-    """启用账户"""
+    """启用账户（同时重置错误禁用状态）"""
     global multi_account_mgr
     try:
         multi_account_mgr = _update_account_disabled_status(
@@ -789,6 +789,15 @@ async def admin_enable_account(request: Request, account_id: str):
             ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS,
             SESSION_CACHE_TTL_SECONDS, global_stats
         )
+
+        # 重置运行时错误状态（允许手动恢复错误禁用的账户）
+        if account_id in multi_account_mgr.accounts:
+            account_mgr = multi_account_mgr.accounts[account_id]
+            account_mgr.is_available = True
+            account_mgr.error_count = 0
+            account_mgr.last_429_time = 0.0
+            logger.info(f"[CONFIG] 账户 {account_id} 错误状态已重置")
+
         return {"status": "success", "message": f"账户 {account_id} 已启用", "account_count": len(multi_account_mgr.accounts)}
     except Exception as e:
         logger.error(f"[CONFIG] 启用账户失败: {str(e)}")

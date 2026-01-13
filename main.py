@@ -1,4 +1,4 @@
-import json, time, os, asyncio, uuid, ssl, re, yaml, shutil
+import json, time, os, asyncio, uuid, ssl, re, yaml, shutil, base64
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Union, Dict, Any
 from pathlib import Path
@@ -1593,16 +1593,26 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                     continue
 
                 try:
-                    image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
-                    logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
-                    success_count += 1
+                    # 根据配置选择输出格式
+                    output_format = config_manager.image_output_format
 
-                    markdown = f"\n\n![生成的图片]({image_url})\n\n"
+                    if output_format == "base64":
+                        # Base64 模式：直接返回 base64 编码
+                        b64 = base64.b64encode(result).decode()
+                        markdown = f"\n\n![生成的图片](data:{mime};base64,{b64})\n\n"
+                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已编码为base64")
+                    else:
+                        # URL 模式：保存到本地并返回 URL
+                        image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
+                        markdown = f"\n\n![生成的图片]({image_url})\n\n"
+                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
+
+                    success_count += 1
                     chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
                     yield f"data: {chunk}\n\n"
                 except Exception as save_error:
-                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}保存失败: {str(save_error)[:100]}")
-                    error_msg = f"\n\n⚠️ 图片 {idx} 保存失败\n\n"
+                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}处理失败: {str(save_error)[:100]}")
+                    error_msg = f"\n\n⚠️ 图片 {idx} 处理失败\n\n"
                     chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
                     yield f"data: {chunk}\n\n"
 

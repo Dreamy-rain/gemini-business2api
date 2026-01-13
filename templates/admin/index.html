@@ -346,6 +346,17 @@
                                             </label>
                                         </div>
                                     </div>
+                                    <div class="setting-item">
+                                        <label>图片输出格式</label>
+                                        <select id="setting-image-output-format" style="width: 100%; padding: 8px; border: 1px solid #d2d2d7; border-radius: 8px; font-size: 13px;">
+                                            <option value="base64">Base64 编码（默认）</option>
+                                            <option value="url">URL 链接</option>
+                                        </select>
+                                        <div style="margin-top: 6px; font-size: 11px; color: #86868b;">
+                                            Base64：无需存储，响应体积较大<br>
+                                            URL：需要存储空间，响应体积小
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

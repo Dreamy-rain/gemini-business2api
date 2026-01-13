@@ -271,6 +271,7 @@ let currentConfig = null;
                     document.querySelectorAll('#setting-image-models input[type="checkbox"]').forEach(cb => {
                         cb.checked = supportedModels.includes(cb.value);
                     });
+                    document.getElementById('setting-image-output-format').value = settings.image_generation?.output_format || 'base64';
 
                     // 重试策略配置
                     document.getElementById('setting-max-new-session').value = settings.retry?.max_new_session_tries || 5;
@@ -306,7 +307,8 @@ let currentConfig = null;
                         },
                         image_generation: {
                             enabled: document.getElementById('setting-image-enabled').checked,
-                            supported_models: supportedModels
+                            supported_models: supportedModels,
+                            output_format: document.getElementById('setting-image-output-format').value
                         },
                         retry: {
                             max_new_session_tries: parseInt(document.getElementById('setting-max-new-session').value) || 5,

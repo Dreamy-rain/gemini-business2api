@@ -39,6 +39,7 @@ class ImageGenerationConfig(BaseModel):
         default=["gemini-3-pro-preview"],
         description="支持图片生成的模型列表"
     )
+    output_format: str = Field(default="base64", description="图片输出格式：base64 或 url")
 
 
 class RetryConfig(BaseModel):
@@ -231,6 +232,11 @@ class ConfigManager:
     def image_generation_models(self) -> List[str]:
         """支持图片生成的模型列表"""
         return self._config.image_generation.supported_models
+
+    @property
+    def image_output_format(self) -> str:
+        """图片输出格式"""
+        return self._config.image_generation.output_format
 
     @property
     def session_expire_hours(self) -> int:

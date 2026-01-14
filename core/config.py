@@ -66,7 +66,6 @@ class SessionConfig(BaseModel):
 class SecurityConfig(BaseModel):
     """安全配置（仅从环境变量读取，不可热更新）"""
     admin_key: str = Field(default="", description="管理员密钥（必需）")
-    path_prefix: str = Field(default="", description="路径前缀（隐藏管理端点）")
     session_secret_key: str = Field(..., description="Session密钥")
 
 
@@ -104,7 +103,7 @@ class ConfigManager:
         加载配置
 
         优先级规则：
-        1. 安全配置（ADMIN_KEY, PATH_PREFIX, SESSION_SECRET_KEY）：仅从环境变量读取
+        1. 安全配置（ADMIN_KEY, SESSION_SECRET_KEY）：仅从环境变量读取
         2. 其他配置：YAML > 环境变量 > 默认值
         """
         # 1. 加载 YAML 配置
@@ -113,7 +112,6 @@ class ConfigManager:
         # 2. 加载安全配置（仅从环境变量，不允许 Web 修改）
         security_config = SecurityConfig(
             admin_key=os.getenv("ADMIN_KEY", ""),
-            path_prefix=os.getenv("PATH_PREFIX", ""),
             session_secret_key=os.getenv("SESSION_SECRET_KEY", self._generate_secret())
         )
 
@@ -192,11 +190,6 @@ class ConfigManager:
     def admin_key(self) -> str:
         """管理员密钥"""
         return self._config.security.admin_key
-
-    @property
-    def path_prefix(self) -> str:
-        """路径前缀"""
-        return self._config.security.path_prefix
 
     @property
     def session_secret_key(self) -> str:

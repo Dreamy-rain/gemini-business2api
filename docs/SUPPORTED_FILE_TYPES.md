@@ -1,6 +1,21 @@
 # 支持的文件类型清单
 
-本文档列出了 Gemini 支持的所有文件类型。
+本文档列出了 Gemini 可能支持的所有文件类型（可能支持）。
+
+**支持的文件类型**（12 个分类，100+ 种格式）：
+
+- 🖼️ **图片文件** - 11 种格式（PNG, JPEG, WebP, GIF, BMP, TIFF, SVG, ICO, HEIC, HEIF, AVIF）
+- 📄 **文档文件** - 9 种格式（PDF, TXT, Markdown, HTML, XML, CSV, TSV, RTF, LaTeX）
+- 📊 **Microsoft Office** - 6 种格式（.docx, .doc, .xlsx, .xls, .pptx, .ppt）
+- 📝 **Google Workspace** - 3 种格式（Docs, Sheets, Slides）
+- 💻 **代码文件** - 19 种语言（Python, JavaScript, TypeScript, Java, C/C++, Go, Rust, PHP, Ruby, Swift, Kotlin, Scala, Shell, PowerShell, SQL, R, MATLAB 等）
+- 🎨 **Web 开发** - 8 种格式（CSS, SCSS, LESS, JSON, YAML, TOML, Vue, Svelte）
+- 🎵 **音频文件** - 10 种格式（MP3, WAV, AAC, M4A, OGG, FLAC, AIFF, WMA, OPUS, AMR）
+- 🎬 **视频文件** - 10 种格式（MP4, MOV, AVI, MPEG, WebM, FLV, WMV, MKV, 3GPP, M4V）
+- 📦 **数据文件** - 6 种格式（JSON, JSONL, CSV, TSV, Parquet, Avro）
+- 🗜️ **压缩文件** - 5 种格式（ZIP, RAR, 7Z, TAR, GZ）
+- 🔧 **配置文件** - 5 种格式（YAML, TOML, INI, ENV, Properties）
+- 📚 **电子书** - 2 种格式（EPUB, MOBI）
 
 ## 🖼️ 图片文件（Image Files）
 
@@ -363,6 +378,6 @@ curl -X POST http://localhost:7860/v1/v1/chat/completions \
 
 ## 🔗 相关链接
 
-- [项目主页](https://github.com/your-repo/gemini-business2api)
+- [项目主页](https://github.com/Dreamy-rain/gemini-business2api)
 - [API 文档](README.md)
-- [问题反馈](https://github.com/your-repo/gemini-business2api/issues)
+- [问题反馈](https://github.com/Dreamy-rain/gemini-business2api/issues)

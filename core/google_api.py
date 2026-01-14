@@ -3,6 +3,7 @@
 负责与Google Gemini Business API的所有交互操作
 """
 import asyncio
+import json
 import logging
 import os
 import time
@@ -164,7 +165,18 @@ async def upload_context_file(
     req_tag = f"[req_{request_id}] " if request_id else ""
     if r.status_code != 200:
         logger.error(f"[FILE] [{account_manager.config.account_id}] {req_tag}文件上传失败: {r.status_code}")
-        raise HTTPException(r.status_code, f"Upload failed: {r.text}")
+        error_text = r.text
+        if r.status_code == 400:
+            try:
+                payload = json.loads(r.text or "{}")
+                message = payload.get("error", {}).get("message", "")
+            except Exception:
+                message = ""
+            if "Unsupported file type" in message:
+                mime_type = message.split("Unsupported file type:", 1)[-1].strip()
+                hint = f"不支持的文件类型: {mime_type}。请转换为 PDF、图片或纯文本后再上传。"
+                raise HTTPException(400, hint)
+        raise HTTPException(r.status_code, f"Upload failed: {error_text}")
 
     data = r.json()
     file_id = data.get("addContextFileResponse", {}).get("fileId")

@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 import httpx
 import aiofiles
 from fastapi import FastAPI, HTTPException, Header, Request, Body, Form
-from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
@@ -69,9 +70,7 @@ from core.account import (
 from core import uptime as uptime_tracker
 
 # 导入配置管理和模板系统
-from fastapi.templating import Jinja2Templates
 from core.config import config_manager, config
-from util.template_helpers import prepare_admin_template_data
 
 # ---------- 日志配置 ----------
 
@@ -83,7 +82,7 @@ log_lock = Lock()
 stats_lock = asyncio.Lock()  # 改为异步锁
 
 async def load_stats():
-    """加载统计数据（异步）"""
+    """加载统计数据（异步）。"""
     try:
         if os.path.exists(STATS_FILE):
             async with aiofiles.open(STATS_FILE, 'r', encoding='utf-8') as f:
@@ -94,9 +93,13 @@ async def load_stats():
     return {
         "total_visitors": 0,
         "total_requests": 0,
-        "request_timestamps": [],  # 最近1小时的请求时间戳
-        "visitor_ips": {},  # {ip: timestamp} 记录访问IP和时间
-        "account_conversations": {}  # {account_id: conversation_count} 账户对话次数
+        "request_timestamps": [],
+        "model_request_timestamps": {},
+        "failure_timestamps": [],
+        "rate_limit_timestamps": [],
+        "visitor_ips": {},
+        "account_conversations": {},
+        "recent_conversations": []
     }
 
 async def save_stats(stats):
@@ -112,9 +115,84 @@ global_stats = {
     "total_visitors": 0,
     "total_requests": 0,
     "request_timestamps": [],
+    "model_request_timestamps": {},
+    "failure_timestamps": [],
+    "rate_limit_timestamps": [],
     "visitor_ips": {},
-    "account_conversations": {}
+    "account_conversations": {},
+    "recent_conversations": []
 }
+
+
+def get_beijing_time_str(ts: Optional[float] = None) -> str:
+    tz = timezone(timedelta(hours=8))
+    current = datetime.fromtimestamp(ts or time.time(), tz=tz)
+    return current.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def build_recent_conversation_entry(
+    request_id: str,
+    model: Optional[str],
+    message_count: Optional[int],
+    start_ts: float,
+    status: str,
+    duration_s: Optional[float] = None,
+    error_detail: Optional[str] = None,
+) -> dict:
+    start_time = get_beijing_time_str(start_ts)
+    if model:
+        start_content = f"{model}"
+        if message_count:
+            start_content = f"{model} | {message_count}条消息"
+    else:
+        start_content = "请求处理中"
+
+    events = [{
+        "time": start_time,
+        "type": "start",
+        "content": start_content,
+    }]
+
+    end_time = get_beijing_time_str(start_ts + duration_s) if duration_s is not None else get_beijing_time_str()
+
+    if status == "success":
+        if duration_s is not None:
+            events.append({
+                "time": end_time,
+                "type": "complete",
+                "status": "success",
+            "content": f"响应完成 | 耗时{duration_s:.2f}s",
+            })
+        else:
+            events.append({
+                "time": end_time,
+                "type": "complete",
+                "status": "success",
+            "content": "响应完成",
+            })
+    elif status == "timeout":
+        events.append({
+            "time": end_time,
+            "type": "complete",
+            "status": "timeout",
+            "content": "请求超时",
+        })
+    else:
+        detail = error_detail or "请求失败"
+        events.append({
+            "time": end_time,
+            "type": "complete",
+            "status": "error",
+            "content": detail[:120],
+        })
+
+    return {
+        "request_id": request_id,
+        "start_time": start_time,
+        "start_ts": start_ts,
+        "status": status,
+        "events": events,
+    }
 
 class MemoryLogHandler(logging.Handler):
     """自定义日志处理器，将日志写入内存缓冲区"""
@@ -147,7 +225,6 @@ logger.addHandler(memory_handler)
 # 所有配置通过 config_manager 访问，优先级：环境变量 > YAML > 默认值
 TIMEOUT_SECONDS = 600
 API_KEY = config.basic.api_key
-PATH_PREFIX = config.security.path_prefix
 ADMIN_KEY = config.security.admin_key
 PROXY = config.basic.proxy
 BASE_URL = config.basic.base_url
@@ -204,6 +281,8 @@ def get_base_url(request: Request) -> str:
 
     return f"{forwarded_proto}://{forwarded_host}"
 
+
+
 # ---------- 常量定义 ----------
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 
@@ -230,15 +309,9 @@ if not ADMIN_KEY:
     sys.exit(1)
 
 # 启动日志
-if PATH_PREFIX:
-    logger.info(f"[SYSTEM] 路径前缀已配置: {PATH_PREFIX[:4]}****")
-    logger.info(f"[SYSTEM] API端点: /{PATH_PREFIX}/v1/chat/completions")
-    logger.info(f"[SYSTEM] 管理端点: /{PATH_PREFIX}/")
-else:
-    logger.info("[SYSTEM] 未配置路径前缀，使用默认路径")
-    logger.info("[SYSTEM] API端点: /v1/chat/completions")
-    logger.info("[SYSTEM] 管理端点: /admin/")
-logger.info("[SYSTEM] 公开端点: /public/log/html, /public/stats, /public/uptime/html")
+logger.info("[SYSTEM] API端点: /v1/chat/completions")
+logger.info("[SYSTEM] Admin API endpoints: /admin/*")
+logger.info("[SYSTEM] Public endpoints: /public/log, /public/stats, /public/uptime")
 logger.info(f"[SYSTEM] Session过期时间: {SESSION_EXPIRE_HOURS}小时")
 logger.info("[SYSTEM] 系统初始化完成")
 
@@ -254,16 +327,44 @@ logger.info("[SYSTEM] 系统初始化完成")
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
 
-# ---------- 模板系统配置 ----------
-templates = Jinja2Templates(directory="templates")
+frontend_origin = os.getenv("FRONTEND_ORIGIN", "").strip()
+allow_all_origins = os.getenv("ALLOW_ALL_ORIGINS", "0") == "1"
+if allow_all_origins and not frontend_origin:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+elif frontend_origin:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[frontend_origin],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# 开发模式：支持热更新
-if os.getenv("ENV") == "development":
-    templates.env.auto_reload = True
-    logger.info("[SYSTEM] 模板热更新已启用（开发模式）")
-
-# 挂载静态文件
 app.mount("/static", StaticFiles(directory="static"), name="static")
+if os.path.exists(os.path.join("static", "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join("static", "assets")), name="assets")
+if os.path.exists(os.path.join("static", "vendor")):
+    app.mount("/vendor", StaticFiles(directory=os.path.join("static", "vendor")), name="vendor")
+
+@app.get("/")
+async def serve_frontend_index():
+    index_path = os.path.join("static", "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    raise HTTPException(404, "Not Found")
+
+@app.get("/logo.svg")
+async def serve_logo():
+    logo_path = os.path.join("static", "logo.svg")
+    if os.path.exists(logo_path):
+        return FileResponse(logo_path)
+    raise HTTPException(404, "Not Found")
 
 # ---------- Session 中间件配置 ----------
 from starlette.middleware.sessions import SessionMiddleware
@@ -278,42 +379,29 @@ app.add_middleware(
 # ---------- Uptime 追踪中间件 ----------
 @app.middleware("http")
 async def track_uptime_middleware(request: Request, call_next):
-    """追踪每个请求的成功/失败状态，用于 Uptime 监控"""
-    # 只追踪 API 请求（排除静态文件、管理端点等）
+    """Uptime 监控：跟踪非对话接口的请求结果。"""
     path = request.url.path
-    if path.startswith("/images/") or path.startswith("/public/") or path.startswith("/favicon"):
+    if (
+        path.startswith("/images/")
+        or path.startswith("/public/")
+        or path.startswith("/favicon")
+        or path.endswith("/v1/chat/completions")
+    ):
         return await call_next(request)
 
     start_time = time.time()
-    success = False
-    model = None
 
     try:
         response = await call_next(request)
+        latency_ms = int((time.time() - start_time) * 1000)
         success = response.status_code < 400
-
-        # 尝试从请求中提取模型信息
-        if hasattr(request.state, "model"):
-            model = request.state.model
-
-        # 记录 API 主服务状态
-        uptime_tracker.record_request("api_service", success)
-
-        # 如果有模型信息，记录模型状态
-        if model and model in uptime_tracker.SUPPORTED_MODELS:
-            uptime_tracker.record_request(model, success)
-
+        uptime_tracker.record_request("api_service", success, latency_ms, response.status_code)
         return response
 
-    except Exception as e:
-        # 请求失败 - 尝试提取模型信息（可能在异常前已设置）
-        if hasattr(request.state, "model"):
-            model = request.state.model
-
+    except Exception:
         uptime_tracker.record_request("api_service", False)
-        if model and model in uptime_tracker.SUPPORTED_MODELS:
-            uptime_tracker.record_request(model, False)
         raise
+
 
 # ---------- 图片静态服务初始化 ----------
 os.makedirs(IMAGE_DIR, exist_ok=True)
@@ -340,15 +428,18 @@ async def startup_event():
 
     # 加载统计数据
     global_stats = await load_stats()
+    global_stats.setdefault("request_timestamps", [])
+    global_stats.setdefault("model_request_timestamps", {})
+    global_stats.setdefault("failure_timestamps", [])
+    global_stats.setdefault("rate_limit_timestamps", [])
+    global_stats.setdefault("recent_conversations", [])
+    uptime_tracker.configure_storage(os.path.join(DATA_DIR, "uptime.json"))
+    uptime_tracker.load_heartbeats()
     logger.info(f"[SYSTEM] 统计数据已加载: {global_stats['total_requests']} 次请求, {global_stats['total_visitors']} 位访客")
 
     # 启动缓存清理任务
     asyncio.create_task(multi_account_mgr.start_background_cleanup())
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
-
-    # 启动 Uptime 数据聚合任务
-    asyncio.create_task(uptime_tracker.uptime_aggregation_task())
-    logger.info("[SYSTEM] Uptime 数据聚合任务已启动（间隔: 240秒）")
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:
@@ -581,116 +672,129 @@ def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: 
         "system_fingerprint": None  # OpenAI 标准字段（可选）
     }
     return json.dumps(chunk)
-
-# ---------- 辅助函数 ----------
-
-def get_admin_template_data(request: Request):
-    """获取管理页面模板数据（避免重复代码）"""
-    return prepare_admin_template_data(
-        request, multi_account_mgr, log_buffer, log_lock,
-        api_key=API_KEY, base_url=BASE_URL, proxy=PROXY,
-        logo_url=LOGO_URL, chat_url=CHAT_URL, path_prefix=PATH_PREFIX,
-        max_new_session_tries=MAX_NEW_SESSION_TRIES,
-        max_request_retries=MAX_REQUEST_RETRIES,
-        max_account_switch_tries=MAX_ACCOUNT_SWITCH_TRIES,
-        account_failure_threshold=ACCOUNT_FAILURE_THRESHOLD,
-        rate_limit_cooldown_seconds=RATE_LIMIT_COOLDOWN_SECONDS,
-        session_cache_ttl_seconds=SESSION_CACHE_TTL_SECONDS
-    )
-
-# ---------- 路由定义 ----------
-
-@app.get("/")
-async def home(request: Request):
-    """首页 - 根据PATH_PREFIX配置决定行为"""
-    if PATH_PREFIX:
-        # 如果设置了PATH_PREFIX（隐藏模式），首页返回404，不暴露任何信息
-        raise HTTPException(404, "Not Found")
-    else:
-        # 未设置PATH_PREFIX（公开模式），根据登录状态重定向
-        if is_logged_in(request):
-            template_data = get_admin_template_data(request)
-            return templates.TemplateResponse("admin/index.html", template_data)
-        else:
-            return RedirectResponse(url="/login", status_code=302)
-
-# ---------- 登录/登出端点（支持可选PATH_PREFIX） ----------
-
-# 不带PATH_PREFIX的登录端点
-@app.get("/login")
-async def admin_login_get(request: Request, error: str = None):
-    """登录页面"""
-    return templates.TemplateResponse("auth/login.html", {"request": request, "error": error})
+# ---------- Auth endpoints (API) ----------
 
 @app.post("/login")
 async def admin_login_post(request: Request, admin_key: str = Form(...)):
-    """处理登录表单提交"""
+    """Admin login (API)"""
     if admin_key == ADMIN_KEY:
         login_user(request)
-        logger.info(f"[AUTH] 管理员登录成功")
-        return RedirectResponse(url="/", status_code=302)
-    else:
-        logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-        return templates.TemplateResponse("auth/login.html", {"request": request, "error": "密钥错误，请重试"})
+        logger.info("[AUTH] Admin login success")
+        return {"success": True}
+    logger.warning("[AUTH] Login failed - invalid key")
+    raise HTTPException(401, "Invalid key")
+
 
 @app.post("/logout")
 @require_login(redirect_to_login=False)
 async def admin_logout(request: Request):
-    """登出"""
+    """Admin logout (API)"""
     logout_user(request)
-    logger.info(f"[AUTH] 管理员已登出")
-    return RedirectResponse(url="/login", status_code=302)
-
-# 带PATH_PREFIX的登录端点（如果配置了PATH_PREFIX）
-if PATH_PREFIX:
-    @app.get(f"/{PATH_PREFIX}/login")
-    async def admin_login_get_prefixed(request: Request, error: str = None):
-        """登录页面（带前缀）"""
-        return templates.TemplateResponse("auth/login.html", {"request": request, "error": error})
-
-    @app.post(f"/{PATH_PREFIX}/login")
-    async def admin_login_post_prefixed(request: Request, admin_key: str = Form(...)):
-        """处理登录表单提交（带前缀）"""
-        if admin_key == ADMIN_KEY:
-            login_user(request)
-            logger.info(f"[AUTH] 管理员登录成功")
-            return RedirectResponse(url=f"/{PATH_PREFIX}", status_code=302)
-        else:
-            logger.warning(f"[AUTH] 登录失败 - 密钥错误")
-            return templates.TemplateResponse("auth/login.html", {"request": request, "error": "密钥错误，请重试"})
-
-    @app.post(f"/{PATH_PREFIX}/logout")
-    @require_login(redirect_to_login=False)
-    async def admin_logout_prefixed(request: Request):
-        """登出（带前缀）"""
-        logout_user(request)
-        logger.info(f"[AUTH] 管理员已登出")
-        return RedirectResponse(url=f"/{PATH_PREFIX}/login", status_code=302)
-
-# ---------- 管理端点（需要登录） ----------
-
-# 不带PATH_PREFIX的管理端点
-@app.get("/admin")
-@require_login()
-async def admin_home_no_prefix(request: Request):
-    """管理首页"""
-    template_data = get_admin_template_data(request)
-    return templates.TemplateResponse("admin/index.html", template_data)
-
-# 带PATH_PREFIX的管理端点（如果配置了PATH_PREFIX）
-if PATH_PREFIX:
-    @app.get(f"/{PATH_PREFIX}")
-    @require_login()
-    async def admin_home_prefixed(request: Request):
-        """管理首页（带前缀）"""
-        return await admin_home_no_prefix(request=request)
-
-# ---------- 管理API端点（需要登录） ----------
+    logger.info("[AUTH] Admin logout")
+    return {"success": True}
 
 @app.get("/admin/health")
 @require_login()
 async def admin_health(request: Request):
     return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+@app.get("/admin/stats")
+@require_login()
+async def admin_stats(request: Request):
+    now = time.time()
+    window_seconds = 12 * 3600
+
+    active_accounts = 0
+    failed_accounts = 0
+    rate_limited_accounts = 0
+    idle_accounts = 0
+
+    for account_manager in multi_account_mgr.accounts.values():
+        config = account_manager.config
+        cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
+        is_rate_limited = cooldown_seconds > 0 and cooldown_reason and "429" in cooldown_reason
+        is_expired = config.is_expired()
+        is_auto_disabled = (not account_manager.is_available) and (not config.disabled)
+        is_failed = is_auto_disabled or is_expired or cooldown_reason == "错误禁用"
+        is_active = (not is_failed) and (not config.disabled) and (not is_rate_limited)
+
+        if is_rate_limited:
+            rate_limited_accounts += 1
+        elif is_failed:
+            failed_accounts += 1
+        elif is_active:
+            active_accounts += 1
+        else:
+            idle_accounts += 1
+
+    total_accounts = len(multi_account_mgr.accounts)
+
+    beijing_tz = timezone(timedelta(hours=8))
+    now_dt = datetime.now(beijing_tz)
+    start_dt = (now_dt - timedelta(hours=11)).replace(minute=0, second=0, microsecond=0)
+    start_ts = start_dt.timestamp()
+    labels = [(start_dt + timedelta(hours=i)).strftime("%H:00") for i in range(12)]
+
+    def bucketize(timestamps: list) -> list:
+        buckets = [0] * 12
+        for ts in timestamps:
+            idx = int((ts - start_ts) // 3600)
+            if 0 <= idx < 12:
+                buckets[idx] += 1
+        return buckets
+
+    async with stats_lock:
+        global_stats.setdefault("request_timestamps", [])
+        global_stats.setdefault("failure_timestamps", [])
+        global_stats.setdefault("rate_limit_timestamps", [])
+        global_stats.setdefault("model_request_timestamps", {})
+        global_stats["request_timestamps"] = [
+            ts for ts in global_stats["request_timestamps"]
+            if now - ts < window_seconds
+        ]
+        global_stats["failure_timestamps"] = [
+            ts for ts in global_stats["failure_timestamps"]
+            if now - ts < window_seconds
+        ]
+        global_stats["rate_limit_timestamps"] = [
+            ts for ts in global_stats["rate_limit_timestamps"]
+            if now - ts < window_seconds
+        ]
+        model_request_timestamps = {}
+        for model, timestamps in global_stats["model_request_timestamps"].items():
+            model_request_timestamps[model] = [
+                ts for ts in timestamps
+                if now - ts < window_seconds
+            ]
+        global_stats["model_request_timestamps"] = model_request_timestamps
+
+        await save_stats(global_stats)
+
+        request_timestamps = list(global_stats["request_timestamps"])
+        failure_timestamps = list(global_stats["failure_timestamps"])
+        rate_limit_timestamps = list(global_stats["rate_limit_timestamps"])
+        model_request_timestamps = global_stats.get("model_request_timestamps", {})
+        model_requests = {}
+        for model in MODEL_MAPPING.keys():
+            model_requests[model] = bucketize(model_request_timestamps.get(model, []))
+        for model, timestamps in model_request_timestamps.items():
+            if model not in model_requests:
+                model_requests[model] = bucketize(timestamps)
+
+    return {
+        "total_accounts": total_accounts,
+        "active_accounts": active_accounts,
+        "failed_accounts": failed_accounts,
+        "rate_limited_accounts": rate_limited_accounts,
+        "idle_accounts": idle_accounts,
+        "trend": {
+            "labels": labels,
+            "total_requests": bucketize(request_timestamps),
+            "failed_requests": bucketize(failure_timestamps),
+            "rate_limited_requests": bucketize(rate_limit_timestamps),
+            "model_requests": model_requests,
+        }
+    }
 
 @app.get("/admin/accounts")
 @require_login()
@@ -803,7 +907,7 @@ async def admin_enable_account(request: Request, account_id: str):
         logger.error(f"[CONFIG] 启用账户失败: {str(e)}")
         raise HTTPException(500, f"启用失败: {str(e)}")
 
-# ---------- 系统设置 API ----------
+# ---------- Auth endpoints (API) ----------
 @app.get("/admin/settings")
 @require_login()
 async def admin_get_settings(request: Request):
@@ -975,86 +1079,10 @@ async def admin_clear_logs(request: Request, confirm: str = None):
     logger.info("[LOG] 日志已清空")
     return {"status": "success", "message": "已清空内存日志", "cleared_count": cleared_count}
 
-@app.get("/admin/log/html")
-@require_login()
-async def admin_logs_html_route(request: Request):
-    """返回美化的 HTML 日志查看界面"""
-    return templates.TemplateResponse("admin/logs.html", {"request": request})
-
-# 带PATH_PREFIX的管理API端点（如果配置了PATH_PREFIX）
-if PATH_PREFIX:
-    @app.get(f"/{PATH_PREFIX}/health")
-    @require_login()
-    async def admin_health_prefixed(request: Request):
-        return await admin_health(request=request)
-
-    @app.get(f"/{PATH_PREFIX}/accounts")
-    @require_login()
-    async def admin_get_accounts_prefixed(request: Request):
-        return await admin_get_accounts(request=request)
-
-    @app.get(f"/{PATH_PREFIX}/accounts-config")
-    @require_login()
-    async def admin_get_config_prefixed(request: Request):
-        return await admin_get_config(request=request)
-
-    @app.put(f"/{PATH_PREFIX}/accounts-config")
-    @require_login()
-    async def admin_update_config_prefixed(request: Request, accounts_data: list = Body(...)):
-        return await admin_update_config(request=request, accounts_data=accounts_data)
-
-    @app.delete(f"/{PATH_PREFIX}/accounts/{{account_id}}")
-    @require_login()
-    async def admin_delete_account_prefixed(request: Request, account_id: str):
-        return await admin_delete_account(request=request, account_id=account_id)
-
-    @app.put(f"/{PATH_PREFIX}/accounts/{{account_id}}/disable")
-    @require_login()
-    async def admin_disable_account_prefixed(request: Request, account_id: str):
-        return await admin_disable_account(request=request, account_id=account_id)
-
-    @app.put(f"/{PATH_PREFIX}/accounts/{{account_id}}/enable")
-    @require_login()
-    async def admin_enable_account_prefixed(request: Request, account_id: str):
-        return await admin_enable_account(request=request, account_id=account_id)
-
-    @app.get(f"/{PATH_PREFIX}/log")
-    @require_login()
-    async def admin_get_logs_prefixed(
-        request: Request,
-        limit: int = 1500,
-        level: str = None,
-        search: str = None,
-        start_time: str = None,
-        end_time: str = None
-    ):
-        return await admin_get_logs(request=request, limit=limit, level=level, search=search, start_time=start_time, end_time=end_time)
-
-    @app.delete(f"/{PATH_PREFIX}/log")
-    @require_login()
-    async def admin_clear_logs_prefixed(request: Request, confirm: str = None):
-        return await admin_clear_logs(request=request, confirm=confirm)
-
-    @app.get(f"/{PATH_PREFIX}/log/html")
-    @require_login()
-    async def admin_logs_html_route_prefixed(request: Request):
-        return await admin_logs_html_route(request=request)
-
-    @app.get(f"/{PATH_PREFIX}/settings")
-    @require_login()
-    async def admin_get_settings_prefixed(request: Request):
-        return await admin_get_settings(request=request)
-
-    @app.put(f"/{PATH_PREFIX}/settings")
-    @require_login()
-    async def admin_update_settings_prefixed(request: Request, new_settings: dict = Body(...)):
-        return await admin_update_settings(request=request, new_settings=new_settings)
-
-# ---------- API端点（API Key认证） ----------
+# ---------- Auth endpoints (API) ----------
 
 @app.get("/v1/models")
 async def list_models(authorization: str = Header(None)):
-    verify_api_key(API_KEY, authorization)
     data = []
     now = int(time.time())
     for m in MODEL_MAPPING.keys():
@@ -1063,20 +1091,9 @@ async def list_models(authorization: str = Header(None)):
 
 @app.get("/v1/models/{model_id}")
 async def get_model(model_id: str, authorization: str = Header(None)):
-    verify_api_key(API_KEY, authorization)
     return {"id": model_id, "object": "model"}
 
-# 带PATH_PREFIX的API端点（如果配置了PATH_PREFIX）
-if PATH_PREFIX:
-    @app.get(f"/{PATH_PREFIX}/v1/models")
-    async def list_models_prefixed(authorization: str = Header(None)):
-        return await list_models(authorization)
-
-    @app.get(f"/{PATH_PREFIX}/v1/models/{{model_id}}")
-    async def get_model_prefixed(model_id: str, authorization: str = Header(None)):
-        return await get_model(model_id, authorization)
-
-# ---------- 聊天API端点 ----------
+# ---------- Auth endpoints (API) ----------
 
 @app.post("/v1/chat/completions")
 async def chat(
@@ -1089,15 +1106,6 @@ async def chat(
     # ... (保留原有的chat逻辑)
     return await chat_impl(req, request, authorization)
 
-if PATH_PREFIX:
-    @app.post(f"/{PATH_PREFIX}/v1/chat/completions")
-    async def chat_prefixed(
-        req: ChatRequest,
-        request: Request,
-        authorization: Optional[str] = Header(None)
-    ):
-        return await chat(req, request, authorization)
-
 # chat实现函数
 async def chat_impl(
     req: ChatRequest,
@@ -1106,6 +1114,62 @@ async def chat_impl(
 ):
     # 生成请求ID（最优先，用于所有日志追踪）
     request_id = str(uuid.uuid4())[:6]
+
+    start_ts = time.time()
+    request.state.first_response_time = None
+    message_count = len(req.messages)
+
+    monitor_recorded = False
+
+    async def finalize_result(
+        status: str,
+        status_code: Optional[int] = None,
+        error_detail: Optional[str] = None
+    ) -> None:
+        nonlocal monitor_recorded
+        if monitor_recorded:
+            return
+        monitor_recorded = True
+        duration_s = time.time() - start_ts
+        latency_ms = None
+        first_response_time = getattr(request.state, "first_response_time", None)
+        if first_response_time:
+            latency_ms = int((first_response_time - start_ts) * 1000)
+        else:
+            latency_ms = int(duration_s * 1000)
+
+        uptime_tracker.record_request("api_service", status == "success", latency_ms, status_code)
+
+        entry = build_recent_conversation_entry(
+            request_id=request_id,
+            model=req.model if req else None,
+            message_count=message_count,
+            start_ts=start_ts,
+            status=status,
+            duration_s=duration_s if status == "success" else None,
+            error_detail=error_detail,
+        )
+
+        async with stats_lock:
+            global_stats.setdefault("failure_timestamps", [])
+            global_stats.setdefault("rate_limit_timestamps", [])
+            global_stats.setdefault("recent_conversations", [])
+            if status != "success":
+                if status_code == 429:
+                    global_stats["rate_limit_timestamps"].append(time.time())
+                else:
+                    global_stats["failure_timestamps"].append(time.time())
+            global_stats["recent_conversations"].append(entry)
+            global_stats["recent_conversations"] = global_stats["recent_conversations"][-60:]
+            await save_stats(global_stats)
+
+    def classify_error_status(status_code: Optional[int], error: Exception) -> str:
+        if status_code == 504:
+            return "timeout"
+        if isinstance(error, (asyncio.TimeoutError, httpx.TimeoutException)):
+            return "timeout"
+        return "error"
+
 
     # 获取客户端IP（用于会话隔离）
     client_ip = request.headers.get("x-forwarded-for")
@@ -1116,13 +1180,17 @@ async def chat_impl(
 
     # 记录请求统计
     async with stats_lock:
+        timestamp = time.time()
         global_stats["total_requests"] += 1
-        global_stats["request_timestamps"].append(time.time())
+        global_stats["request_timestamps"].append(timestamp)
+        global_stats.setdefault("model_request_timestamps", {})
+        global_stats["model_request_timestamps"].setdefault(req.model, []).append(timestamp)
         await save_stats(global_stats)
 
     # 2. 模型校验
     if req.model not in MODEL_MAPPING:
         logger.error(f"[CHAT] [req_{request_id}] 不支持的模型: {req.model}")
+        await finalize_result("error", 404, f"HTTP 404: Model '{req.model}' not found")
         raise HTTPException(
             status_code=404,
             detail=f"Model '{req.model}' not found. Available models: {list(MODEL_MAPPING.keys())}"
@@ -1173,9 +1241,12 @@ async def chat_impl(
                     account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
                     logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
                     # 记录账号池状态（单个账户失败）
-                    uptime_tracker.record_request("account_pool", False)
+                    status_code = e.status_code if isinstance(e, HTTPException) else None
+                    uptime_tracker.record_request("account_pool", False, status_code=status_code)
                     if attempt == max_account_tries - 1:
                         logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
+                        status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
+                        await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
                         raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
                     # 继续尝试下一个账户
 
@@ -1200,7 +1271,16 @@ async def chat_impl(
     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 用户消息: {preview}")
 
     # 3. 解析请求内容
-    last_text, current_images = await parse_last_message(req.messages, http_client, request_id)
+    try:
+        last_text, current_images = await parse_last_message(req.messages, http_client, request_id)
+    except HTTPException as e:
+        status = classify_error_status(e.status_code, e)
+        await finalize_result(status, e.status_code, f"HTTP {e.status_code}: {e.detail}")
+        raise
+    except Exception as e:
+        status = classify_error_status(None, e)
+        await finalize_result(status, 500, f"{type(e).__name__}: {str(e)[:200]}")
+        raise
 
     # 4. 准备文本内容
     if is_new_conversation:
@@ -1293,14 +1373,24 @@ async def chat_impl(
                     global_stats["account_conversations"][account_manager.config.account_id] = account_manager.conversation_count
                     await save_stats(global_stats)
 
+                await finalize_result("success", 200, None)
+
                 break
 
             except (httpx.HTTPError, ssl.SSLError, HTTPException) as e:
+                status_code = e.status_code if isinstance(e, HTTPException) else None
+                error_detail = (
+                    f"HTTP {e.status_code}: {e.detail}"
+                    if isinstance(e, HTTPException)
+                    else f"{type(e).__name__}: {str(e)[:200]}"
+                )
                 # 记录当前失败的账户
                 failed_accounts.add(account_manager.config.account_id)
 
                 # 记录账号池状态（请求失败）
-                uptime_tracker.record_request("account_pool", False)
+                status_code = e.status_code if isinstance(e, HTTPException) else None
+
+                uptime_tracker.record_request("account_pool", False, status_code=status_code)
 
                 # 检查是否为429错误（Rate Limit）
                 is_rate_limit = isinstance(e, HTTPException) and e.status_code == 429
@@ -1349,7 +1439,8 @@ async def chat_impl(
                                 break
 
                         if not new_account:
-                            logger.error(f"[CHAT] [req_{request_id}] 所有账户均已失败，无可用账户")
+                            logger.error(f"[CHAT] [req_{request_id}] All accounts failed, no available account")
+                            await finalize_result("error", 503, "All Accounts Failed")
                             if req.stream: yield f"data: {json.dumps({'error': {'message': 'All Accounts Failed'}})}\n\n"
                             return
 
@@ -1376,12 +1467,20 @@ async def chat_impl(
                         error_type = type(create_err).__name__
                         logger.error(f"[CHAT] [req_{request_id}] 账户切换失败 ({error_type}): {str(create_err)}")
                         # 记录账号池状态（账户切换失败）
-                        uptime_tracker.record_request("account_pool", False)
+                        status_code = create_err.status_code if isinstance(create_err, HTTPException) else None
+
+                        uptime_tracker.record_request("account_pool", False, status_code=status_code)
+
+                        status = classify_error_status(status_code, create_err)
+
+                        await finalize_result(status, status_code, f"Account Failover Failed: {str(create_err)[:200]}")
                         if req.stream: yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
                         return
                 else:
                     # 已达到最大重试次数
                     logger.error(f"[CHAT] [req_{request_id}] 已达到最大重试次数 ({max_retries})，请求失败")
+                    status = classify_error_status(status_code, e)
+                    await finalize_result(status, status_code, error_detail)
                     if req.stream: yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_retries}) exceeded: {e}'}})}\n\n"
                     return
 
@@ -1465,6 +1564,8 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
 
 async def stream_chat_generator(session: str, text_content: str, file_ids: List[str], model_name: str, chat_id: str, created_time: int, account_manager: AccountManager, is_stream: bool = True, request_id: str = "", request: Request = None):
     start_time = time.time()
+    full_content = ""
+    first_response_time = None
 
     # 记录发送给API的内容
     text_preview = text_content[:500] + "...(已截断)" if len(text_content) > 500 else text_content
@@ -1523,6 +1624,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     ) as r:
         if r.status_code != 200:
             error_text = await r.aread()
+            uptime_tracker.record_request(model_name, False, status_code=r.status_code)
             raise HTTPException(status_code=r.status_code, detail=f"Upstream Error {error_text.decode()}")
 
         # 使用异步解析器处理 JSON 数组流
@@ -1544,7 +1646,10 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                         chunk = create_chunk(chat_id, created_time, model_name, {"reasoning_content": text}, None)
                         yield f"data: {chunk}\n\n"
                     else:
+                        if first_response_time is None:
+                            first_response_time = time.time()
                         # 正常内容使用 content 字段
+                        full_content += text
                         chunk = create_chunk(chat_id, created_time, model_name, {"content": text}, None)
                         yield f"data: {chunk}\n\n"
 
@@ -1556,9 +1661,11 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                     logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 检测到{len(file_ids)}张生成图片")
 
         except ValueError as e:
+            uptime_tracker.record_request(model_name, False)
             logger.error(f"[API] [{account_manager.config.account_id}] [req_{request_id}] JSON解析失败: {str(e)}")
         except Exception as e:
             error_type = type(e).__name__
+            uptime_tracker.record_request(model_name, False)
             logger.error(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 流处理错误 ({error_type}): {str(e)}")
             raise
 
@@ -1625,6 +1732,16 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
             yield f"data: {chunk}\n\n"
 
+    if full_content:
+        response_preview = full_content[:500] + "...(已截断)" if len(full_content) > 500 else full_content
+        logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] AI响应: {response_preview}")
+
+    if first_response_time:
+        latency_ms = int((first_response_time - start_time) * 1000)
+        uptime_tracker.record_request(model_name, True, latency_ms)
+    else:
+        uptime_tracker.record_request(model_name, True)
+
     total_time = time.time() - start_time
     logger.info(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 响应完成: {total_time:.2f}秒")
     
@@ -1641,10 +1758,6 @@ async def get_public_uptime(days: int = 90):
         days = 90
     return await uptime_tracker.get_uptime_summary(days)
 
-@app.get("/public/uptime/html")
-async def get_public_uptime_html(request: Request):
-    """Uptime 监控页面（类似 status.openai.com）"""
-    return templates.TemplateResponse("public/uptime.html", {"request": request})
 
 @app.get("/public/stats")
 async def get_public_stats():
@@ -1652,14 +1765,14 @@ async def get_public_stats():
     async with stats_lock:
         # 清理1小时前的请求时间戳
         current_time = time.time()
-        global_stats["request_timestamps"] = [
+        recent_requests = [
             ts for ts in global_stats["request_timestamps"]
             if current_time - ts < 3600
         ]
 
         # 计算每分钟请求数
         recent_minute = [
-            ts for ts in global_stats["request_timestamps"]
+            ts for ts in recent_requests
             if current_time - ts < 60
         ]
         requests_per_minute = len(recent_minute)
@@ -1683,59 +1796,74 @@ async def get_public_stats():
             "load_color": load_color
         }
 
+@app.get("/public/display")
+async def get_public_display():
+    """获取公开展示信息"""
+    return {
+        "logo_url": LOGO_URL,
+        "chat_url": CHAT_URL
+    }
+
 @app.get("/public/log")
 async def get_public_logs(request: Request, limit: int = 100):
-    """获取脱敏后的日志（JSON格式）"""
     try:
         # 基于IP的访问统计（24小时内去重）
-        # 优先从 X-Forwarded-For 获取真实IP（处理代理情况）
-        client_ip = request.headers.get("x-forwarded-for")
-        if client_ip:
-            # X-Forwarded-For 可能包含多个IP，取第一个
-            client_ip = client_ip.split(",")[0].strip()
-        else:
-            # 没有代理时使用直连IP
-            client_ip = request.client.host if request.client else "unknown"
-
+        client_ip = request.client.host
         current_time = time.time()
 
         async with stats_lock:
             # 清理24小时前的IP记录
             if "visitor_ips" not in global_stats:
                 global_stats["visitor_ips"] = {}
-
-            expired_ips = [
-                ip for ip, timestamp in global_stats["visitor_ips"].items()
-                if current_time - timestamp > 86400  # 24小时
-            ]
-            for ip in expired_ips:
-                del global_stats["visitor_ips"][ip]
+            global_stats["visitor_ips"] = {
+                ip: timestamp for ip, timestamp in global_stats["visitor_ips"].items()
+                if current_time - timestamp <= 86400
+            }
 
             # 记录新访问（24小时内同一IP只计数一次）
             if client_ip not in global_stats["visitor_ips"]:
                 global_stats["visitor_ips"][client_ip] = current_time
+                global_stats["total_visitors"] = global_stats.get("total_visitors", 0) + 1
 
-            # 同步访问者计数（清理后的实际数量）
-            global_stats["total_visitors"] = len(global_stats["visitor_ips"])
+            global_stats.setdefault("recent_conversations", [])
             await save_stats(global_stats)
 
+            stored_logs = list(global_stats.get("recent_conversations", []))
+
         sanitized_logs = get_sanitized_logs(limit=min(limit, 1000))
+
+        log_map = {log.get("request_id"): log for log in sanitized_logs}
+        for log in stored_logs:
+            request_id = log.get("request_id")
+            if request_id and request_id not in log_map:
+                log_map[request_id] = log
+
+        def get_log_ts(item: dict) -> float:
+            if "start_ts" in item:
+                return float(item["start_ts"])
+            try:
+                return datetime.strptime(item.get("start_time", ""), "%Y-%m-%d %H:%M:%S").timestamp()
+            except Exception:
+                return 0.0
+
+        merged_logs = sorted(log_map.values(), key=get_log_ts, reverse=True)[:min(limit, 1000)]
+        output_logs = []
+        for log in merged_logs:
+            if "start_ts" in log:
+                log = dict(log)
+                log.pop("start_ts", None)
+            output_logs.append(log)
+
         return {
-            "total": len(sanitized_logs),
-            "logs": sanitized_logs
+            "total": len(output_logs),
+            "logs": output_logs
         }
     except Exception as e:
         logger.error(f"[LOG] 获取公开日志失败: {e}")
         return {"total": 0, "logs": [], "error": str(e)}
-
-@app.get("/public/log/html")
-async def get_public_logs_html(request: Request):
-    """公开的脱敏日志查看器"""
-    return templates.TemplateResponse("public/logs.html", {
-        "request": request,
-        "logo_url": LOGO_URL,
-        "chat_url": CHAT_URL
-    })
+    except Exception as e:
+        logger.error(f"[LOG] 获取公开日志失败: {e}")
+        return {"total": 0, "logs": [], "error": str(e)}
 
 # ---------- 全局 404 处理（必须在最后） ----------
 
@@ -1749,4 +1877,5 @@ async def not_found_handler(request: Request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    port = int(os.getenv("PORT", "7860"))
+    uvicorn.run(app, host="0.0.0.0", port=port)

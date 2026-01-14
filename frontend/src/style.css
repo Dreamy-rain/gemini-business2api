@@ -1,0 +1,337 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 97%;
+    --foreground: 0 0% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+
+    --primary: 0 0% 10%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 92%;
+    --secondary-foreground: 0 0% 10%;
+
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 40%;
+
+    --accent: 0 0% 90%;
+    --accent-foreground: 0 0% 10%;
+
+    --destructive: 0 70% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 86%;
+    --input: 0 0% 86%;
+    --ring: 0 0% 10%;
+
+    --radius: 1rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(900px circle at 10% -20%, rgba(0, 0, 0, 0.04), transparent 45%),
+      radial-gradient(700px circle at 90% 0%, rgba(0, 0, 0, 0.05), transparent 40%),
+      linear-gradient(180deg, hsl(var(--background)) 0%, hsl(var(--background)) 100%);
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: linear-gradient(120deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+    opacity: 0.5;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: "Noto Serif SC", "Georgia", serif;
+    letter-spacing: -0.01em;
+  }
+
+  #app {
+    min-height: 100vh;
+  }
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.scrollbar-slim::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-slim::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+.monitor-badge--up {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.monitor-badge--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.monitor-badge--down {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.monitor-badge--unknown {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.monitor-card {
+  border-radius: 16px;
+  padding: 0;
+  background: hsl(var(--card));
+  box-shadow: none;
+}
+
+.monitor-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.monitor-card__name {
+  font-size: 14px;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.monitor-card__badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.monitor-card__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 12px;
+}
+
+.monitor-card__value {
+  margin-left: 4px;
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+.monitor-card__beats {
+  display: flex;
+  gap: 2px;
+  height: 24px;
+  align-items: flex-end;
+}
+
+.monitor-beat {
+  flex: 1;
+  min-width: 4px;
+  max-width: 8px;
+  border-radius: 2px;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.monitor-beat:hover {
+  opacity: 0.8;
+  transform: scaleY(1.1);
+}
+
+.monitor-beat--up {
+  background: #34c759;
+  height: 100%;
+}
+
+.monitor-beat--warn {
+  background: #f5c15b;
+  height: 100%;
+}
+
+.monitor-beat--slow {
+  background: #f5c15b;
+  height: 100%;
+}
+
+.monitor-beat--down {
+  background: #ff3b30;
+  height: 100%;
+}
+
+.monitor-beat--empty {
+  background: #e5e5ea;
+  height: 40%;
+}
+
+.monitor-beat__tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1d1d1f;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  margin-bottom: 6px;
+  z-index: 10;
+}
+
+.monitor-beat__tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1d1d1f;
+}
+
+.monitor-beat:hover .monitor-beat__tooltip {
+  opacity: 1;
+}
+
+.help-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  font-size: 10px;
+  line-height: 1;
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+}
+
+@media (max-width: 768px) {
+  .monitor-beat {
+    min-width: 3px;
+    max-width: 6px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-split {
+    flex-direction: row;
+    flex-wrap: nowrap;
+  }
+
+  .dashboard-split .dashboard-main {
+    flex: 0 0 66.6667%;
+    max-width: 66.6667%;
+  }
+
+  .dashboard-split .dashboard-side {
+    flex: 0 0 33.3333%;
+    max-width: 33.3333%;
+  }
+}
+
+@keyframes logo-float {
+  0% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(6px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+  75% {
+    transform: translateY(-6px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+@keyframes logo-blink {
+  0%,
+  45%,
+  55%,
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleY(0.1);
+    opacity: 0.6;
+  }
+}
+
+.logo-mark .logo-cat-wrapper {
+  animation: logo-float 4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.logo-mark {
+  transform: translateY(2px);
+}
+
+.logo-mark .logo-eye {
+  fill: #00bcd4;
+  filter: drop-shadow(0 0 2px #00bcd4);
+  animation: logo-blink 5s infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}

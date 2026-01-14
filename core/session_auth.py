@@ -42,23 +42,26 @@ def require_login(redirect_to_login: bool = True):
         async def wrapper(*args, request: Request, **kwargs):
             if not is_logged_in(request):
                 if redirect_to_login:
-                    # 构建登录页面URL（支持可选的PATH_PREFIX）
-                    # 从请求路径中提取PATH_PREFIX（如果有）
-                    path = request.url.path
+                    accept_header = (request.headers.get("accept") or "").lower()
+                    wants_html = "text/html" in accept_header or request.url.path.endswith("/html")
 
-                    # 动态导入main模块获取PATH_PREFIX（避免循环依赖）
-                    import main
-                    prefix = main.PATH_PREFIX
+                    if wants_html:
+                        # 清理掉 URL 中可能重复的 PATH_PREFIX
+                        # 避免重定向路径出现多层前缀
+                        path = request.url.path
 
-                    if prefix:
-                        login_url = f"/{prefix}/login"
-                    else:
-                        login_url = "/login"
+                        # 兼容 main 中 PATH_PREFIX 为空的情况
+                        import main
+                        prefix = main.PATH_PREFIX
 
-                    return RedirectResponse(url=login_url, status_code=302)
-                else:
-                    # 返回404假装端点不存在
-                    raise HTTPException(404, "Not Found")
+                        if prefix:
+                            login_url = f"/{prefix}/login"
+                        else:
+                            login_url = "/login"
+
+                        return RedirectResponse(url=login_url, status_code=302)
+
+                raise HTTPException(401, "Unauthorized")
 
             return await func(*args, request=request, **kwargs)
         return wrapper

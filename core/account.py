@@ -390,12 +390,14 @@ def load_multi_account_config(
             disabled=acc.get("disabled", False)  # 读取手动禁用状态，默认为 False
         )
 
-        # 检查账户是否已过期
-        if config.is_expired():
-            logger.warning(f"[CONFIG] 账户 {config.account_id} 已过期，跳过加载")
-            continue
+        # 检查账户是否已过期（已过期也加载到管理面板）
+        is_expired = config.is_expired()
+        if is_expired:
+            logger.warning(f"[CONFIG] 账户 {config.account_id} 已过期，仍加载用于展示")
 
         manager.add_account(config, http_client, user_agent, account_failure_threshold, rate_limit_cooldown_seconds, global_stats)
+        if is_expired:
+            manager.accounts[config.account_id].is_available = False
 
     if not manager.accounts:
         logger.warning(f"[CONFIG] 没有有效的账户配置，服务将启动但无法处理请求，请在管理面板添加账户")

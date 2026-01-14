@@ -35,14 +35,11 @@ ENV/
 # Project specific
 .env
 *.log
-data/stats.json
-data/settings.yaml
-accounts.json
 
 # Generated files
-data/images/
+data/
 logs/
-test/
+static/
 
 # OS
 .DS_Store

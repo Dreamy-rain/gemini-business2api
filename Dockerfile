@@ -1,5 +1,16 @@
+# 多阶段构建：前端构建
+FROM node:20-alpine AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# 后端运行环境
 FROM python:3.11-slim
 WORKDIR /app
+
+# 安装 Python 依赖
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -7,17 +18,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get purge -y gcc \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+
+# 复制后端代码
 COPY main.py .
-# 复制 core 模块
 COPY core ./core
-# 复制 util 目录
 COPY util ./util
-# 复制 templates 目录
-COPY templates ./templates
-# 复制 static 目录
-COPY static ./static
-# 创建数据目录
-RUN mkdir -p ./data/images
-# 声明数据卷（运行时需要 -v 挂载才能持久化）
+
+# 复制前端构建产物
+COPY --from=frontend-builder /frontend/dist ./static
+
+# 创建数据目录（支持本地和 HF Spaces Pro）
+RUN mkdir -p ./data
+
+# 声明数据卷
 VOLUME ["/app/data"]
+
+# 启动服务
 CMD ["python", "-u", "main.py"]

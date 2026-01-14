@@ -108,18 +108,31 @@ async def parse_last_message(messages: List['Message'], http_client: httpx.Async
         async def download_url(url: str):
             try:
                 resp = await http_client.get(url, timeout=30, follow_redirects=True)
+                if resp.status_code == 404:
+                    logger.warning(f"[FILE] [req_{request_id}] URL文件已失效(404)，已跳过: {url[:50]}...")
+                    return None
                 resp.raise_for_status()
                 content_type = resp.headers.get("content-type", "application/octet-stream").split(";")[0]
                 # 移除图片类型限制，支持所有文件类型
                 b64 = base64.b64encode(resp.content).decode()
                 logger.info(f"[FILE] [req_{request_id}] URL文件下载成功: {url[:50]}... ({len(resp.content)} bytes, {content_type})")
                 return {"mime": content_type, "data": b64}
+            except httpx.HTTPStatusError as e:
+                status_code = e.response.status_code if e.response else "unknown"
+                logger.warning(f"[FILE] [req_{request_id}] URL文件下载失败({status_code}): {url[:50]}... - {e}")
+                return None
             except Exception as e:
                 logger.warning(f"[FILE] [req_{request_id}] URL文件下载失败: {url[:50]}... - {e}")
                 return None
 
-        results = await asyncio.gather(*[download_url(u) for u in image_urls])
-        images.extend([r for r in results if r])
+        results = await asyncio.gather(*[download_url(u) for u in image_urls], return_exceptions=True)
+        safe_results = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning(f"[FILE] [req_{request_id}] URL文件下载异常: {type(result).__name__}: {str(result)[:120]}")
+                continue
+            safe_results.append(result)
+        images.extend([r for r in safe_results if r])
 
     return text_content, images
 

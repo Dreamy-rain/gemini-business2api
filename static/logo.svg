@@ -1,0 +1,53 @@
+<svg width="130" height="150" viewBox="0 0 130 150" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      :root {
+        --primary-ink: #2c3e50;
+        --soul-color: #00bcd4;
+      }
+      .logo-cat-wrapper {
+        animation: logo-float 4s ease-in-out infinite;
+        transform-origin: center;
+      }
+      .logo-eye {
+        fill: var(--soul-color);
+        filter: drop-shadow(0 0 2px var(--soul-color));
+        animation: logo-blink 5s infinite;
+        transform-box: fill-box;
+        transform-origin: center;
+      }
+      @keyframes logo-float {
+        0% { transform: translateY(0); }
+        25% { transform: translateY(6px); }
+        50% { transform: translateY(0); }
+        75% { transform: translateY(-6px); }
+        100% { transform: translateY(0); }
+      }
+      @keyframes logo-blink {
+        0%, 45%, 55%, 100% { transform: scaleY(1); opacity: 1; }
+        50% { transform: scaleY(0.1); opacity: 0.6; }
+      }
+    </style>
+    <filter id="head-shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="rgba(0, 188, 212, 0.2)"/>
+    </filter>
+  </defs>
+
+  <g class="logo-cat-wrapper" transform="translate(0, 12)">
+    <g transform="translate(16, 20) rotate(-10, 9, 12)">
+      <path d="M14 0 L18 24 L0 24 Z" fill="#2c3e50" />
+    </g>
+    <g transform="translate(96, 20) rotate(10, 9, 12)">
+      <path d="M4 0 L18 24 L0 24 Z" fill="#2c3e50" />
+    </g>
+    <g filter="url(#head-shadow)">
+      <path d="M 32 40 L 98 40 A 12 12 0 0 1 110 52 L 110 90 A 30 30 0 0 1 80 120 L 50 120 A 30 30 0 0 1 20 90 L 20 52 A 12 12 0 0 1 32 40 Z"
+        fill="rgba(255, 255, 255, 0.9)"
+        stroke="#2c3e50"
+        stroke-width="3"
+      />
+    </g>
+    <rect class="logo-eye" x="35" y="68" width="14" height="4" rx="1" />
+    <rect class="logo-eye" x="81" y="68" width="14" height="4" rx="1" />
+  </g>
+</svg>

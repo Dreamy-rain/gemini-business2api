@@ -1,12 +1,19 @@
 <p align="center">
-  <img src="static/logo.svg" width="120" alt="Gemini Business2API logo" />
+  <img src="docs/logo.svg" width="120" alt="Gemini Business2API logo" />
 </p>
 <h1 align="center">Gemini Business2API</h1>
+<p align="center">赋予硅基生物以灵魂</p>
 <p align="center">当时明月在 · 曾照彩云归</p>
 <p align="center">
   <strong>简体中文</strong> | <a href="docs/README_EN.md">English</a>
 </p>
 <p align="center"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" /> <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white" /> <img src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js&logoColor=white" /> <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" /> <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" /></p>
+
+<p align="center">
+  <a href="https://huggingface.co/spaces/xiaoyukkkk/gemini-business2api?duplicate=true">
+    <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/deploy-to-spaces-md.svg" />
+  </a>
+</p>
 
 <p align="center">将 Gemini Business 转换为 OpenAI 兼容接口，支持多账号负载均衡、图像生成、多模态能力与内置管理面板。</p>
 

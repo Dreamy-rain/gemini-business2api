@@ -1,12 +1,19 @@
 <p align="center">
-  <img src="../static/logo.svg" width="120" alt="Gemini Business2API logo" />
+  <img src="../docs/logo.svg" width="120" alt="Gemini Business2API logo" />
 </p>
 <h1 align="center">Gemini Business2API</h1>
+<p align="center">Endow silicon-based beings with souls</p>
 <p align="center">When the bright moon was there · It once shone on the colorful clouds returning</p>
 <p align="center">
   <a href="../README.md">简体中文</a> | <strong>English</strong>
 </p>
 <p align="center"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" /> <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white" /> <img src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js&logoColor=white" /> <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" /> <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" /></p>
+
+<p align="center">
+  <a href="https://huggingface.co/spaces/xiaoyukkkk/gemini-business2api?duplicate=true">
+    <img src="https://huggingface.co/datasets/huggingface/badges/resolve/main/deploy-to-spaces-md.svg" />
+  </a>
+</p>
 
 <p align="center">Convert Gemini Business to OpenAI-compatible API with multi-account load balancing, image generation, multimodal capabilities, and built-in admin panel.</p>
 
@@ -37,13 +44,13 @@
 
 ## 🤖 Model Capabilities
 
-| Model ID                 | Vision | Image Gen    | Native Web | File Multimodal |
-| ------------------------ | ------ | ------------ | ---------- | --------------- |
-| `gemini-auto`            | ✅      | Optional     | ✅          | ✅               |
-| `gemini-2.5-flash`       | ✅      | Optional     | ✅          | ✅               |
-| `gemini-2.5-pro`         | ✅      | Optional     | ✅          | ✅               |
-| `gemini-3-flash-preview` | ✅      | Optional     | ✅          | ✅               |
-| `gemini-3-pro-preview`   | ✅      | Optional     | ✅          | ✅               |
+| Model ID                 | Vision | Image Gen | Native Web | File Multimodal |
+| ------------------------ | ------ | --------- | ---------- | --------------- |
+| `gemini-auto`            | ✅      | Optional  | ✅          | ✅               |
+| `gemini-2.5-flash`       | ✅      | Optional  | ✅          | ✅               |
+| `gemini-2.5-pro`         | ✅      | Optional  | ✅          | ✅               |
+| `gemini-3-flash-preview` | ✅      | Optional  | ✅          | ✅               |
+| `gemini-3-pro-preview`   | ✅      | Optional  | ✅          | ✅               |
 
 ## 🚀 Quick Start
 

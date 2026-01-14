@@ -1,0 +1,1 @@
+import{g as a,D as g,h as n}from"./index-koyNnZzO.js";const i={get:()=>a.get("/admin/settings"),update:t=>a.put("/admin/settings",t)},r=g("settings",()=>{const t=n(null),e=n(!1);async function u(){e.value=!0;try{t.value=await i.get()}finally{e.value=!1}}async function o(s){await i.update(s),t.value=s}return{settings:t,isLoading:e,loadSettings:u,updateSettings:o}});export{r as u};

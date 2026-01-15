@@ -55,16 +55,55 @@
 
 ## 🚀 Quick Start
 
-### Method 1: Local Run (Recommended)
+### Method 1: Using Deployment Script (Recommended)
+
+**Linux/macOS:**
+```bash
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+bash deploy.sh
+```
+
+**Windows:**
+```cmd
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+deploy.bat
+```
+
+The deployment script automatically:
+- Builds frontend
+- Creates Python virtual environment
+- Installs dependencies
+- Creates configuration file
+
+After completion, edit `.env` to set `ADMIN_KEY`, then run `python main.py`
+
+### Method 2: Manual Deployment
 
 ```bash
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+
+# Build frontend
+cd frontend
+npm install
+npm run build
+cd ..
+
+# Create virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
+# Install Python dependencies
 pip install -r requirements.txt
 cp .env.example .env
 # Edit .env to set ADMIN_KEY
 python main.py
 ```
 
-### Method 2: Docker
+### Method 3: Docker
 
 ```bash
 docker build -t gemini-business2api .

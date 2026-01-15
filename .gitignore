@@ -39,6 +39,7 @@ ENV/
 # Generated files
 data/
 logs/
+static/
 
 # OS
 .DS_Store

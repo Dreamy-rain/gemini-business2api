@@ -55,16 +55,55 @@
 
 ## 🚀 快速开始
 
-### 方式一：本地运行（推荐）
+### 方式一：使用部署脚本（推荐）
+
+**Linux/macOS:**
+```bash
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+bash deploy.sh
+```
+
+**Windows:**
+```cmd
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+deploy.bat
+```
+
+部署脚本会自动完成：
+- 构建前端
+- 创建 Python 虚拟环境
+- 安装依赖
+- 创建配置文件
+
+完成后编辑 `.env` 设置 `ADMIN_KEY`，然后运行 `python main.py`
+
+### 方式二：手动部署
 
 ```bash
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+
+# 构建前端
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 创建虚拟环境（推荐）
+python3 -m venv .venv
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
+# 安装 Python 依赖
 pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 设置 ADMIN_KEY
 python main.py
 ```
 
-### 方式二：Docker
+### 方式三：Docker
 
 ```bash
 docker build -t gemini-business2api .

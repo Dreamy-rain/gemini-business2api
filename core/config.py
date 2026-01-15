@@ -19,6 +19,8 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, validator
 from dotenv import load_dotenv
 
+from core import storage
+
 # 加载 .env 文件
 load_dotenv()
 
@@ -152,6 +154,13 @@ class ConfigManager:
 
     def _load_yaml(self) -> dict:
         """加载 YAML 文件"""
+        if storage.is_database_enabled():
+            try:
+                data = storage.load_settings_sync()
+                if isinstance(data, dict):
+                    return data
+            except Exception as e:
+                print(f"[WARN] 加载数据库设置失败: {e}，使用本地配置")
         if self.yaml_path.exists():
             try:
                 with open(self.yaml_path, 'r', encoding='utf-8') as f:
@@ -166,6 +175,13 @@ class ConfigManager:
 
     def save_yaml(self, data: dict):
         """保存 YAML 配置"""
+        if storage.is_database_enabled():
+            try:
+                saved = storage.save_settings_sync(data)
+                if saved:
+                    return
+            except Exception as e:
+                print(f"[WARN] 保存数据库设置失败: {e}，降级到本地文件")
         self.yaml_path.parent.mkdir(exist_ok=True)
         with open(self.yaml_path, 'w', encoding='utf-8') as f:
             yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)

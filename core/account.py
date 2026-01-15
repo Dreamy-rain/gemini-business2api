@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
 
+# 导入存储层（支持数据库）
+from core import storage
+
 if TYPE_CHECKING:
     from core.jwt import JWTManager
 
@@ -313,16 +316,41 @@ class MultiAccountManager:
 
 # ---------- 配置文件管理 ----------
 
-def save_accounts_to_file(accounts_data: list):
-    """保存账户配置到文件"""
+def _save_to_file(accounts_data: list):
+    """保存账户配置到本地文件"""
+    os.makedirs(os.path.dirname(ACCOUNTS_FILE) or ".", exist_ok=True)
     with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(accounts_data, f, ensure_ascii=False, indent=2)
     logger.info(f"[CONFIG] 配置已保存到 {ACCOUNTS_FILE}")
 
 
+def _load_from_file() -> list:
+    """从本地文件加载账户配置"""
+    if os.path.exists(ACCOUNTS_FILE):
+        try:
+            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"[CONFIG] 文件加载失败: {str(e)}")
+    return None
+
+
+def save_accounts_to_file(accounts_data: list):
+    """保存账户配置（优先数据库，降级到文件）"""
+    if storage.is_database_enabled():
+        try:
+            saved = storage.save_accounts_sync(accounts_data)
+            if saved:
+                return
+        except Exception as e:
+            logger.warning(f"[CONFIG] 数据库保存失败: {e}，降级到文件存储")
+
+    _save_to_file(accounts_data)
+
+
 def load_accounts_from_source() -> list:
-    """从环境变量或文件加载账户配置，优先使用环境变量"""
-    # 优先从环境变量加载
+    """从环境变量、数据库或文件加载账户配置"""
+    # 1. 优先从环境变量加载
     env_accounts = os.environ.get('ACCOUNTS_CONFIG')
     if env_accounts:
         try:
@@ -333,24 +361,33 @@ def load_accounts_from_source() -> list:
                 logger.warning(f"[CONFIG] 环境变量 ACCOUNTS_CONFIG 为空")
             return accounts_data
         except Exception as e:
-            logger.error(f"[CONFIG] 环境变量加载失败: {str(e)}，尝试从文件加载")
+            logger.error(f"[CONFIG] 环境变量加载失败: {str(e)}")
 
-    # 从文件加载
-    if os.path.exists(ACCOUNTS_FILE):
+    # 2. 尝试从数据库加载
+    if storage.is_database_enabled():
         try:
-            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
-                accounts_data = json.load(f)
-            if accounts_data:
-                logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}，共 {len(accounts_data)} 个账户")
-            else:
-                logger.warning(f"[CONFIG] 账户配置为空，请在管理面板添加账户或编辑 {ACCOUNTS_FILE}")
-            return accounts_data
+            accounts_data = storage.load_accounts_sync()
+            if accounts_data is not None:
+                if accounts_data:
+                    logger.info(f"[CONFIG] 从数据库加载配置，共 {len(accounts_data)} 个账户")
+                else:
+                    logger.warning(f"[CONFIG] 数据库中账户配置为空")
+                return accounts_data
         except Exception as e:
-            logger.warning(f"[CONFIG] 文件加载失败: {str(e)}，创建空配置")
+            logger.warning(f"[CONFIG] 数据库加载失败: {e}，降级到文件存储")
 
-    # 文件不存在，创建空配置
-    logger.warning(f"[CONFIG] 未找到 {ACCOUNTS_FILE}，已创建空配置文件")
-    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或直接编辑 {ACCOUNTS_FILE}，或使用批量上传功能，或设置环境变量 ACCOUNTS_CONFIG")
+    # 3. 从文件加载
+    accounts_data = _load_from_file()
+    if accounts_data is not None:
+        if accounts_data:
+            logger.info(f"[CONFIG] 从文件加载配置: {ACCOUNTS_FILE}，共 {len(accounts_data)} 个账户")
+        else:
+            logger.warning(f"[CONFIG] 账户配置为空，请在管理面板添加账户或编辑 {ACCOUNTS_FILE}")
+        return accounts_data
+
+    # 4. 无配置，创建空配置
+    logger.warning(f"[CONFIG] 未找到配置，已创建空配置")
+    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或设置 DATABASE_URL 使用数据库存储")
     save_accounts_to_file([])
     return []
 

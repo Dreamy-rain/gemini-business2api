@@ -72,6 +72,9 @@ from core import uptime as uptime_tracker
 # 导入配置管理和模板系统
 from core.config import config_manager, config
 
+# 数据库存储支持
+from core import storage
+
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 3000 条日志，重启后清空)
@@ -83,6 +86,13 @@ stats_lock = asyncio.Lock()  # 改为异步锁
 
 async def load_stats():
     """加载统计数据（异步）。"""
+    if storage.is_database_enabled():
+        try:
+            data = await asyncio.to_thread(storage.load_stats_sync)
+            if isinstance(data, dict):
+                return data
+        except Exception as e:
+            logger.error(f"[STATS] 数据库加载失败: {str(e)[:50]}")
     try:
         if os.path.exists(STATS_FILE):
             async with aiofiles.open(STATS_FILE, 'r', encoding='utf-8') as f:
@@ -104,6 +114,13 @@ async def load_stats():
 
 async def save_stats(stats):
     """保存统计数据（异步，避免阻塞事件循环）"""
+    if storage.is_database_enabled():
+        try:
+            saved = await asyncio.to_thread(storage.save_stats_sync, stats)
+            if saved:
+                return
+        except Exception as e:
+            logger.error(f"[STATS] 数据库保存失败: {str(e)[:50]}")
     try:
         async with aiofiles.open(STATS_FILE, 'w', encoding='utf-8') as f:
             await f.write(json.dumps(stats, ensure_ascii=False, indent=2))

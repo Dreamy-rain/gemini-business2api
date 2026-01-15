@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="docs/logo.svg" width="120" alt="Gemini Business2API logo" />
 </p>
 <h1 align="center">Gemini Business2API</h1>
@@ -41,16 +41,17 @@
 - ✅ 日志与监控 - 实时状态与统计信息
 - ✅ 代理支持 - 通过 PROXY 配置
 - ✅ 内置管理面板 - 在线配置与账号管理
+- ✅ 可选 PostgreSQL 后端 - 支持账户/设置/统计持久化 [感谢PR](https://github.com/Dreamy-rain/gemini-business2api/pull/4)
 
 ## 🤖 模型功能
 
-| 模型ID                   | 识图 | 香蕉绘图 | 原生联网 | 文件多模态 |
-| ------------------------ | ---- | -------- | -------- | ---------- |
-| `gemini-auto`            | ✅    | 可选     | ✅        | ✅          |
-| `gemini-2.5-flash`       | ✅    | 可选     | ✅        | ✅          |
-| `gemini-2.5-pro`         | ✅    | 可选     | ✅        | ✅          |
-| `gemini-3-flash-preview` | ✅    | 可选     | ✅        | ✅          |
-| `gemini-3-pro-preview`   | ✅    | 可选     | ✅        | ✅          |
+| 模型ID                   | 识图 | 原生联网 | 文件多模态 | 香蕉绘图 |
+| ------------------------ | ---- | -------- | ---------- | -------- |
+| `gemini-auto`            | ✅    | ✅        | ✅          | 可选     |
+| `gemini-2.5-flash`       | ✅    | ✅        | ✅          | 可选     |
+| `gemini-2.5-pro`         | ✅    | ✅        | ✅          | 可选     |
+| `gemini-3-flash-preview` | ✅    | ✅        | ✅          | 可选     |
+| `gemini-3-pro-preview`   | ✅    | ✅        | ✅          | 可选     |
 
 ## 🚀 快速开始
 
@@ -70,6 +71,25 @@ docker build -t gemini-business2api .
 docker run -d -p 7860:7860 \
   -e ADMIN_KEY=your_admin_key \
   gemini-business2api
+```
+
+### 数据库持久化（可选）
+
+- HF Spaces 环境建议开启，否则重启会丢数据
+- 取消 `requirements.txt` 中 `asyncpg` 的注释并安装依赖
+- 设置 `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
+  - 本地：写入 `.env`
+  - HF Spaces：Settings -> Variables/Secrets
+- 启用后账户/设置/统计写入数据库（HF Spaces 重启不丢）
+- 注意：连接串包含密码，请勿公开
+
+```
+#  Neon 获取 DATABASE_URL（推荐）
+1. 打开 https://neon.tech 并登录
+2. Create project -> 选择区域
+3. 进入项目页，找到 Connection string 并复制
+4. 形如：
+   postgresql://user:password@ep-xxx.neon.tech/dbname?sslmode=require
 ```
 
 ### 访问方式
@@ -129,3 +149,6 @@ docker run -d -p 7860:7860 \
 [![Star History Chart](https://api.star-history.com/svg?repos=Dreamy-rain/gemini-business2api&type=date&legend=top-left)](https://www.star-history.com/#Dreamy-rain/gemini-business2api&type=date&legend=top-left)
 
 **如果这个项目对你有帮助，请给个 ⭐ Star!**
+
+
+

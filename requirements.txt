@@ -8,3 +8,7 @@ itsdangerous==2.1.2
 python-multipart==0.0.6
 pyyaml>=6.0
 jinja2>=3.1.0
+
+# 可选：PostgreSQL 数据库支持（用于 HF Spaces 等无持久化存储的环境）
+# 如需使用，请取消下行注释并设置 DATABASE_URL 环境变量
+# asyncpg>=0.29.0

@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="../docs/logo.svg" width="120" alt="Gemini Business2API logo" />
 </p>
 <h1 align="center">Gemini Business2API</h1>
@@ -41,16 +41,17 @@
 - ✅ Logging & monitoring - Real-time status and statistics
 - ✅ Proxy support - Via PROXY configuration
 - ✅ Built-in admin panel - Online configuration and account management
+- ✅ Optional PostgreSQL backend — persists accounts/settings/stats [thanks PR](https://github.com/Dreamy-rain/gemini-business2api/pull/4)
 
 ## 🤖 Model Capabilities
 
-| Model ID                 | Vision | Image Gen | Native Web | File Multimodal |
-| ------------------------ | ------ | --------- | ---------- | --------------- |
-| `gemini-auto`            | ✅      | Optional  | ✅          | ✅               |
-| `gemini-2.5-flash`       | ✅      | Optional  | ✅          | ✅               |
-| `gemini-2.5-pro`         | ✅      | Optional  | ✅          | ✅               |
-| `gemini-3-flash-preview` | ✅      | Optional  | ✅          | ✅               |
-| `gemini-3-pro-preview`   | ✅      | Optional  | ✅          | ✅               |
+| Model ID                 | Vision | Native Web | File Multimodal | Image Gen |
+| ------------------------ | ------ | ---------- | --------------- | --------- |
+| `gemini-auto`            | ✅      | ✅          | ✅               | Optional  |
+| `gemini-2.5-flash`       | ✅      | ✅          | ✅               | Optional  |
+| `gemini-2.5-pro`         | ✅      | ✅          | ✅               | Optional  |
+| `gemini-3-flash-preview` | ✅      | ✅          | ✅               | Optional  |
+| `gemini-3-pro-preview`   | ✅      | ✅          | ✅               | Optional  |
 
 ## 🚀 Quick Start
 
@@ -70,6 +71,25 @@ docker build -t gemini-business2api .
 docker run -d -p 7860:7860 \
   -e ADMIN_KEY=your_admin_key \
   gemini-business2api
+```
+
+### Optional: Database Persistence (Local / HF Spaces)
+
+- Recommended on HF Spaces (free tier) to avoid data loss after restart
+- Uncomment `asyncpg` in `requirements.txt` and install dependencies
+- Set `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
+  - Local: put it in `.env`
+  - HF Spaces: Settings -> Variables/Secrets
+- Accounts/settings/stats are stored in the database
+- Keep the connection string secret (it includes credentials)
+
+```
+#  Get DATABASE_URL from Neon (recommended)
+1. Open https://neon.tech and sign in
+2. Create project -> choose a region
+3. Open the project page, copy the Connection string
+4. Example:
+   postgresql://user:password@ep-xxx.neon.tech/dbname?sslmode=require
 ```
 
 ### Access
@@ -129,3 +149,6 @@ docker run -d -p 7860:7860 \
 [![Star History Chart](https://api.star-history.com/svg?repos=Dreamy-rain/gemini-business2api&type=date&legend=top-left)](https://www.star-history.com/#Dreamy-rain/gemini-business2api&type=date&legend=top-left)
 
 **If this project helps you, please give it a ⭐ Star!**
+
+
+

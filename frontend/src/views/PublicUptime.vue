@@ -5,7 +5,6 @@
         <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p class="text-sm font-medium text-foreground">服务状态</p>
-            <p class="mt-1 text-xs text-muted-foreground">Gemini Business2API 公开状态页</p>
           </div>
           <p class="text-xs text-muted-foreground">最近更新：{{ updatedAt || '未获取' }}</p>
         </div>

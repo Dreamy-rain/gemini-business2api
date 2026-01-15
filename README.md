@@ -73,6 +73,25 @@ docker run -d -p 7860:7860 \
   gemini-business2api
 ```
 
+### 更新
+
+**Linux/macOS:**
+```bash
+bash update.sh
+```
+
+**Windows:**
+```cmd
+update.bat
+```
+
+**HuggingFace:**
+```
+暂时只能重新部署更新，记得保存数据，建议用 PostgreSQL
+```
+
+更新脚本会自动备份配置、拉取最新代码、更新依赖并构建前端。
+
 ### 数据库持久化（可选）
 
 - HF Spaces 环境建议开启，否则重启会丢数据
@@ -104,7 +123,7 @@ docker run -d -p 7860:7860 \
 
 ### 更多文档
 
-- 支持的文件类型：`docs/SUPPORTED_FILE_TYPES.md`
+- 支持的文件类型：[docs/SUPPORTED_FILE_TYPES.md](docs/SUPPORTED_FILE_TYPES.md)
 
 ## 📸 功能展示
 

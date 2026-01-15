@@ -73,6 +73,25 @@ docker run -d -p 7860:7860 \
   gemini-business2api
 ```
 
+### Update
+
+**Linux/macOS:**
+```bash
+bash update.sh
+```
+
+**Windows:**
+```cmd
+update.bat
+```
+
+**HuggingFace:**
+```
+Currently only supports redeployment for updates. Remember to save your data, PostgreSQL is recommended.
+```
+
+The update script automatically backs up configuration, pulls latest code, updates dependencies, and builds the frontend.
+
 ### Optional: Database Persistence (Local / HF Spaces)
 
 - Recommended on HF Spaces (free tier) to avoid data loss after restart
@@ -104,7 +123,7 @@ docker run -d -p 7860:7860 \
 
 ### Documentation
 
-- Supported file types: `SUPPORTED_FILE_TYPES.md`
+- Supported file types: [SUPPORTED_FILE_TYPES.md](SUPPORTED_FILE_TYPES.md)
 
 ## 📸 Screenshots
 

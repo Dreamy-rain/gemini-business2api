@@ -50,7 +50,7 @@
         v-model.number="filters.limit"
         type="number"
         min="10"
-        max="3000"
+        max="1000"
         step="100"
         class="w-24 rounded-2xl border border-border bg-background px-3 py-2 text-xs text-foreground"
       />
@@ -102,26 +102,26 @@
     <div
       v-if="rawView"
       ref="rawLogContainer"
-      class="scrollbar-slim mt-4 max-h-[60vh] overflow-y-auto rounded-2xl border border-border bg-black px-4 py-3 text-xs text-green-200"
+      class="scrollbar-slim mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-2xl border border-border bg-black px-4 py-3 text-xs text-green-200"
     >
-      <pre class="whitespace-pre-wrap font-mono leading-relaxed">{{ rawLogs }}</pre>
+      <pre class="whitespace-pre font-mono leading-relaxed">{{ rawLogView.text }}</pre>
     </div>
     <div
       v-else
       ref="structuredLogContainer"
       class="scrollbar-slim mt-4 max-h-[60vh] space-y-3 overflow-y-auto rounded-2xl border border-border bg-card px-4 py-3"
     >
-      <div v-if="groupedLogs.ungrouped.length === 0 && groupedLogs.groups.length === 0" class="text-xs text-muted-foreground">
+      <div v-if="structuredView.ungrouped.length === 0 && structuredView.groups.length === 0" class="text-xs text-muted-foreground">
         暂无日志
       </div>
 
-      <div v-for="(log, index) in groupedLogs.ungrouped" :key="`u-${index}`">
-        <div class="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs">
+      <div v-for="(log, index) in structuredView.ungrouped" :key="`u-${index}`">
+        <div class="cv-auto flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">{{ log.time }}</span>
             <span :class="levelBadgeClass(log.level)">{{ log.level }}</span>
             <span
-              v-for="tag in parseLogMessage(log.message).tags"
+              v-for="tag in log.tags"
               :key="tag"
               class="rounded px-2 py-0.5 text-[10px] font-semibold text-white"
               :style="{ backgroundColor: getCategoryColor(tag) }"
@@ -129,20 +129,20 @@
               {{ tag }}
             </span>
             <span
-              v-if="parseLogMessage(log.message).accountId"
+              v-if="log.accountId"
               class="text-[11px] font-semibold"
-              :style="{ color: getAccountColor(parseLogMessage(log.message).accountId) }"
+              :style="{ color: getAccountColor(log.accountId) }"
             >
-              {{ parseLogMessage(log.message).accountId }}
+              {{ log.accountId }}
             </span>
           </div>
           <div class="w-full text-foreground md:w-auto md:flex-1">
-            {{ parseLogMessage(log.message).text }}
+            {{ log.text }}
           </div>
         </div>
       </div>
 
-      <div v-for="group in groupedLogs.groups" :key="group.id" class="rounded-2xl border border-border bg-card">
+      <div v-for="group in structuredView.groups" :key="group.id" class="rounded-2xl border border-border bg-card">
         <button
           type="button"
           class="flex w-full flex-wrap items-center gap-2 rounded-2xl bg-secondary/40 px-4 py-3 text-left text-xs transition hover:bg-secondary/60"
@@ -154,6 +154,9 @@
             {{ group.accountId }}
           </span>
           <span v-if="group.model" class="text-muted-foreground">{{ group.model }}</span>
+          <span v-if="isGroupLimited(group)" class="text-[10px] text-muted-foreground">
+            仅显示最近 {{ groupLogLimit }} 条
+          </span>
           <span class="text-muted-foreground">{{ group.logs.length }} 条日志</span>
           <span
             class="ml-auto text-muted-foreground transition-transform"
@@ -162,17 +165,17 @@
             ▸
           </span>
         </button>
-        <div v-show="!isCollapsed(group.id)" class="space-y-2 px-4 py-3">
+        <div v-if="!isCollapsed(group.id)" class="space-y-2 px-4 py-3">
           <div
-            v-for="(log, logIndex) in group.logs"
+            v-for="(log, logIndex) in visibleGroupLogs(group)"
             :key="`${group.id}-${logIndex}`"
-            class="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs"
+            class="cv-auto flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-xs"
           >
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-muted-foreground">{{ log.time }}</span>
               <span :class="levelBadgeClass(log.level)">{{ log.level }}</span>
               <span
-                v-for="tag in parseLogMessage(log.message).tags"
+                v-for="tag in log.tags"
                 :key="tag"
                 class="rounded px-2 py-0.5 text-[10px] font-semibold text-white"
                 :style="{ backgroundColor: getCategoryColor(tag) }"
@@ -180,15 +183,15 @@
                 {{ tag }}
               </span>
               <span
-                v-if="parseLogMessage(log.message).accountId"
+                v-if="log.accountId"
                 class="text-[11px] font-semibold"
-                :style="{ color: getAccountColor(parseLogMessage(log.message).accountId) }"
+                :style="{ color: getAccountColor(log.accountId) }"
               >
-                {{ parseLogMessage(log.message).accountId }}
+                {{ log.accountId }}
               </span>
             </div>
             <div class="w-full text-foreground md:w-auto md:flex-1">
-              {{ parseLogMessage(log.message).text }}
+              {{ log.text }}
             </div>
           </div>
         </div>
@@ -214,7 +217,29 @@ import SelectMenu from '@/components/ui/SelectMenu.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { AdminLogStats, LogEntry } from '@/types/api'
 
+type ParsedLogEntry = LogEntry & {
+  tags: string[]
+  accountId: string
+  text: string
+  reqId: string
+}
+
+type GroupedLog = {
+  id: string
+  logs: ParsedLogEntry[]
+  status: string
+  accountId: string
+  model: string
+}
+
+type GroupedLogState = {
+  ungrouped: ParsedLogEntry[]
+  groups: GroupedLog[]
+}
+
 const logs = ref<LogEntry[]>([])
+const parsedLogs = ref<ParsedLogEntry[]>([])
+const groupedLogs = ref<GroupedLogState>({ ungrouped: [], groups: [] })
 const stats = ref<AdminLogStats | null>(null)
 const errorMessage = ref('')
 const statusMessage = ref('')
@@ -222,15 +247,20 @@ const statusTone = ref<'success' | 'error'>('success')
 const confirmOpen = ref(false)
 const autoRefreshEnabled = ref(true)
 const collapsedState = ref<Record<string, boolean>>({})
-const rawView = ref(false)
+const rawView = ref(true)
 const rawLogContainer = ref<HTMLDivElement | null>(null)
 const structuredLogContainer = ref<HTMLDivElement | null>(null)
+const structuredRenderLimit = 1000
+const rawRenderLimit = 1000
+const groupLogLimit = 200
+const refreshIntervalMs = 3000
 let timer: number | undefined
+let isFetching = false
 
 const filters = reactive({
   level: '',
   search: '',
-  limit: 1500,
+  limit: 300,
 })
 
 const levelOptions = [
@@ -317,6 +347,16 @@ const parseLogMessage = (message: string) => {
   return { tags, accountId, text: remaining }
 }
 
+const parseLogEntry = (log: LogEntry): ParsedLogEntry => {
+  const parsed = parseLogMessage(log.message)
+  const reqMatch = log.message.match(/\[req_([a-z0-9]+)\]/i)
+  return {
+    ...log,
+    ...parsed,
+    reqId: reqMatch ? reqMatch[1] : '',
+  }
+}
+
 const parseLogTime = (value: string) => {
   if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
     return new Date(value)
@@ -356,20 +396,18 @@ const getGroupStatus = (groupLogs: LogEntry[]) => {
   return 'in_progress'
 }
 
-const groupedLogs = computed(() => {
-  const groups = new Map<string, LogEntry[]>()
+const buildGroupedLogs = (items: ParsedLogEntry[]): GroupedLogState => {
+  const groups = new Map<string, ParsedLogEntry[]>()
   const groupOrder: string[] = []
-  const ungrouped: LogEntry[] = []
+  const ungrouped: ParsedLogEntry[] = []
 
-  logs.value.forEach((log) => {
-    const reqMatch = log.message.match(/\[req_([a-z0-9]+)\]/i)
-    if (reqMatch) {
-      const reqId = reqMatch[1]
-      if (!groups.has(reqId)) {
-        groups.set(reqId, [])
-        groupOrder.push(reqId)
+  items.forEach((log) => {
+    if (log.reqId) {
+      if (!groups.has(log.reqId)) {
+        groups.set(log.reqId, [])
+        groupOrder.push(log.reqId)
       }
-      groups.get(reqId)?.push(log)
+      groups.get(log.reqId)?.push(log)
     } else {
       ungrouped.push(log)
     }
@@ -385,17 +423,48 @@ const groupedLogs = computed(() => {
       id,
       logs: groupLogs,
       status: getGroupStatus(groupLogs),
-      accountId: accountMatch ? accountMatch[1] : '',
+      accountId: firstLog?.accountId || (accountMatch ? accountMatch[1] : ''),
       model: modelMatch ? modelMatch[1] : '',
     }
   })
 
   return { ungrouped, groups: groupList }
+}
+
+const structuredView = computed(() => {
+  const ungrouped = groupedLogs.value.ungrouped
+  const groups = groupedLogs.value.groups
+  const limitedUngrouped = ungrouped.length > structuredRenderLimit
+    ? ungrouped.slice(-structuredRenderLimit)
+    : ungrouped
+  const limitedGroups = groups.length > structuredRenderLimit
+    ? groups.slice(-structuredRenderLimit)
+    : groups
+
+  return {
+    ungrouped: limitedUngrouped,
+    groups: limitedGroups,
+    limited: ungrouped.length > limitedUngrouped.length || groups.length > limitedGroups.length,
+    ungroupedTotal: ungrouped.length,
+    groupsTotal: groups.length,
+    ungroupedShowing: limitedUngrouped.length,
+    groupsShowing: limitedGroups.length,
+  }
 })
 
-const rawLogs = computed(() =>
-  logs.value.map(log => `${log.time} | ${log.level} | ${log.message}`).join('\n')
-)
+const rawLogView = computed(() => {
+  const total = parsedLogs.value.length
+  const startIndex = total > rawRenderLimit ? total - rawRenderLimit : 0
+  const slice = parsedLogs.value.slice(startIndex)
+  const text = slice.map(log => `${log.time} | ${log.level} | ${log.message}`).join('\n')
+  const showing = slice.length
+  return {
+    text,
+    total,
+    showing,
+    limited: total > showing,
+  }
+})
 
 const isCollapsed = (requestId: string) => collapsedState.value[requestId] === true
 
@@ -404,14 +473,23 @@ const toggleGroup = (requestId: string) => {
   localStorage.setItem('log-fold-state', JSON.stringify(collapsedState.value))
 }
 
+const isGroupLimited = (group: GroupedLog) => group.logs.length > groupLogLimit
+
+const visibleGroupLogs = (group: GroupedLog) => {
+  if (group.logs.length <= groupLogLimit) return group.logs
+  return group.logs.slice(-groupLogLimit)
+}
+
 const normalizeLimit = () => {
   if (!filters.limit || Number.isNaN(filters.limit)) {
-    filters.limit = 1500
+    filters.limit = 300
   }
-  filters.limit = Math.min(Math.max(filters.limit, 10), 3000)
+  filters.limit = Math.min(Math.max(filters.limit, 10), 1000)
 }
 
 const fetchLogs = async () => {
+  if (isFetching) return
+  isFetching = true
   errorMessage.value = ''
   statusMessage.value = ''
   normalizeLimit()
@@ -422,17 +500,14 @@ const fetchLogs = async () => {
       search: filters.search || undefined,
     })
     logs.value = response.logs
+    parsedLogs.value = response.logs.map(parseLogEntry)
+    groupedLogs.value = buildGroupedLogs(parsedLogs.value)
     stats.value = response.stats
-    requestAnimationFrame(() => {
-      if (rawView.value && rawLogContainer.value) {
-        rawLogContainer.value.scrollTop = rawLogContainer.value.scrollHeight
-      }
-      if (!rawView.value && structuredLogContainer.value) {
-        structuredLogContainer.value.scrollTop = structuredLogContainer.value.scrollHeight
-      }
-    })
   } catch (error: any) {
     errorMessage.value = error.message || '日志加载失败'
+  } finally {
+    isFetching = false
+    requestAnimationFrame(scrollToBottom)
   }
 }
 
@@ -441,7 +516,7 @@ const exportLogs = async () => {
   statusTone.value = 'success'
   try {
     const response = await logsApi.list({
-      limit: 3000,
+      limit: 1000,
       level: filters.level || undefined,
       search: filters.search || undefined,
     })
@@ -475,31 +550,55 @@ const clearLogs = async () => {
   }
 }
 
-const startAutoRefresh = () => {
+const stopAutoRefresh = () => {
   if (timer) {
-    window.clearInterval(timer)
+    window.clearTimeout(timer)
     timer = undefined
   }
-  if (autoRefreshEnabled.value) {
-    timer = window.setInterval(fetchLogs, 3000)
-  }
+}
+
+const scheduleAutoRefresh = () => {
+  if (!autoRefreshEnabled.value || document.hidden) return
+  timer = window.setTimeout(async () => {
+    await fetchLogs()
+    scheduleAutoRefresh()
+  }, refreshIntervalMs)
+}
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  scheduleAutoRefresh()
 }
 
 const toggleAutoRefresh = () => {
   autoRefreshEnabled.value = !autoRefreshEnabled.value
-  startAutoRefresh()
+  if (autoRefreshEnabled.value) {
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
 }
 
 const toggleView = () => {
   rawView.value = !rawView.value
-  requestAnimationFrame(() => {
-    if (rawView.value && rawLogContainer.value) {
-      rawLogContainer.value.scrollTop = rawLogContainer.value.scrollHeight
-    }
-    if (!rawView.value && structuredLogContainer.value) {
-      structuredLogContainer.value.scrollTop = structuredLogContainer.value.scrollHeight
-    }
-  })
+  requestAnimationFrame(scrollToBottom)
+}
+
+const scrollToBottom = () => {
+  if (rawView.value && rawLogContainer.value) {
+    rawLogContainer.value.scrollTop = rawLogContainer.value.scrollHeight
+  }
+  if (!rawView.value && structuredLogContainer.value) {
+    structuredLogContainer.value.scrollTop = structuredLogContainer.value.scrollHeight
+  }
+}
+
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopAutoRefresh()
+  } else if (autoRefreshEnabled.value) {
+    startAutoRefresh()
+  }
 }
 
 onMounted(() => {
@@ -513,9 +612,11 @@ onMounted(() => {
   }
   fetchLogs()
   startAutoRefresh()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

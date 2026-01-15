@@ -77,8 +77,8 @@ from core import storage
 
 # ---------- 日志配置 ----------
 
-# 内存日志缓冲区 (保留最近 3000 条日志，重启后清空)
-log_buffer = deque(maxlen=3000)
+# 内存日志缓冲区 (保留最近 1000 条日志，重启后清空)
+log_buffer = deque(maxlen=1000)
 log_lock = Lock()
 
 # 统计数据持久化
@@ -938,7 +938,8 @@ async def admin_get_settings(request: Request):
         },
         "image_generation": {
             "enabled": config.image_generation.enabled,
-            "supported_models": config.image_generation.supported_models
+            "supported_models": config.image_generation.supported_models,
+            "output_format": config.image_generation.output_format
         },
         "retry": {
             "max_new_session_tries": config.retry.max_new_session_tries,
@@ -968,6 +969,13 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
     global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client
 
     try:
+        image_generation = dict(new_settings.get("image_generation") or {})
+        output_format = str(image_generation.get("output_format") or config_manager.image_output_format).lower()
+        if output_format not in ("base64", "url"):
+            output_format = "base64"
+        image_generation["output_format"] = output_format
+        new_settings["image_generation"] = image_generation
+
         # 保存旧配置用于对比
         old_proxy = PROXY
         old_retry_config = {
@@ -1040,7 +1048,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 @require_login()
 async def admin_get_logs(
     request: Request,
-    limit: int = 1500,
+    limit: int = 300,
     level: str = None,
     search: str = None,
     start_time: str = None,
@@ -1070,7 +1078,7 @@ async def admin_get_logs(
     if end_time:
         logs = [log for log in logs if log["time"] <= end_time]
 
-    limit = min(limit, 3000)
+    limit = min(limit, log_buffer.maxlen)
     filtered_logs = logs[-limit:]
 
     return {

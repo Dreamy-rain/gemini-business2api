@@ -7,8 +7,8 @@
         @click="isSidebarOpen = false"
       ></div>
       <aside
-        class="fixed inset-y-0 left-0 z-40 w-72 -translate-x-full bg-card/90 backdrop-blur border-r border-border
-               transition-[width,transform] duration-200 ease-out will-change-[width,transform] transform-gpu flex flex-col lg:static lg:translate-x-0 lg:bg-card/80
+        class="fixed inset-y-0 left-0 z-40 w-72 -translate-x-full bg-card/90 backdrop-blur-sm lg:backdrop-blur-none border-r border-border
+               transition-transform duration-200 ease-out will-change-[transform] transform-gpu flex flex-col lg:static lg:translate-x-0 lg:bg-card/80
                lg:border-b-0 lg:border-r lg:sticky lg:top-0 lg:h-screen"
         :class="[
           { 'translate-x-0': isSidebarOpen, 'w-20 lg:w-20': isSidebarCollapsed },

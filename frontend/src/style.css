@@ -109,6 +109,11 @@ html {
   background-color: rgba(0, 0, 0, 0.4);
 }
 
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 44px;
+}
+
 .monitor-badge--up {
   background: #d1fae5;
   color: #065f46;

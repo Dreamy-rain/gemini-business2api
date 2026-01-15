@@ -59,7 +59,7 @@
         </div>
 
         <div v-else-if="logs.length > 0" class="mt-4 max-h-[60vh] space-y-3 overflow-y-auto pr-1 scrollbar-slim">
-          <div v-for="log in logs" :key="log.request_id" class="rounded-2xl border border-border bg-card">
+          <div v-for="log in visibleLogs" :key="log.request_id" class="rounded-2xl border border-border bg-card">
             <button
               type="button"
               class="flex w-full flex-wrap items-center gap-2 rounded-2xl bg-secondary/40 px-4 py-3 text-left text-xs transition hover:bg-secondary/60"
@@ -76,11 +76,11 @@
               </span>
             </button>
 
-            <div v-show="!isCollapsed(log.request_id)" class="space-y-2 px-4 py-3">
+            <div v-if="!isCollapsed(log.request_id)" class="space-y-2 px-4 py-3">
               <div
                 v-for="event in log.events"
                 :key="`${log.request_id}-${event.time}-${event.type}`"
-                class="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-xs"
+                class="cv-auto flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3 py-2 text-xs"
               >
                 <div class="text-muted-foreground">{{ event.time }}</div>
                 <span :class="eventBadgeClass(event)">{{ eventLabel(event) }}</span>
@@ -112,7 +112,10 @@ const errorMessage = ref('')
 const lastUpdated = ref('--:--')
 const collapsedState = ref<Record<string, boolean>>({})
 const limit = 1000
+const renderLimit = 1000
+const refreshIntervalMs = 3000
 let timer: number | undefined
+let isFetching = false
 
 const logoUrl = computed(() => {
   const url = display.value?.logo_url?.trim()
@@ -123,6 +126,13 @@ const chatUrl = computed(() => display.value?.chat_url?.trim() || '')
 const totalLogs = computed(() => logs.value.length)
 const successLogs = computed(() => logs.value.filter(log => log.status === 'success').length)
 const errorLogs = computed(() => logs.value.filter(log => log.status === 'error').length)
+
+const visibleLogs = computed(() => {
+  if (logs.value.length > renderLimit) {
+    return logs.value.slice(-renderLimit)
+  }
+  return logs.value
+})
 
 const avgResponseTime = computed(() => {
   let total = 0
@@ -229,6 +239,8 @@ const toggleGroup = (requestId: string) => {
 }
 
 const fetchData = async () => {
+  if (isFetching) return
+  isFetching = true
   errorMessage.value = ''
   try {
     const [logsResponse, statsResponse] = await Promise.all([
@@ -244,6 +256,8 @@ const fetchData = async () => {
     })
   } catch (error: any) {
     errorMessage.value = error.message || '日志加载失败'
+  } finally {
+    isFetching = false
   }
 }
 
@@ -255,14 +269,44 @@ const fetchDisplay = async () => {
   }
 }
 
+const stopAutoRefresh = () => {
+  if (timer) {
+    window.clearTimeout(timer)
+    timer = undefined
+  }
+}
+
+const scheduleAutoRefresh = () => {
+  if (document.hidden) return
+  timer = window.setTimeout(async () => {
+    await fetchData()
+    scheduleAutoRefresh()
+  }, refreshIntervalMs)
+}
+
+const startAutoRefresh = () => {
+  stopAutoRefresh()
+  scheduleAutoRefresh()
+}
+
+const handleVisibilityChange = () => {
+  if (document.hidden) {
+    stopAutoRefresh()
+  } else {
+    startAutoRefresh()
+  }
+}
+
 onMounted(() => {
   loadCollapseState()
   fetchDisplay()
   fetchData()
-  timer = window.setInterval(fetchData, 3000)
+  startAutoRefresh()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer)
+  stopAutoRefresh()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

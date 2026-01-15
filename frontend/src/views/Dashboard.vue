@@ -1,6 +1,6 @@
 ﻿<template>
   <div class="space-y-8">
-    <section class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section class="grid grid-cols-2 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <div
         v-for="stat in stats"
         :key="stat.label"

@@ -132,16 +132,21 @@ class AccountManager:
             raise
 
     def should_retry(self) -> bool:
-        """检查账户是否可重试（429错误10分钟后恢复，普通错误永久禁用）"""
+        """检查账户是否可重试（429错误冷却期后自动恢复，普通错误永久禁用）"""
         if self.is_available:
             return True
 
         current_time = time.time()
 
-        # 检查429冷却期（10分钟后自动恢复）
+        # 检查429冷却期（冷却期后自动恢复）
         if self.last_429_time > 0:
             if current_time - self.last_429_time > self.rate_limit_cooldown_seconds:
-                return True  # 冷却期已过，可以重试
+                # 冷却期已过，自动恢复账户可用性
+                self.is_available = True
+                self.last_429_time = 0.0
+                self.error_count = 0  # 重置错误计数
+                logger.info(f"[ACCOUNT] [{self.config.account_id}] 429冷却期已过，账户已自动恢复")
+                return True
             return False  # 仍在冷却期
 
         # 普通错误永久禁用
@@ -278,7 +283,7 @@ class MultiAccountManager:
         logger.info(f"[MULTI] [ACCOUNT] 添加账户: {config.account_id}")
 
     async def get_account(self, account_id: Optional[str] = None, request_id: str = "") -> AccountManager:
-        """获取账户 (轮询或指定) - 优化锁粒度，减少竞争"""
+        """获取账户 (智能选择或指定) - 优先选择健康账户，提升响应速度"""
         req_tag = f"[req_{request_id}] " if request_id else ""
 
         # 如果指定了账户ID（无需锁）
@@ -290,27 +295,38 @@ class MultiAccountManager:
                 raise HTTPException(503, f"Account {account_id} temporarily unavailable")
             return account
 
-        # 轮询选择可用账户（无锁读取账户列表）
-        available_accounts = [
-            acc_id for acc_id in self.account_list
-            if self.accounts[acc_id].should_retry()
-            and not self.accounts[acc_id].config.is_expired()
-            and not self.accounts[acc_id].config.disabled
-        ]
+        # 智能选择可用账户（优先健康账户，提升响应速度）
+        available_accounts = []
+        for acc_id in self.account_list:
+            account = self.accounts[acc_id]
+            # 检查账户是否可用（会自动恢复429冷却期后的账户）
+            if (account.should_retry() and
+                not account.config.is_expired() and
+                not account.config.disabled):
+                # 计算账户健康度（error_count越低越健康）
+                health_score = -account.error_count  # 负数，越大越健康
+                available_accounts.append((acc_id, health_score))
 
         if not available_accounts:
             raise HTTPException(503, "No available accounts")
+
+        # 按健康度排序（优先选择error_count最低的账户）
+        available_accounts.sort(key=lambda x: x[1], reverse=True)
 
         # 只在更新索引时加锁（最小化锁持有时间）
         async with self._index_lock:
             if not hasattr(self, '_available_index'):
                 self._available_index = 0
 
-            account_id = available_accounts[self._available_index % len(available_accounts)]
-            self._available_index = (self._available_index + 1) % len(available_accounts)
+            # 在健康账户中轮询（只在前50%健康账户中选择）
+            healthy_count = max(1, len(available_accounts) // 2)
+            healthy_accounts = [acc_id for acc_id, _ in available_accounts[:healthy_count]]
+
+            account_id = healthy_accounts[self._available_index % len(healthy_accounts)]
+            self._available_index = (self._available_index + 1) % len(healthy_accounts)
 
         account = self.accounts[account_id]
-        logger.info(f"[MULTI] [ACCOUNT] {req_tag}选择账户: {account_id}")
+        logger.info(f"[MULTI] [ACCOUNT] {req_tag}选择账户: {account_id} (健康度: {account.error_count}错误)")
         return account
 
 

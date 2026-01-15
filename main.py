@@ -1420,17 +1420,17 @@ async def chat_impl(
                 # 检查是否为429错误（Rate Limit）
                 is_rate_limit = isinstance(e, HTTPException) and e.status_code == 429
 
-                # 增加账户失败计数（触发熔断机制）
-                account_manager.last_error_time = time.time()
+                # 429错误单独处理（不增加error_count，只设置冷却时间）
                 if is_rate_limit:
                     account_manager.last_429_time = time.time()
-
-                account_manager.error_count += 1
-                if account_manager.error_count >= ACCOUNT_FAILURE_THRESHOLD:
-                    account_manager.is_available = False
-                    if is_rate_limit:
-                        logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429错误{account_manager.error_count}次，账户已禁用（需休息{RATE_LIMIT_COOLDOWN_SECONDS}秒）")
-                    else:
+                    account_manager.is_available = False  # 临时禁用，冷却期后自动恢复
+                    logger.warning(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429限流，账户将休息{RATE_LIMIT_COOLDOWN_SECONDS}秒后自动恢复")
+                else:
+                    # 非429错误才增加失败计数
+                    account_manager.last_error_time = time.time()
+                    account_manager.error_count += 1
+                    if account_manager.error_count >= ACCOUNT_FAILURE_THRESHOLD:
+                        account_manager.is_available = False
                         logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 请求连续失败{account_manager.error_count}次，账户已永久禁用")
 
                 retry_count += 1
@@ -1451,10 +1451,26 @@ async def chat_impl(
                 # 检查是否还能继续重试
                 if retry_count <= max_retries:
                     logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 正在重试 ({retry_count}/{max_retries})")
+
+                    # 快速失败：检查是否还有可用账户（避免无效重试）
+                    available_count = sum(
+                        1 for acc in multi_account_mgr.accounts.values()
+                        if (acc.should_retry() and
+                            not acc.config.is_expired() and
+                            not acc.config.disabled and
+                            acc.config.account_id not in failed_accounts)
+                    )
+
+                    if available_count == 0:
+                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用，快速失败")
+                        await finalize_result("error", 503, "All accounts unavailable")
+                        if req.stream: yield f"data: {json.dumps({'error': {'message': 'All accounts unavailable'}})}\n\n"
+                        return
+
                     # 尝试切换到其他账户（客户端会传递完整上下文）
                     try:
                         # 获取新账户，跳过已失败的账户
-                        max_account_tries = MAX_ACCOUNT_SWITCH_TRIES  # 使用配置的账户切换尝试次数
+                        max_account_tries = min(MAX_ACCOUNT_SWITCH_TRIES, available_count)  # 限制尝试次数
                         new_account = None
 
                         for _ in range(max_account_tries):
@@ -1464,9 +1480,9 @@ async def chat_impl(
                                 break
 
                         if not new_account:
-                            logger.error(f"[CHAT] [req_{request_id}] All accounts failed, no available account")
-                            await finalize_result("error", 503, "All Accounts Failed")
-                            if req.stream: yield f"data: {json.dumps({'error': {'message': 'All Accounts Failed'}})}\n\n"
+                            logger.error(f"[CHAT] [req_{request_id}] 所有可用账户均已失败")
+                            await finalize_result("error", 503, "All available accounts failed")
+                            if req.stream: yield f"data: {json.dumps({'error': {'message': 'All available accounts failed'}})}\n\n"
                             return
 
                         logger.info(f"[CHAT] [req_{request_id}] 切换账户: {account_manager.config.account_id} -> {new_account.config.account_id}")

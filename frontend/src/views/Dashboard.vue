@@ -17,10 +17,10 @@
         <div class="flex items-center justify-between">
           <p class="text-sm font-medium text-foreground">调用趋势（近12小时）</p>
         </div>
-        <div ref="trendChartRef" class="mt-6 h-56 w-full max-w-full lg:h-64"></div>
-        <div class="mt-6 border-t border-border pt-6">
+        <div ref="trendChartRef" class="mt-6 h-64 w-full max-w-full lg:h-72"></div>
+        <div class="mt-4 border-t border-border pt-4">
           <p class="text-sm font-medium text-foreground">模型调用分布（近12小时）</p>
-          <div ref="modelChartRef" class="mt-4 h-56 w-full max-w-full lg:h-64"></div>
+          <div ref="modelChartRef" class="mt-4 h-80 w-full max-w-full lg:h-64"></div>
         </div>
       </div>
 
@@ -68,6 +68,7 @@ const stats = ref([
 
 const trendData = ref<number[]>([])
 const trendFailureData = ref<number[]>([])
+const trendSuccessData = ref<number[]>([])
 const trendLabels = ref<string[]>([])
 const trendModelRequests = ref<Record<string, number[]>>({})
 
@@ -152,10 +153,14 @@ function initModelChart() {
 function updateTrendChart() {
   if (!trendChart) return
 
+  const successColor = '#0ea5e9'
+  const failureColor = '#f59e0b'
+  const failureLineColor = '#ef4444'
+
   trendChart.setOption({
     tooltip: { trigger: 'axis' },
     legend: {
-      data: ['总请求', '失败/限流'],
+      data: ['成功(总请求)', '失败/限流'],
       right: 0,
       top: 0,
       textStyle: { color: '#6b6b6b', fontSize: 11 },
@@ -178,13 +183,16 @@ function updateTrendChart() {
     },
     series: [
       {
-        name: '总请求',
+        name: '成功(总请求)',
         type: 'line',
-        data: trendData.value,
+        data: trendSuccessData.value,
         smooth: true,
         showSymbol: false,
-        lineStyle: { width: 3 },
-        itemStyle: { color: '#0ea5e9' },
+        lineStyle: { width: 2 },
+        areaStyle: { opacity: 0.25 },
+        itemStyle: { color: successColor },
+        emphasis: { disabled: true },
+        z: 1,
       },
       {
         name: '失败/限流',
@@ -193,7 +201,10 @@ function updateTrendChart() {
         smooth: true,
         showSymbol: false,
         lineStyle: { width: 2 },
-        itemStyle: { color: '#f59e0b' },
+        areaStyle: { opacity: 0.4 },
+        itemStyle: { color: failureLineColor },
+        emphasis: { disabled: true },
+        z: 2,
       },
     ],
   })
@@ -203,43 +214,62 @@ function updateTrendChart() {
 function updateModelChart() {
   if (!modelChart) return
 
-  const modelSeries = Object.entries(trendModelRequests.value).map(([model, data]) => ({
-    name: model,
-    type: 'line',
-    stack: 'models',
-    data,
-    smooth: true,
-    showSymbol: false,
-    areaStyle: { opacity: 0.2 },
-    lineStyle: { width: 1.5 },
-    itemStyle: { color: getModelColor(model) },
-  }))
+  const modelTotals = Object.entries(trendModelRequests.value)
+    .map(([model, data]) => ({
+      name: model,
+      value: data.reduce((sum, item) => sum + item, 0),
+      itemStyle: { color: getModelColor(model), borderRadius: 8 },
+    }))
+    .filter(item => item.value > 0)
+
+  // 响应式布局：手机端标签在底部，桌面端标签在左侧
+  const isMobile = window.innerWidth < 768
+  const legendConfig = isMobile
+    ? {
+        data: modelTotals.map(item => item.name),
+        left: 'center',
+        bottom: 0,
+        orient: 'horizontal' as const,
+        textStyle: { color: '#6b6b6b', fontSize: 11 },
+      }
+    : {
+        data: modelTotals.map(item => item.name),
+        left: 0,
+        top: 'center',
+        orient: 'vertical' as const,
+        textStyle: { color: '#6b6b6b', fontSize: 11 },
+      }
+
+  const pieCenter = isMobile ? ['50%', '38%'] : ['66%', '50%']
+  const pieRadius = isMobile ? ['40%', '62%'] : ['52%', '78%']
 
   modelChart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: {
-      data: modelSeries.map(series => series.name),
-      right: 0,
-      top: 0,
-      textStyle: { color: '#6b6b6b', fontSize: 11 },
+    animation: true,
+    animationDuration: 600,
+    animationEasing: 'cubicOut',
+    animationDurationUpdate: 300,
+    animationEasingUpdate: 'cubicOut',
+    tooltip: {
+      trigger: 'item',
+      formatter: (params: { name: string; value: number; percent: number }) =>
+        `${params.name}: ${params.value} 次 (${params.percent}%)`,
     },
-    grid: { left: 24, right: 16, top: 44, bottom: 24, containLabel: true },
-    xAxis: {
-      type: 'category',
-      data: trendLabels.value,
-      boundaryGap: false,
-      axisLine: { lineStyle: { color: '#d4d4d4' } },
-      axisTick: { show: false },
-      axisLabel: { color: '#6b6b6b', fontSize: 10 },
-    },
-    yAxis: {
-      type: 'value',
-      axisLine: { show: false },
-      axisTick: { show: false },
-      axisLabel: { color: '#6b6b6b', fontSize: 10 },
-      splitLine: { lineStyle: { color: '#e5e5e5' } },
-    },
-    series: modelSeries,
+    legend: legendConfig,
+    series: [
+      {
+        type: 'pie',
+        radius: pieRadius,
+        center: pieCenter,
+        startAngle: 90,
+        animationType: 'scale',
+        animationEasing: 'cubicOut',
+        avoidLabelOverlap: true,
+        label: { show: true, formatter: '{b}', fontSize: 11, color: '#6b6b6b' },
+        labelLine: { length: 12, length2: 10 },
+        itemStyle: { borderWidth: 2, borderColor: '#fff', borderRadius: 10 },
+        data: modelTotals,
+      },
+    ],
   })
   scheduleModelResize()
 }
@@ -249,7 +279,8 @@ function handleResize() {
     trendChart.resize()
   }
   if (modelChart) {
-    modelChart.resize()
+    // 重新渲染图表以应用响应式布局
+    updateModelChart()
   }
 }
 
@@ -266,7 +297,9 @@ async function loadOverview() {
     trendData.value = trend.total_requests || []
     const failed = trend.failed_requests || []
     const limited = trend.rate_limited_requests || []
-    trendFailureData.value = trendData.value.map((_, idx) => (failed[idx] || 0) + (limited[idx] || 0))
+    const failureSeries = trendData.value.map((_, idx) => (failed[idx] || 0) + (limited[idx] || 0))
+    trendFailureData.value = failureSeries
+    trendSuccessData.value = trendData.value.map(item => Math.max(item, 0))
     trendModelRequests.value = trend.model_requests || {}
 
     updateTrendChart()
@@ -292,10 +325,10 @@ function scheduleModelResize() {
 
 function getModelColor(model: string) {
   const modelColors: Record<string, string> = {
-    'gemini-3-pro-preview': '#2563eb',
-    'gemini-2.5-pro': '#10b981',
-    'gemini-2.5-flash': '#f97316',
-    'gemini-3-flash-preview': '#8b5cf6',
+    'gemini-3-pro-preview': '#0ea5e9',
+    'gemini-2.5-pro': '#22c55e',
+    'gemini-2.5-flash': '#f59e0b',
+    'gemini-3-flash-preview': '#ec4899',
     'gemini-auto': '#64748b',
   }
   return modelColors[model] || '#94a3b8'

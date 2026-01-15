@@ -337,24 +337,14 @@ def _load_from_file() -> list:
 
 def save_accounts_to_file(accounts_data: list):
     """保存账户配置（优先数据库，降级到文件）"""
-    # 尝试保存到数据库
     if storage.is_database_enabled():
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 在已有事件循环中，创建任务
-                asyncio.create_task(storage.save_accounts(accounts_data))
-                logger.info(f"[CONFIG] 配置已提交到数据库（异步）")
+            saved = storage.save_accounts_sync(accounts_data)
+            if saved:
                 return
-            else:
-                saved = loop.run_until_complete(storage.save_accounts(accounts_data))
-                if saved:
-                    return
         except Exception as e:
             logger.warning(f"[CONFIG] 数据库保存失败: {e}，降级到文件存储")
-    
-    # 降级到文件存储
+
     _save_to_file(accounts_data)
 
 
@@ -376,9 +366,7 @@ def load_accounts_from_source() -> list:
     # 2. 尝试从数据库加载
     if storage.is_database_enabled():
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
-            accounts_data = loop.run_until_complete(storage.load_accounts())
+            accounts_data = storage.load_accounts_sync()
             if accounts_data is not None:
                 if accounts_data:
                     logger.info(f"[CONFIG] 从数据库加载配置，共 {len(accounts_data)} 个账户")

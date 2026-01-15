@@ -1,192 +1,245 @@
 """
-存储抽象层 - 支持文件存储和 PostgreSQL 数据库存储
+Storage abstraction supporting file and PostgreSQL backends.
 
-通过 DATABASE_URL 环境变量自动切换：
-- 未设置：使用本地文件存储（原有逻辑）
-- 已设置：使用 PostgreSQL 数据库存储
-
-示例：
-DATABASE_URL=postgresql://user:pass@host:5432/dbname?sslmode=require
+If DATABASE_URL is set, PostgreSQL is used.
 """
 
+import asyncio
 import json
 import logging
 import os
+import threading
 from typing import Optional
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# 数据库 URL（可选）
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-
-# 数据库连接池（延迟初始化）
 _db_pool = None
+_db_pool_lock = None
+_db_loop = None
+_db_thread = None
+_db_loop_lock = threading.Lock()
+
+
+def _get_database_url() -> str:
+    return os.environ.get("DATABASE_URL", "").strip()
 
 
 def is_database_enabled() -> bool:
-    """检查是否启用数据库存储"""
-    return bool(DATABASE_URL)
+    """Return True when DATABASE_URL is configured."""
+    return bool(_get_database_url())
+
+
+def _ensure_db_loop() -> asyncio.AbstractEventLoop:
+    global _db_loop, _db_thread
+    if _db_loop and _db_thread and _db_thread.is_alive():
+        return _db_loop
+    with _db_loop_lock:
+        if _db_loop and _db_thread and _db_thread.is_alive():
+            return _db_loop
+        loop = asyncio.new_event_loop()
+
+        def _runner() -> None:
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="storage-db-loop", daemon=True)
+        thread.start()
+        _db_loop = loop
+        _db_thread = thread
+        return _db_loop
+
+
+def _run_in_db_loop(coro):
+    loop = _ensure_db_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
 
 
 async def _get_pool():
-    """获取数据库连接池（延迟初始化）"""
-    global _db_pool
-    if _db_pool is None:
+    """Get (or create) the asyncpg connection pool."""
+    global _db_pool, _db_pool_lock
+    if _db_pool is not None:
+        return _db_pool
+    if _db_pool_lock is None:
+        _db_pool_lock = asyncio.Lock()
+    async with _db_pool_lock:
+        if _db_pool is not None:
+            return _db_pool
+        db_url = _get_database_url()
+        if not db_url:
+            raise ValueError("DATABASE_URL is not set")
         try:
             import asyncpg
             _db_pool = await asyncpg.create_pool(
-                DATABASE_URL,
+                db_url,
                 min_size=1,
                 max_size=10,
-                command_timeout=30
+                command_timeout=30,
             )
-            # 初始化表结构
-            await _init_tables()
-            logger.info("[STORAGE] PostgreSQL 连接池已创建")
+            await _init_tables(_db_pool)
+            logger.info("[STORAGE] PostgreSQL pool initialized")
         except ImportError:
-            logger.error("[STORAGE] 需要安装 asyncpg: pip install asyncpg")
+            logger.error("[STORAGE] asyncpg is required for database storage")
             raise
         except Exception as e:
-            logger.error(f"[STORAGE] 数据库连接失败: {e}")
+            logger.error(f"[STORAGE] Database connection failed: {e}")
             raise
     return _db_pool
 
 
-async def _init_tables():
-    """初始化数据库表结构"""
-    pool = _db_pool
+async def _init_tables(pool) -> None:
+    """Initialize database tables."""
     async with pool.acquire() as conn:
-        await conn.execute("""
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS kv_store (
                 key TEXT PRIMARY KEY,
                 value JSONB NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """)
-        logger.info("[STORAGE] 数据库表已初始化")
+            """
+        )
+        logger.info("[STORAGE] Database tables initialized")
 
 
 async def db_get(key: str) -> Optional[dict]:
-    """从数据库获取数据"""
+    """Fetch a value from the database."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT value FROM kv_store WHERE key = $1", key
         )
-        if row:
-            return json.loads(row["value"])
-        return None
+        if not row:
+            return None
+        value = row["value"]
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
 
 
-async def db_set(key: str, value: dict):
-    """保存数据到数据库"""
+async def db_set(key: str, value: dict) -> None:
+    """Persist a value to the database."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        await conn.execute("""
+        await conn.execute(
+            """
             INSERT INTO kv_store (key, value, updated_at)
             VALUES ($1, $2, CURRENT_TIMESTAMP)
             ON CONFLICT (key) DO UPDATE SET
                 value = EXCLUDED.value,
                 updated_at = CURRENT_TIMESTAMP
-        """, key, json.dumps(value, ensure_ascii=False))
+            """,
+            key,
+            json.dumps(value, ensure_ascii=False),
+        )
 
 
-# ==================== 账户存储接口 ====================
+# ==================== Accounts storage ====================
 
-async def load_accounts() -> list:
+async def load_accounts() -> Optional[list]:
     """
-    加载账户配置
-    - 优先从环境变量 ACCOUNTS_CONFIG 加载
-    - 其次从数据库加载（如果启用）
-    - 最后从文件加载
+    Load account configuration from database when enabled.
+    Return None to indicate file-based fallback.
     """
-    # 1. 优先从环境变量加载
-    env_accounts = os.environ.get("ACCOUNTS_CONFIG")
-    if env_accounts:
-        try:
-            accounts = json.loads(env_accounts)
-            logger.info(f"[STORAGE] 从环境变量加载 {len(accounts)} 个账户")
-            return accounts
-        except Exception as e:
-            logger.error(f"[STORAGE] 环境变量解析失败: {e}")
-
-    # 2. 从数据库加载（如果启用）
-    if is_database_enabled():
-        try:
-            data = await db_get("accounts")
-            if data:
-                logger.info(f"[STORAGE] 从数据库加载 {len(data)} 个账户")
-                return data
-            logger.info("[STORAGE] 数据库中无账户数据")
-            return []
-        except Exception as e:
-            logger.error(f"[STORAGE] 数据库读取失败: {e}")
-            # 降级到文件存储
-    
-    # 3. 从文件加载（原有逻辑）
-    return None  # 返回 None 表示使用原有文件加载逻辑
+    if not is_database_enabled():
+        return None
+    try:
+        data = await db_get("accounts")
+        if data:
+            logger.info(f"[STORAGE] Loaded {len(data)} accounts from database")
+            return data
+        logger.info("[STORAGE] No accounts found in database")
+        return []
+    except Exception as e:
+        logger.error(f"[STORAGE] Database read failed: {e}")
+    return None
 
 
-async def save_accounts(accounts: list):
-    """
-    保存账户配置
-    - 如果启用数据库，保存到数据库
-    - 否则保存到文件
-    """
-    if is_database_enabled():
-        try:
-            await db_set("accounts", accounts)
-            logger.info(f"[STORAGE] 已保存 {len(accounts)} 个账户到数据库")
-            return True
-        except Exception as e:
-            logger.error(f"[STORAGE] 数据库写入失败: {e}")
-            # 降级到文件存储
-    
-    return False  # 返回 False 表示使用原有文件保存逻辑
+async def save_accounts(accounts: list) -> bool:
+    """Save account configuration to database when enabled."""
+    if not is_database_enabled():
+        return False
+    try:
+        await db_set("accounts", accounts)
+        logger.info(f"[STORAGE] Saved {len(accounts)} accounts to database")
+        return True
+    except Exception as e:
+        logger.error(f"[STORAGE] Database write failed: {e}")
+    return False
 
 
-# ==================== 设置存储接口 ====================
+def load_accounts_sync() -> Optional[list]:
+    """Sync wrapper for load_accounts (safe in sync/async call sites)."""
+    return _run_in_db_loop(load_accounts())
+
+
+def save_accounts_sync(accounts: list) -> bool:
+    """Sync wrapper for save_accounts (safe in sync/async call sites)."""
+    return _run_in_db_loop(save_accounts(accounts))
+
+
+# ==================== Settings storage ====================
 
 async def load_settings() -> Optional[dict]:
-    """从数据库加载设置（如果启用）"""
-    if is_database_enabled():
-        try:
-            return await db_get("settings")
-        except Exception as e:
-            logger.error(f"[STORAGE] 设置读取失败: {e}")
+    if not is_database_enabled():
+        return None
+    try:
+        return await db_get("settings")
+    except Exception as e:
+        logger.error(f"[STORAGE] Settings read failed: {e}")
     return None
 
 
 async def save_settings(settings: dict) -> bool:
-    """保存设置到数据库（如果启用）"""
-    if is_database_enabled():
-        try:
-            await db_set("settings", settings)
-            logger.info("[STORAGE] 设置已保存到数据库")
-            return True
-        except Exception as e:
-            logger.error(f"[STORAGE] 设置写入失败: {e}")
+    if not is_database_enabled():
+        return False
+    try:
+        await db_set("settings", settings)
+        logger.info("[STORAGE] Settings saved to database")
+        return True
+    except Exception as e:
+        logger.error(f"[STORAGE] Settings write failed: {e}")
     return False
 
 
-# ==================== 统计存储接口 ====================
+# ==================== Stats storage ====================
 
 async def load_stats() -> Optional[dict]:
-    """从数据库加载统计数据（如果启用）"""
-    if is_database_enabled():
-        try:
-            return await db_get("stats")
-        except Exception as e:
-            logger.error(f"[STORAGE] 统计读取失败: {e}")
+    if not is_database_enabled():
+        return None
+    try:
+        return await db_get("stats")
+    except Exception as e:
+        logger.error(f"[STORAGE] Stats read failed: {e}")
     return None
 
 
 async def save_stats(stats: dict) -> bool:
-    """保存统计数据到数据库（如果启用）"""
-    if is_database_enabled():
-        try:
-            await db_set("stats", stats)
-            return True
-        except Exception as e:
-            logger.error(f"[STORAGE] 统计写入失败: {e}")
+    if not is_database_enabled():
+        return False
+    try:
+        await db_set("stats", stats)
+        return True
+    except Exception as e:
+        logger.error(f"[STORAGE] Stats write failed: {e}")
     return False
+
+
+def load_settings_sync() -> Optional[dict]:
+    return _run_in_db_loop(load_settings())
+
+
+def save_settings_sync(settings: dict) -> bool:
+    return _run_in_db_loop(save_settings(settings))
+
+
+def load_stats_sync() -> Optional[dict]:
+    return _run_in_db_loop(load_stats())
+
+
+def save_stats_sync(stats: dict) -> bool:
+    return _run_in_db_loop(save_stats(stats))

@@ -159,6 +159,28 @@ async def load_accounts() -> Optional[list]:
     return None
 
 
+async def get_accounts_count() -> Optional[int]:
+    """
+    Get the number of accounts in the database (lightweight check).
+    Return None if database is not enabled or failed.
+    """
+    if not is_database_enabled():
+        return None
+    try:
+        data = await db_get("accounts")
+        if data:
+            return len(data)
+        return 0
+    except Exception as e:
+        logger.error(f"[STORAGE] Database accounts count failed: {e}")
+    return None
+
+
+def get_accounts_count_sync() -> Optional[int]:
+    """Sync wrapper for get_accounts_count."""
+    return _run_in_db_loop(get_accounts_count())
+
+
 async def save_accounts(accounts: list) -> bool:
     """Save account configuration to database when enabled."""
     if not is_database_enabled():

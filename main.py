@@ -432,16 +432,19 @@ else:
 
 # ---------- 后台任务启动 ----------
 
-# 全局变量：记录上次检测到的账号数量（用于自动刷新检测）
-_last_known_account_count: int = 0
+# 全局变量：记录上次检测到的账号更新时间（用于自动刷新检测）
+_last_known_accounts_version: float | None = None
 
 
 async def auto_refresh_accounts_task():
     """后台任务：定期检查数据库中的账号变化，自动刷新"""
-    global multi_account_mgr, _last_known_account_count
+    global multi_account_mgr, _last_known_accounts_version
 
-    # 初始化：记录当前账号数量
-    _last_known_account_count = len(multi_account_mgr.accounts)
+    # 初始化：记录当前账号更新时间
+    if storage.is_database_enabled() and not os.environ.get("ACCOUNTS_CONFIG"):
+        _last_known_accounts_version = await asyncio.to_thread(
+            storage.get_accounts_updated_at_sync
+        )
 
     while True:
         try:
@@ -454,19 +457,22 @@ async def auto_refresh_accounts_task():
 
             await asyncio.sleep(refresh_interval)
 
+            # 环境变量优先时无需自动刷新
+            if os.environ.get("ACCOUNTS_CONFIG"):
+                continue
+
             # 检查数据库是否启用
             if not storage.is_database_enabled():
                 continue
 
-            # 获取数据库中的账号数量
-            db_count = await asyncio.to_thread(storage.get_accounts_count_sync)
-            if db_count is None:
+            # 获取数据库中的账号更新时间
+            db_version = await asyncio.to_thread(storage.get_accounts_updated_at_sync)
+            if db_version is None:
                 continue
 
-            # 比较数量变化
-            current_count = len(multi_account_mgr.accounts)
-            if db_count != current_count:
-                logger.info(f"[AUTO-REFRESH] 检测到账号变化: {current_count} -> {db_count}，正在自动刷新...")
+            # 比较更新时间变化
+            if _last_known_accounts_version != db_version:
+                logger.info("[AUTO-REFRESH] 检测到账号变化，正在自动刷新...")
 
                 # 重新加载账号配置
                 multi_account_mgr = _reload_accounts(
@@ -479,8 +485,8 @@ async def auto_refresh_accounts_task():
                     global_stats
                 )
 
-                _last_known_account_count = len(multi_account_mgr.accounts)
-                logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {_last_known_account_count}")
+                _last_known_accounts_version = db_version
+                logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(multi_account_mgr.accounts)}")
 
         except asyncio.CancelledError:
             logger.info("[AUTO-REFRESH] 自动刷新任务已停止")
@@ -520,7 +526,9 @@ async def startup_event():
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
 
     # 启动自动刷新账号任务（仅数据库模式有效）
-    if storage.is_database_enabled() and AUTO_REFRESH_ACCOUNTS_SECONDS > 0:
+    if os.environ.get("ACCOUNTS_CONFIG"):
+        logger.info("[SYSTEM] 自动刷新账号已跳过（使用 ACCOUNTS_CONFIG）")
+    elif storage.is_database_enabled() and AUTO_REFRESH_ACCOUNTS_SECONDS > 0:
         asyncio.create_task(auto_refresh_accounts_task())
         logger.info(f"[SYSTEM] 自动刷新账号任务已启动（间隔: {AUTO_REFRESH_ACCOUNTS_SECONDS}秒）")
     elif storage.is_database_enabled():

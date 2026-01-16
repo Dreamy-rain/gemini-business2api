@@ -159,26 +159,31 @@ async def load_accounts() -> Optional[list]:
     return None
 
 
-async def get_accounts_count() -> Optional[int]:
+async def get_accounts_updated_at() -> Optional[float]:
     """
-    Get the number of accounts in the database (lightweight check).
+    Get the accounts updated_at timestamp (epoch seconds).
     Return None if database is not enabled or failed.
     """
     if not is_database_enabled():
         return None
     try:
-        data = await db_get("accounts")
-        if data:
-            return len(data)
-        return 0
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT EXTRACT(EPOCH FROM updated_at) AS ts FROM kv_store WHERE key = $1",
+                "accounts",
+            )
+            if not row or row["ts"] is None:
+                return None
+            return float(row["ts"])
     except Exception as e:
-        logger.error(f"[STORAGE] Database accounts count failed: {e}")
+        logger.error(f"[STORAGE] Database accounts updated_at failed: {e}")
     return None
 
 
-def get_accounts_count_sync() -> Optional[int]:
-    """Sync wrapper for get_accounts_count."""
-    return _run_in_db_loop(get_accounts_count())
+def get_accounts_updated_at_sync() -> Optional[float]:
+    """Sync wrapper for get_accounts_updated_at."""
+    return _run_in_db_loop(get_accounts_updated_at())
 
 
 async def save_accounts(accounts: list) -> bool:

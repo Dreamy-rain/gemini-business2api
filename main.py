@@ -321,6 +321,49 @@ multi_account_mgr = load_multi_account_config(
     global_stats
 )
 
+# ---------- 自动注册/刷新服务 ----------
+register_service = None
+login_service = None
+
+def _set_multi_account_mgr(new_mgr):
+    global multi_account_mgr
+    multi_account_mgr = new_mgr
+    if register_service:
+        register_service.multi_account_mgr = new_mgr
+    if login_service:
+        login_service.multi_account_mgr = new_mgr
+
+def _get_global_stats():
+    return global_stats
+
+try:
+    from core.register_service import RegisterService
+    from core.login_service import LoginService
+    register_service = RegisterService(
+        multi_account_mgr,
+        http_client,
+        USER_AGENT,
+        ACCOUNT_FAILURE_THRESHOLD,
+        RATE_LIMIT_COOLDOWN_SECONDS,
+        SESSION_CACHE_TTL_SECONDS,
+        _get_global_stats,
+        _set_multi_account_mgr,
+    )
+    login_service = LoginService(
+        multi_account_mgr,
+        http_client,
+        USER_AGENT,
+        ACCOUNT_FAILURE_THRESHOLD,
+        RATE_LIMIT_COOLDOWN_SECONDS,
+        SESSION_CACHE_TTL_SECONDS,
+        _get_global_stats,
+        _set_multi_account_mgr,
+    )
+except Exception as e:
+    logger.warning("[SYSTEM] 自动注册/刷新服务不可用: %s", e)
+    register_service = None
+    login_service = None
+
 # 验证必需的环境变量
 if not ADMIN_KEY:
     logger.error("[SYSTEM] 未配置 ADMIN_KEY 环境变量，请设置后重启")
@@ -533,6 +576,16 @@ async def startup_event():
         logger.info(f"[SYSTEM] 自动刷新账号任务已启动（间隔: {AUTO_REFRESH_ACCOUNTS_SECONDS}秒）")
     elif storage.is_database_enabled():
         logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
+
+    # 启动自动登录刷新轮询
+    if login_service:
+        try:
+            asyncio.create_task(login_service.start_polling())
+            logger.info("[SYSTEM] 账户过期检查轮询已启动（间隔: 30分钟）")
+        except Exception as e:
+            logger.error(f"[SYSTEM] 启动登录服务失败: {e}")
+    else:
+        logger.info("[SYSTEM] 自动登录刷新未启用或依赖不可用")
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:
@@ -943,6 +996,70 @@ async def admin_update_config(request: Request, accounts_data: list = Body(...))
         logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
         raise HTTPException(500, f"更新失败: {str(e)}")
 
+@app.post("/admin/register/start")
+@require_login()
+async def admin_start_register(request: Request, count: Optional[int] = Body(default=None), domain: Optional[str] = Body(default=None)):
+    if not register_service:
+        raise HTTPException(503, "register service unavailable")
+    task = await register_service.start_register(count=count, domain=domain)
+    return task.to_dict()
+
+@app.get("/admin/register/task/{task_id}")
+@require_login()
+async def admin_get_register_task(request: Request, task_id: str):
+    if not register_service:
+        raise HTTPException(503, "register service unavailable")
+    task = register_service.get_task(task_id)
+    if not task:
+        raise HTTPException(404, "task not found")
+    return task.to_dict()
+
+@app.get("/admin/register/current")
+@require_login()
+async def admin_get_current_register_task(request: Request):
+    if not register_service:
+        raise HTTPException(503, "register service unavailable")
+    task = register_service.get_current_task()
+    if not task:
+        return {"status": "idle"}
+    return task.to_dict()
+
+@app.post("/admin/login/start")
+@require_login()
+async def admin_start_login(request: Request, account_ids: List[str] = Body(...)):
+    if not login_service:
+        raise HTTPException(503, "login service unavailable")
+    task = await login_service.start_login(account_ids)
+    return task.to_dict()
+
+@app.get("/admin/login/task/{task_id}")
+@require_login()
+async def admin_get_login_task(request: Request, task_id: str):
+    if not login_service:
+        raise HTTPException(503, "login service unavailable")
+    task = login_service.get_task(task_id)
+    if not task:
+        raise HTTPException(404, "task not found")
+    return task.to_dict()
+
+@app.get("/admin/login/current")
+@require_login()
+async def admin_get_current_login_task(request: Request):
+    if not login_service:
+        raise HTTPException(503, "login service unavailable")
+    task = login_service.get_current_task()
+    if not task:
+        return {"status": "idle"}
+    return task.to_dict()
+
+@app.post("/admin/login/check")
+@require_login()
+async def admin_check_login_refresh(request: Request):
+    if not login_service:
+        raise HTTPException(503, "login service unavailable")
+    await login_service.check_and_refresh()
+    return {"status": "ok"}
+
 @app.delete("/admin/accounts/{account_id}")
 @require_login()
 async def admin_delete_account(request: Request, account_id: str):
@@ -1010,7 +1127,14 @@ async def admin_get_settings(request: Request):
         "basic": {
             "api_key": config.basic.api_key,
             "base_url": config.basic.base_url,
-            "proxy": config.basic.proxy
+            "proxy": config.basic.proxy,
+            "duckmail_base_url": config.basic.duckmail_base_url,
+            "duckmail_api_key": config.basic.duckmail_api_key,
+            "duckmail_verify_ssl": config.basic.duckmail_verify_ssl,
+            "browser_headless": config.basic.browser_headless,
+            "refresh_window_hours": config.basic.refresh_window_hours,
+            "register_default_count": config.basic.register_default_count,
+            "register_domain": config.basic.register_domain,
         },
         "image_generation": {
             "enabled": config.image_generation.enabled,
@@ -1023,7 +1147,8 @@ async def admin_get_settings(request: Request):
             "max_account_switch_tries": config.retry.max_account_switch_tries,
             "account_failure_threshold": config.retry.account_failure_threshold,
             "rate_limit_cooldown_seconds": config.retry.rate_limit_cooldown_seconds,
-            "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds
+            "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
+            "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds
         },
         "public_display": {
             "logo_url": config.public_display.logo_url,
@@ -1041,16 +1166,33 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
     global API_KEY, PROXY, BASE_URL, LOGO_URL, CHAT_URL
     global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
     global MAX_NEW_SESSION_TRIES, MAX_REQUEST_RETRIES, MAX_ACCOUNT_SWITCH_TRIES
-    global ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS
+    global ACCOUNT_FAILURE_THRESHOLD, RATE_LIMIT_COOLDOWN_SECONDS, SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
     global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client
 
     try:
+        basic = dict(new_settings.get("basic") or {})
+        basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
+        basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
+        basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
+        basic.setdefault("browser_headless", config.basic.browser_headless)
+        basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)
+        basic.setdefault("register_default_count", config.basic.register_default_count)
+        basic.setdefault("register_domain", config.basic.register_domain)
+        if not isinstance(basic.get("register_domain"), str):
+            basic["register_domain"] = ""
+        basic.pop("duckmail_proxy", None)
+        new_settings["basic"] = basic
+
         image_generation = dict(new_settings.get("image_generation") or {})
         output_format = str(image_generation.get("output_format") or config_manager.image_output_format).lower()
         if output_format not in ("base64", "url"):
             output_format = "base64"
         image_generation["output_format"] = output_format
         new_settings["image_generation"] = image_generation
+
+        retry = dict(new_settings.get("retry") or {})
+        retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
+        new_settings["retry"] = retry
 
         # 保存旧配置用于对比
         old_proxy = PROXY
@@ -1080,6 +1222,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
         RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
         SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
+        AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
         SESSION_EXPIRE_HOURS = config.session.expire_hours
 
         # 检查是否需要重建 HTTP 客户端（代理变化）

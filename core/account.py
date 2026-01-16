@@ -38,6 +38,8 @@ class AccountConfig:
     config_id: str
     expires_at: Optional[str] = None  # 账户过期时间 (格式: "2025-12-23 10:59:21")
     disabled: bool = False  # 手动禁用状态
+    mail_provider: Optional[str] = None
+    mail_password: Optional[str] = None
 
     def get_remaining_hours(self) -> Optional[float]:
         """计算账户剩余小时数"""
@@ -440,7 +442,9 @@ def load_multi_account_config(
             csesidx=acc["csesidx"],
             config_id=acc["config_id"],
             expires_at=acc.get("expires_at"),
-            disabled=acc.get("disabled", False)  # 读取手动禁用状态，默认为 False
+            disabled=acc.get("disabled", False),  # 读取手动禁用状态，默认为 False
+            mail_provider=acc.get("mail_provider"),
+            mail_password=acc.get("mail_password") or acc.get("email_password")
         )
 
         # 检查账户是否已过期（已过期也加载到管理面板）

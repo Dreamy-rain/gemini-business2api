@@ -2,13 +2,12 @@
 统一配置管理系统
 
 优先级规则：
-1. 环境变量（最高优先级）
-2. YAML 配置文件
-3. 默认值（最低优先级）
+1. 安全配置：仅环境变量（ADMIN_KEY, SESSION_SECRET_KEY）
+2. 业务配置：YAML 配置文件 > 默认值
 
 配置分类：
-- 安全配置：仅从环境变量读取，不可热更新（ADMIN_KEY, PATH_PREFIX, SESSION_SECRET_KEY）
-- 业务配置：环境变量 > YAML，支持热更新（API_KEY, PROXY, 重试策略等）
+- 安全配置：仅从环境变量读取，不可热更新（ADMIN_KEY, SESSION_SECRET_KEY）
+- 业务配置：仅从 YAML 读取，支持热更新（API_KEY, BASE_URL, PROXY, 重试策略等）
 """
 
 import os
@@ -24,6 +23,21 @@ from core import storage
 # 加载 .env 文件
 load_dotenv()
 
+def _parse_bool(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("1", "true", "yes", "y", "on"):
+            return True
+        if lowered in ("0", "false", "no", "n", "off"):
+            return False
+    return default
+
 
 # ==================== 配置模型定义 ====================
 
@@ -32,6 +46,13 @@ class BasicConfig(BaseModel):
     api_key: str = Field(default="", description="API访问密钥（留空则公开访问）")
     base_url: str = Field(default="", description="服务器URL（留空则自动检测）")
     proxy: str = Field(default="", description="代理地址")
+    duckmail_base_url: str = Field(default="https://api.duckmail.sbs", description="DuckMail API地址")
+    duckmail_api_key: str = Field(default="", description="DuckMail API key")
+    duckmail_verify_ssl: bool = Field(default=True, description="DuckMail SSL校验")
+    browser_headless: bool = Field(default=True, description="自动化浏览器无头模式")
+    refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
+    register_default_count: int = Field(default=1, ge=1, le=30, description="默认注册数量")
+    register_domain: str = Field(default="", description="默认注册域名（推荐）")
 
 
 class ImageGenerationConfig(BaseModel):
@@ -107,7 +128,7 @@ class ConfigManager:
 
         优先级规则：
         1. 安全配置（ADMIN_KEY, SESSION_SECRET_KEY）：仅从环境变量读取
-        2. 其他配置：YAML > 环境变量 > 默认值
+        2. 其他配置：YAML > 默认值
         """
         # 1. 加载 YAML 配置
         yaml_data = self._load_yaml()
@@ -118,12 +139,24 @@ class ConfigManager:
             session_secret_key=os.getenv("SESSION_SECRET_KEY", self._generate_secret())
         )
 
-        # 3. 加载基础配置（YAML > 环境变量 > 默认值）
+        # 3. 加载基础配置（YAML > 默认值）
         basic_data = yaml_data.get("basic", {})
+        refresh_window_raw = basic_data.get("refresh_window_hours", 1)
+        register_default_raw = basic_data.get("register_default_count", 1)
+        register_domain_raw = basic_data.get("register_domain", "")
+        duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
+
         basic_config = BasicConfig(
-            api_key=basic_data.get("api_key") or os.getenv("API_KEY", ""),
-            base_url=basic_data.get("base_url") or os.getenv("BASE_URL", ""),
-            proxy=basic_data.get("proxy") or os.getenv("PROXY", "")
+            api_key=basic_data.get("api_key") or "",
+            base_url=basic_data.get("base_url") or "",
+            proxy=basic_data.get("proxy") or "",
+            duckmail_base_url=basic_data.get("duckmail_base_url") or "https://api.duckmail.sbs",
+            duckmail_api_key=str(duckmail_api_key_raw or "").strip(),
+            duckmail_verify_ssl=_parse_bool(basic_data.get("duckmail_verify_ssl"), True),
+            browser_headless=_parse_bool(basic_data.get("browser_headless"), True),
+            refresh_window_hours=int(refresh_window_raw),
+            register_default_count=int(register_default_raw),
+            register_domain=str(register_domain_raw or "").strip(),
         )
 
         # 4. 加载其他配置（从 YAML）

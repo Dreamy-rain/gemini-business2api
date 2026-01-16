@@ -61,6 +61,7 @@ from core.account import (
     format_account_expiration,
     load_multi_account_config,
     load_accounts_from_source,
+    reload_accounts as _reload_accounts,
     update_accounts_config as _update_accounts_config,
     delete_account as _delete_account,
     update_account_disabled_status as _update_account_disabled_status
@@ -263,6 +264,7 @@ MAX_ACCOUNT_SWITCH_TRIES = config.retry.max_account_switch_tries
 ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
 RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
 SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
+AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
 
 # ---------- 模型映射配置 ----------
 MODEL_MAPPING = {
@@ -429,6 +431,71 @@ else:
     logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (本地持久化)")
 
 # ---------- 后台任务启动 ----------
+
+# 全局变量：记录上次检测到的账号更新时间（用于自动刷新检测）
+_last_known_accounts_version: float | None = None
+
+
+async def auto_refresh_accounts_task():
+    """后台任务：定期检查数据库中的账号变化，自动刷新"""
+    global multi_account_mgr, _last_known_accounts_version
+
+    # 初始化：记录当前账号更新时间
+    if storage.is_database_enabled() and not os.environ.get("ACCOUNTS_CONFIG"):
+        _last_known_accounts_version = await asyncio.to_thread(
+            storage.get_accounts_updated_at_sync
+        )
+
+    while True:
+        try:
+            # 获取配置的刷新间隔（支持热更新）
+            refresh_interval = config_manager.auto_refresh_accounts_seconds
+            if refresh_interval <= 0:
+                # 自动刷新已禁用，等待一段时间后再检查配置
+                await asyncio.sleep(60)
+                continue
+
+            await asyncio.sleep(refresh_interval)
+
+            # 环境变量优先时无需自动刷新
+            if os.environ.get("ACCOUNTS_CONFIG"):
+                continue
+
+            # 检查数据库是否启用
+            if not storage.is_database_enabled():
+                continue
+
+            # 获取数据库中的账号更新时间
+            db_version = await asyncio.to_thread(storage.get_accounts_updated_at_sync)
+            if db_version is None:
+                continue
+
+            # 比较更新时间变化
+            if _last_known_accounts_version != db_version:
+                logger.info("[AUTO-REFRESH] 检测到账号变化，正在自动刷新...")
+
+                # 重新加载账号配置
+                multi_account_mgr = _reload_accounts(
+                    multi_account_mgr,
+                    http_client,
+                    USER_AGENT,
+                    ACCOUNT_FAILURE_THRESHOLD,
+                    RATE_LIMIT_COOLDOWN_SECONDS,
+                    SESSION_CACHE_TTL_SECONDS,
+                    global_stats
+                )
+
+                _last_known_accounts_version = db_version
+                logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(multi_account_mgr.accounts)}")
+
+        except asyncio.CancelledError:
+            logger.info("[AUTO-REFRESH] 自动刷新任务已停止")
+            break
+        except Exception as e:
+            logger.error(f"[AUTO-REFRESH] 自动刷新任务异常: {type(e).__name__}: {str(e)[:100]}")
+            await asyncio.sleep(60)  # 出错后等待60秒再重试
+
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化后台任务"""
@@ -457,6 +524,15 @@ async def startup_event():
     # 启动缓存清理任务
     asyncio.create_task(multi_account_mgr.start_background_cleanup())
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
+
+    # 启动自动刷新账号任务（仅数据库模式有效）
+    if os.environ.get("ACCOUNTS_CONFIG"):
+        logger.info("[SYSTEM] 自动刷新账号已跳过（使用 ACCOUNTS_CONFIG）")
+    elif storage.is_database_enabled() and AUTO_REFRESH_ACCOUNTS_SECONDS > 0:
+        asyncio.create_task(auto_refresh_accounts_task())
+        logger.info(f"[SYSTEM] 自动刷新账号任务已启动（间隔: {AUTO_REFRESH_ACCOUNTS_SECONDS}秒）")
+    elif storage.is_database_enabled():
+        logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:

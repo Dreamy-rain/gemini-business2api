@@ -15,6 +15,8 @@
   </a>
 </p>
 
+<p align="center"><em>注意：HF Spaces 部署不支持自动注册/刷新功能（需 Chrome 浏览器），请手动添加账号</em></p>
+
 <p align="center">将 Gemini Business 转换为 OpenAI 兼容接口，支持多账号负载均衡、图像生成、多模态能力与内置管理面板。</p>
 
 ---
@@ -23,10 +25,20 @@
 
 **开源协议**: MIT License - 查看 [LICENSE](LICENSE) 文件了解详情
 
-**使用声明**:
-- ⚠️ **本项目仅限学习与研究用途，禁止用于商业用途**
-- 📝 **使用时请保留本声明、原作者信息与开源来源**
-- 🔗 **项目地址**: [github.com/Dreamy-rain/gemini-business2api](https://github.com/Dreamy-rain/gemini-business2api)
+### ⚠️ 严禁滥用：禁止将本工具用于商业用途或任何形式的滥用（无论规模大小）
+
+**本工具严禁用于以下行为：**
+- 商业用途或盈利性使用
+- 任何形式的批量操作或自动化滥用（无论规模大小）
+- 破坏市场秩序或恶意竞争
+- 违反 Google 服务条款的任何行为
+- 违反 Microsoft 服务条款的任何行为
+
+**违规后果**：滥用行为可能导致账号永久封禁、法律追责，一切后果由使用者自行承担。
+
+**合法用途**：本项目仅限个人学习、技术研究与非商业性技术交流。
+
+📖 **完整声明与免责条款**：[DISCLAIMER.md](docs/DISCLAIMER.md)
 
 ---
 
@@ -34,12 +46,13 @@
 
 - ✅ OpenAI API 完全兼容 - 无缝对接现有工具
 - ✅ 多账号负载均衡 - 轮询与故障自动切换
+- ✅ 自动化账号管理 - 支持自动注册与登录，集成 DuckMail 和 Microsoft 邮箱，支持无头浏览器模式
 - ✅ 流式输出 - 实时响应
 - ✅ 多模态输入 - 100+ 文件类型（图片、PDF、Office 文档、音频、视频、代码等）
 - ✅ 图片生成 & 图生图 - 模型可配置，Base64 或 URL 返回
 - ✅ 智能文件处理 - 自动识别文件类型，支持 URL 与 Base64
 - ✅ 日志与监控 - 实时状态与统计信息
-- ✅ 代理支持 - 通过 PROXY 配置
+- ✅ 代理支持 - 通过设置面板配置
 - ✅ 内置管理面板 - 在线配置与账号管理
 - ✅ 可选 PostgreSQL 后端 - 支持账户/设置/统计持久化 [感谢PR](https://github.com/Dreamy-rain/gemini-business2api/pull/4)
 
@@ -101,6 +114,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 设置 ADMIN_KEY
 python main.py
+
+# pm2后台运行
+# 确保你在项目目录下
+pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```
 
 ### 方式三：Docker
@@ -134,7 +151,6 @@ update.bat
 ### 数据库持久化（可选）
 
 - HF Spaces 环境建议开启，否则重启会丢数据
-- 取消 `requirements.txt` 中 `asyncpg` 的注释并安装依赖
 - 设置 `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
   - 本地：写入 `.env`
   - HF Spaces：Settings -> Variables/Secrets
@@ -158,7 +174,7 @@ update.bat
 ### 配置提示
 
 - 账号配置优先读取 `ACCOUNTS_CONFIG`，也可在管理面板中录入并保存至 `data/accounts.json`。
-- 如需鉴权，可设置 `API_KEY` 保护 `/v1/chat/completions`。
+- 如需鉴权，可在管理面板设置中配置 `API_KEY` 保护 `/v1/chat/completions`。
 
 ### 更多文档
 
@@ -170,16 +186,16 @@ update.bat
 
 <table>
   <tr>
-    <td><img src="docs/1.png" alt="管理系统 1" /></td>
-    <td><img src="docs/2.png" alt="管理系统 2" /></td>
+    <td><img src="docs/img/1.png" alt="管理系统 1" /></td>
+    <td><img src="docs/img/2.png" alt="管理系统 2" /></td>
   </tr>
   <tr>
-    <td><img src="docs/3.png" alt="管理系统 3" /></td>
-    <td><img src="docs/4.png" alt="管理系统 4" /></td>
+    <td><img src="docs/img/3.png" alt="管理系统 3" /></td>
+    <td><img src="docs/img/4.png" alt="管理系统 4" /></td>
   </tr>
   <tr>
-    <td><img src="docs/5.png" alt="管理系统 5" /></td>
-    <td><img src="docs/6.png" alt="管理系统 6" /></td>
+    <td><img src="docs/img/5.png" alt="管理系统 5" /></td>
+    <td><img src="docs/img/6.png" alt="管理系统 6" /></td>
   </tr>
 </table>
 
@@ -187,20 +203,14 @@ update.bat
 
 <table>
   <tr>
-    <td><img src="docs/img_1.png" alt="图片效果 1" /></td>
-    <td><img src="docs/img_2.png" alt="图片效果 2" /></td>
+    <td><img src="docs/img/img_1.png" alt="图片效果 1" /></td>
+    <td><img src="docs/img/img_2.png" alt="图片效果 2" /></td>
   </tr>
   <tr>
-    <td><img src="docs/img_3.png" alt="图片效果 3" /></td>
-    <td><img src="docs/img_4.png" alt="图片效果 4" /></td>
+    <td><img src="docs/img/img_3.png" alt="图片效果 3" /></td>
+    <td><img src="docs/img/img_4.png" alt="图片效果 4" /></td>
   </tr>
 </table>
-
-## 🙏 致谢
-
-* 源项目：[F佬 Linux.do 讨论](https://linux.do/t/topic/1225645)
-* 源项目：[heixxin/gemini](https://huggingface.co/spaces/heixxin/gemini/tree/main) | [Linux.do 讨论](https://linux.do/t/topic/1226413)
-* 绘图参考：[Gemini-Link-System](https://github.com/qxd-ljy/Gemini-Link-System) | [Linux.do 讨论](https://linux.do/t/topic/1234363)
 
 ## ⭐ Star History
 

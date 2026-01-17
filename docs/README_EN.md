@@ -15,6 +15,8 @@
   </a>
 </p>
 
+<p align="center"><em>Note: HF Spaces deployment does not support auto registration/refresh (requires Chrome), manual account setup required</em></p>
+
 <p align="center">Convert Gemini Business to OpenAI-compatible API with multi-account load balancing, image generation, multimodal capabilities, and built-in admin panel.</p>
 
 ---
@@ -23,10 +25,19 @@
 
 **License**: MIT License - See [LICENSE](../LICENSE) for details
 
-**Usage Disclaimer**:
-- ⚠️ **This project is for educational and research purposes only. Commercial use is prohibited.**
-- 📝 **Please retain this disclaimer, original author information, and open source attribution when using.**
-- 🔗 **Project Repository**: [github.com/Dreamy-rain/gemini-business2api](https://github.com/Dreamy-rain/gemini-business2api)
+### ⚠️ Abuse Prohibited
+
+**This tool is strictly prohibited for the following uses:**
+- Commercial use or profit-making activities
+- Any form of batch operations or automated abuse (regardless of scale)
+- Market disruption or malicious competition
+- Any behavior violating Google's Terms of Service
+
+**Consequences**: Abuse may result in permanent account bans, legal liability, and all consequences are borne by the user.
+
+**Legitimate Use**: This project is limited to personal learning, technical research, and non-commercial technical exchange.
+
+📖 **Full Disclaimer**: [DISCLAIMER_EN.md](DISCLAIMER_EN.md)
 
 ---
 
@@ -34,12 +45,13 @@
 
 - ✅ Full OpenAI API compatibility - Seamless integration with existing tools
 - ✅ Multi-account load balancing - Round-robin with automatic failover
+- ✅ Automated account management - Auto registration and login with DuckMail and Microsoft email integration, supports headless browser mode
 - ✅ Streaming output - Real-time responses
 - ✅ Multimodal input - 100+ file types (images, PDF, Office docs, audio, video, code, etc.)
 - ✅ Image generation & image-to-image - Configurable models, Base64 or URL output
 - ✅ Smart file handling - Auto file type detection, supports URL and Base64
 - ✅ Logging & monitoring - Real-time status and statistics
-- ✅ Proxy support - Via PROXY configuration
+- ✅ Proxy support - Configure in the admin settings
 - ✅ Built-in admin panel - Online configuration and account management
 - ✅ Optional PostgreSQL backend — persists accounts/settings/stats [thanks PR](https://github.com/Dreamy-rain/gemini-business2api/pull/4)
 
@@ -134,7 +146,6 @@ The update script automatically backs up configuration, pulls latest code, updat
 ### Optional: Database Persistence (Local / HF Spaces)
 
 - Recommended on HF Spaces (free tier) to avoid data loss after restart
-- Uncomment `asyncpg` in `requirements.txt` and install dependencies
 - Set `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`
   - Local: put it in `.env`
   - HF Spaces: Settings -> Variables/Secrets
@@ -158,7 +169,7 @@ The update script automatically backs up configuration, pulls latest code, updat
 ### Configuration Tips
 
 - Account config prioritizes `ACCOUNTS_CONFIG` env var, or can be entered in admin panel and saved to `data/accounts.json`.
-- For authentication, set `API_KEY` to protect `/v1/chat/completions`.
+- For authentication, configure `API_KEY` in the admin settings to protect `/v1/chat/completions`.
 
 ### Documentation
 
@@ -195,12 +206,6 @@ The update script automatically backs up configuration, pulls latest code, updat
     <td><img src="img_4.png" alt="Image Generation 4" /></td>
   </tr>
 </table>
-
-## 🙏 Acknowledgments
-
-* Original project: [F's Linux.do Discussion](https://linux.do/t/topic/1225645)
-* Original project: [heixxin/gemini](https://huggingface.co/spaces/heixxin/gemini/tree/main) | [Linux.do Discussion](https://linux.do/t/topic/1226413)
-* Image generation reference: [Gemini-Link-System](https://github.com/qxd-ljy/Gemini-Link-System) | [Linux.do Discussion](https://linux.do/t/topic/1234363)
 
 ## ⭐ Star History
 

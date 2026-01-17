@@ -44,3 +44,4 @@ static/
 # OS
 .DS_Store
 Thumbs.db
+old_version.py

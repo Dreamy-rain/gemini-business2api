@@ -18,8 +18,7 @@
           <Checkbox :modelValue="allSelected" @update:modelValue="toggleSelectAll">
             全选
           </Checkbox>
-          <span>共 {{ filteredAccounts.length }} 个账号</span>
-          <span v-if="selectedCount">已选 {{ selectedCount }} 个</span>
+          <span>已选 {{ selectedCount }} / {{ filteredAccounts.length }} 个账号</span>
           <div class="ml-auto flex items-center gap-2 sm:ml-0">
             <button
               type="button"
@@ -49,14 +48,7 @@
         </div>
       </div>
 
-      <div class="mt-4 flex flex-wrap items-center gap-3">
-        <button
-          class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
-                 hover:border-primary hover:text-primary"
-          @click="openConfigPanel"
-        >
-          账户配置
-        </button>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
         <button
           class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
                  hover:border-primary hover:text-primary"
@@ -68,27 +60,108 @@
         <button
           class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
                  hover:border-primary hover:text-primary"
-          :disabled="!selectedCount"
-          @click="handleBulkEnable"
+          @click="openConfigPanel"
         >
-          批量启用
+          账户配置
         </button>
         <button
           class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
                  hover:border-primary hover:text-primary"
-          :disabled="!selectedCount"
-          @click="handleBulkDisable"
+          :disabled="isRegistering"
+          @click="openRegisterModal"
         >
-          批量禁用
+          添加账户
         </button>
-        <button
-          class="rounded-full border border-border px-4 py-2 text-sm font-medium text-destructive transition-colors
-                 hover:border-destructive hover:text-destructive"
-          :disabled="!selectedCount"
-          @click="handleBulkDelete"
-        >
-          批量删除
-        </button>
+        
+        <div ref="moreActionsRef" class="relative">
+          <button
+            class="flex items-center gap-2 rounded-full border border-input bg-background px-4 py-2 text-sm font-medium
+                   text-foreground transition-colors hover:border-primary"
+            :class="showMoreActions ? 'bg-accent text-accent-foreground' : ''"
+            @click="toggleMoreActions"
+          >
+            更多操作
+            <svg aria-hidden="true" viewBox="0 0 20 20" class="h-4 w-4" fill="currentColor">
+              <path d="M5 7l5 6 5-6H5z" />
+            </svg>
+            <span
+              v-if="hasTaskData"
+              class="ml-1 h-2 w-2 rounded-full"
+              :class="taskIndicatorClass"
+              aria-hidden="true"
+            ></span>
+          </button>
+          <div
+            v-if="showMoreActions"
+            class="absolute right-0 z-10 mt-2 w-full space-y-1 rounded-2xl border border-border bg-card p-2 shadow-lg"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm text-foreground transition-colors
+                     hover:bg-accent"
+              @click="openTaskModal(); closeMoreActions()"
+            >
+              任务状态
+            </button>
+            <div class="my-1 border-t border-border/60"></div>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="isRefreshing
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="isRefreshing"
+              @click="handleRefreshExpiring(); closeMoreActions()"
+            >
+              刷新过期
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="!selectedCount || isRefreshing
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="!selectedCount || isRefreshing"
+              @click="handleRefreshSelected(); closeMoreActions()"
+            >
+              刷新选中
+            </button>
+            <div class="my-1 border-t border-border/60"></div>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="!selectedCount
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="!selectedCount"
+              @click="handleBulkEnable(); closeMoreActions()"
+            >
+              批量启用
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="!selectedCount
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="!selectedCount"
+              @click="handleBulkDisable(); closeMoreActions()"
+            >
+              批量禁用
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="!selectedCount
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-destructive hover:bg-destructive/10'"
+              :disabled="!selectedCount"
+              @click="handleBulkDelete(); closeMoreActions()"
+            >
+              批量删除
+            </button>
+          </div>
+        </div>
       </div>
 
       <div v-if="viewMode === 'card'" class="mt-6 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -313,6 +386,243 @@
     @confirm="confirmDialog.confirm"
     @cancel="confirmDialog.cancel"
   />
+  
+  <Teleport to="body">
+    <div v-if="isRegisterOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 px-4">
+      <div class="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-border bg-card shadow-xl">
+        <div class="flex items-center justify-between border-b border-border/60 px-6 py-4">
+          <div>
+            <p class="text-sm font-medium text-foreground">添加账户</p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              {{ addMode === 'register' ? '创建 DuckMail 账号并自动注册' : '批量导入账户配置' }}
+            </p>
+          </div>
+          <button
+            class="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            @click="closeRegisterModal"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="scrollbar-slim flex-1 overflow-y-auto px-6 py-4">
+          <div class="space-y-4 text-sm">
+          <div class="flex rounded-full border border-border bg-muted/30 p-1 text-xs">
+            <button
+              type="button"
+              class="flex-1 rounded-full px-3 py-2 font-medium transition-colors"
+              :class="addMode === 'register' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'"
+              @click="addMode = 'register'"
+            >
+              自动注册
+            </button>
+            <button
+              type="button"
+              class="flex-1 rounded-full px-3 py-2 font-medium transition-colors"
+              :class="addMode === 'import' ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground'"
+              @click="addMode = 'import'"
+            >
+              批量导入
+            </button>
+          </div>
+
+          <div v-if="addMode === 'register'" class="space-y-4">
+            <label class="block text-xs text-muted-foreground">注册数量</label>
+            <input
+              v-model.number="registerCount"
+              type="number"
+              min="1"
+              class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+            />
+            <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              默认域名来自设置面板（可在“配置面板”中修改）
+            </div>
+          </div>
+
+          <div v-else class="space-y-4">
+            <label class="block text-xs text-muted-foreground">批量导入（每行一个）</label>
+            <textarea
+              v-model="importText"
+              class="min-h-[140px] w-full rounded-2xl border border-input bg-background px-3 py-2 text-xs font-mono"
+              placeholder="duckmail----you@example.com----password&#10;user@outlook.com----loginPassword----clientId----refreshToken"
+            ></textarea>
+            <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <p>支持两种格式：</p>
+              <p class="mt-1 font-mono">duckmail----email----password</p>
+              <p class="mt-1 font-mono">email----password----clientId----refreshToken</p>
+              <p class="mt-2 text-[11px]">导入后请执行一次"刷新选中"以获取 Cookie。</p>
+            </div>
+            <div v-if="importError" class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
+              {{ importError }}
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+            <div class="space-y-2">
+              <p class="text-xs font-bold text-rose-600">⚠️ 严禁滥用：禁止将本工具用于商业用途或任何形式的滥用（无论规模大小）</p>
+
+              <div class="space-y-1">
+                <p><strong>本工具严禁用于以下行为：</strong></p>
+                <p class="pl-3">• 商业用途或盈利性使用</p>
+                <p class="pl-3">• 任何形式的批量操作或自动化滥用（无论规模大小）</p>
+                <p class="pl-3">• 破坏市场秩序或恶意竞争</p>
+                <p class="pl-3">• 违反 Google 服务条款的任何行为</p>
+                <p class="pl-3">• 违反 Microsoft 服务条款的任何行为</p>
+              </div>
+
+              <div class="space-y-1">
+                <p><strong>违规后果：</strong>滥用行为可能导致账号永久封禁、法律追责，一切后果由使用者自行承担。</p>
+              </div>
+
+              <div class="space-y-1">
+                <p class="font-semibold text-foreground">📖 合法用途</p>
+                <p>本项目仅限于以下场景：</p>
+                <p class="pl-3">• 个人学习与技术研究</p>
+                <p class="pl-3">• 浏览器自动化技术探索</p>
+                <p class="pl-3">• 非商业性技术交流</p>
+              </div>
+
+              <div class="space-y-1">
+                <p class="font-semibold text-foreground">⚖️ 法律责任</p>
+                <p><strong>使用者责任：</strong>使用本工具产生的一切后果（包括但不限于账号封禁、数据损失、法律纠纷）由使用者完全承担。</p>
+                <p><strong>合规义务：</strong>使用者必须遵守所在地法律法规及第三方服务条款（包括但不限于 Google Workspace、Microsoft 365 等服务条款）。</p>
+                <p><strong>作者免责：</strong>作者不对任何违规使用、滥用行为或由此产生的后果承担责任。</p>
+              </div>
+
+              <div class="space-y-1">
+                <p class="font-semibold text-foreground">📋 技术声明</p>
+                <p class="pl-3">• 本项目按"现状"提供，不提供任何形式的担保</p>
+                <p class="pl-3">• 依赖的第三方服务（如 DuckMail API、Microsoft Graph API 等）可用性不受作者控制</p>
+                <p class="pl-3">• 作者保留随时停止维护、变更功能或关闭项目的权利</p>
+              </div>
+            </div>
+          </div>
+          <Checkbox v-model="registerAgreed">
+            我已阅读并同意上述说明与限制
+          </Checkbox>
+          </div>
+        </div>
+
+        <div class="border-t border-border/60 px-6 py-4">
+          <div class="flex items-center justify-end gap-2">
+            <button
+              class="rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors
+                     hover:border-primary hover:text-primary"
+              @click="closeRegisterModal"
+            >
+              取消
+            </button>
+            <button
+              v-if="addMode === 'register'"
+              class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
+                     hover:opacity-90"
+              :disabled="isRegistering || !registerAgreed"
+              @click="handleRegister"
+            >
+              开始注册
+            </button>
+            <button
+              v-else
+              class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
+                     hover:opacity-90"
+              :disabled="isImporting || !registerAgreed"
+              @click="handleImport"
+            >
+              导入并保存
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="isTaskOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 px-4">
+      <div class="flex h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-border bg-card shadow-xl">
+        <div class="flex items-center justify-between border-b border-border/60 px-6 py-4">
+          <div>
+            <p class="text-sm font-medium text-foreground">任务状态</p>
+            <p class="mt-1 text-xs text-muted-foreground">注册与刷新任务的状态与日志</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors
+                     hover:border-primary hover:text-primary"
+              :disabled="!registerLogs.length && !loginLogs.length && !registerTask && !loginTask && !automationError"
+              @click="clearTaskLogs"
+            >
+              清空日志
+            </button>
+            <button
+              class="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              @click="closeTaskModal"
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+        <div class="flex min-h-0 flex-1 flex-col px-6 py-4">
+          <div v-if="automationError" class="rounded-2xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {{ automationError }}
+          </div>
+
+          <div v-if="registerTask || loginTask" class="grid gap-3 text-xs text-muted-foreground">
+            <div v-if="registerTask" class="space-y-1">
+              <div class="font-medium text-foreground">注册任务</div>
+              <div class="flex flex-wrap gap-x-4 gap-y-1">
+                <span>状态：{{ formatTaskStatus(registerTask.status) }}</span>
+                <span>进度：{{ registerTask.progress }}/{{ registerTask.count }}</span>
+                <span>成功：{{ registerTask.success_count }}</span>
+                <span>失败：{{ registerTask.fail_count }}</span>
+              </div>
+            </div>
+            <div v-if="loginTask" class="space-y-1">
+              <div class="font-medium text-foreground">刷新任务</div>
+              <div class="flex flex-wrap gap-x-4 gap-y-1">
+                <span>状态：{{ formatTaskStatus(loginTask.status) }}</span>
+                <span>进度：{{ loginTask.progress }}/{{ loginTask.account_ids.length }}</span>
+                <span>成功：{{ loginTask.success_count }}</span>
+                <span>失败：{{ loginTask.fail_count }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="registerLogs.length || loginLogs.length"
+            class="mt-4 flex min-h-0 flex-1 flex-col"
+          >
+            <div
+              ref="taskLogsRef"
+              class="scrollbar-slim flex-1 overflow-y-auto rounded-2xl border border-border bg-muted/30 p-3"
+            >
+              <div v-if="registerLogs.length" class="space-y-2">
+                <p class="text-xs font-semibold text-foreground">注册日志</p>
+                <div class="space-y-1 text-[11px] text-muted-foreground">
+                  <div v-for="(log, index) in registerLogs" :key="`reg-${index}`" class="font-mono">
+                    {{ formatLogLine(log) }}
+                  </div>
+                </div>
+              </div>
+              <div v-if="loginLogs.length" class="mt-4 space-y-2">
+                <p class="text-xs font-semibold text-foreground">刷新日志</p>
+                <div class="space-y-1 text-[11px] text-muted-foreground">
+                  <div v-for="(log, index) in loginLogs" :key="`login-${index}`" class="font-mono">
+                    {{ formatLogLine(log) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="!automationError && !registerTask && !loginTask && !registerLogs.length && !loginLogs.length"
+            class="mt-4 rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+          >
+            暂无任务
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
   <Teleport to="body">
     <div v-if="isEditOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 px-4">
       <div class="w-full max-w-lg rounded-3xl border border-border bg-card p-6 shadow-xl">
@@ -454,7 +764,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAccountsStore } from '@/stores'
 import SelectMenu from '@/components/ui/SelectMenu.vue'
@@ -463,7 +773,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import HelpTip from '@/components/ui/HelpTip.vue'
 import { accountsApi } from '@/api'
-import type { AdminAccount, AccountConfigItem } from '@/types/api'
+import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
 
 const accountsStore = useAccountsStore()
 const { accounts, isLoading } = storeToRefs(accountsStore)
@@ -480,6 +790,34 @@ const configError = ref('')
 const configJson = ref('')
 const configMasked = ref(false)
 const configData = ref<AccountConfigItem[]>([])
+const registerCount = ref(1)
+const isRegisterOpen = ref(false)
+const addMode = ref<'register' | 'import'>('register')
+const importText = ref('')
+const importError = ref('')
+const isImporting = ref(false)
+const isTaskOpen = ref(false)
+const showMoreActions = ref(false)
+const moreActionsRef = ref<HTMLDivElement | null>(null)
+const lastRegisterTaskId = ref<string | null>(null)
+const lastLoginTaskId = ref<string | null>(null)
+const clearedRegisterTaskId = ref<string | null>(null)
+const clearedLoginTaskId = ref<string | null>(null)
+const registerLogClearOffset = ref(0)
+const loginLogClearOffset = ref(0)
+const registerAgreed = ref(false)
+const registerTask = ref<RegisterTask | null>(null)
+const loginTask = ref<LoginTask | null>(null)
+const taskLogsRef = ref<HTMLDivElement | null>(null)
+const isRegistering = ref(false)
+const isRefreshing = ref(false)
+const automationError = ref('')
+const REGISTER_TASK_CACHE_KEY = 'accounts-register-task-cache'
+const LOGIN_TASK_CACHE_KEY = 'accounts-login-task-cache'
+const REGISTER_CLEAR_KEY = 'accounts-register-log-clear'
+const LOGIN_CLEAR_KEY = 'accounts-login-log-clear'
+const REGISTER_CLEARED_TASK_KEY = 'accounts-register-task-cleared-id'
+const LOGIN_CLEARED_TASK_KEY = 'accounts-login-task-cleared-id'
 const editForm = ref<AccountConfigItem>({
   id: '',
   secure_c_ses: '',
@@ -517,10 +855,438 @@ const allSelected = computed(() =>
 const refreshAccounts = async () => {
   await accountsStore.loadAccounts()
   selectedIds.value = new Set()
+  showMoreActions.value = false
+}
+
+const readCachedTask = <T,>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+
+const readClearedTaskId = (key: string) => {
+  try {
+    return localStorage.getItem(key) || null
+  } catch {
+    return null
+  }
+}
+
+const writeClearedTaskId = (key: string, value: string | null) => {
+  try {
+    if (value) {
+      localStorage.setItem(key, value)
+      return
+    }
+    localStorage.removeItem(key)
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const writeCachedTask = (key: string, value: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const clearCachedTask = (key: string) => {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const readClearOffset = (key: string) => {
+  const raw = localStorage.getItem(key)
+  const value = Number(raw)
+  return Number.isFinite(value) ? value : 0
+}
+
+const writeClearOffset = (key: string, value: number) => {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // ignore storage errors
+  }
+}
+
+const syncRegisterTask = (task: RegisterTask | null, persist = true) => {
+  if (!task) return
+  if (task.id && task.id === clearedRegisterTaskId.value) return
+  if (task.id && clearedRegisterTaskId.value && task.id !== clearedRegisterTaskId.value) {
+    clearedRegisterTaskId.value = null
+    writeClearedTaskId(REGISTER_CLEARED_TASK_KEY, null)
+  }
+  registerTask.value = task
+  if (task.id && task.id !== lastRegisterTaskId.value) {
+    lastRegisterTaskId.value = task.id
+    registerLogClearOffset.value = 0
+    writeClearOffset(REGISTER_CLEAR_KEY, 0)
+  }
+  if (persist) {
+    writeCachedTask(REGISTER_TASK_CACHE_KEY, task)
+  }
+}
+
+const syncLoginTask = (task: LoginTask | null, persist = true) => {
+  if (!task) return
+  if (task.id && task.id === clearedLoginTaskId.value) return
+  if (task.id && clearedLoginTaskId.value && task.id !== clearedLoginTaskId.value) {
+    clearedLoginTaskId.value = null
+    writeClearedTaskId(LOGIN_CLEARED_TASK_KEY, null)
+  }
+  loginTask.value = task
+  if (task.id && task.id !== lastLoginTaskId.value) {
+    lastLoginTaskId.value = task.id
+    loginLogClearOffset.value = 0
+    writeClearOffset(LOGIN_CLEAR_KEY, 0)
+  }
+  if (persist) {
+    writeCachedTask(LOGIN_TASK_CACHE_KEY, task)
+  }
+}
+
+const hydrateTaskCache = () => {
+  registerLogClearOffset.value = readClearOffset(REGISTER_CLEAR_KEY)
+  loginLogClearOffset.value = readClearOffset(LOGIN_CLEAR_KEY)
+  clearedRegisterTaskId.value = readClearedTaskId(REGISTER_CLEARED_TASK_KEY)
+  clearedLoginTaskId.value = readClearedTaskId(LOGIN_CLEARED_TASK_KEY)
+  const cachedRegister = readCachedTask<RegisterTask>(REGISTER_TASK_CACHE_KEY)
+  if (cachedRegister && cachedRegister.id !== clearedRegisterTaskId.value) {
+    registerTask.value = cachedRegister
+    lastRegisterTaskId.value = cachedRegister.id || null
+  }
+  const cachedLogin = readCachedTask<LoginTask>(LOGIN_TASK_CACHE_KEY)
+  if (cachedLogin && cachedLogin.id !== clearedLoginTaskId.value) {
+    loginTask.value = cachedLogin
+    lastLoginTaskId.value = cachedLogin.id || null
+  }
+}
+
+const openRegisterModal = () => {
+  isRegisterOpen.value = true
+  addMode.value = 'register'
+  importText.value = ''
+  importError.value = ''
+  isImporting.value = false
+  registerAgreed.value = false
+}
+
+const closeRegisterModal = () => {
+  isRegisterOpen.value = false
+}
+
+const IMPORT_EXPIRES_AT = '1970-01-01 00:00:00'
+
+const parseImportLines = (raw: string) => {
+  const items: AccountConfigItem[] = []
+  const errors: string[] = []
+  const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+
+  lines.forEach((line, index) => {
+    const parts = line.split('----').map(part => part.trim())
+    const lineNo = index + 1
+
+    if (!parts.length) return
+
+    if (parts[0].toLowerCase() === 'duckmail') {
+      if (parts.length < 3 || !parts[1] || !parts[2]) {
+        errors.push(`第 ${lineNo} 行格式错误（duckmail）`)
+        return
+      }
+      const email = parts[1]
+      const password = parts.slice(2).join('----')
+      items.push({
+        id: email,
+        secure_c_ses: '',
+        csesidx: '',
+        config_id: '',
+        expires_at: IMPORT_EXPIRES_AT,
+        mail_provider: 'duckmail',
+        mail_address: email,
+        mail_password: password,
+      })
+      return
+    }
+
+    if (parts.length >= 4 && parts[0] && parts[2] && parts[3]) {
+      const email = parts[0]
+      const password = parts[1] || ''
+      const clientId = parts[2]
+      const refreshToken = parts.slice(3).join('----')
+      items.push({
+        id: email,
+        secure_c_ses: '',
+        csesidx: '',
+        config_id: '',
+        expires_at: IMPORT_EXPIRES_AT,
+        mail_provider: 'microsoft',
+        mail_address: email,
+        mail_password: password,
+        mail_client_id: clientId,
+        mail_refresh_token: refreshToken,
+        mail_tenant: 'consumers',
+      })
+      return
+    }
+
+    errors.push(`第 ${lineNo} 行格式错误`)
+  })
+
+  return { items, errors }
+}
+
+const handleImport = async () => {
+  importError.value = ''
+  if (!importText.value.trim()) {
+    importError.value = '请输入导入内容'
+    return
+  }
+  const { items, errors } = parseImportLines(importText.value)
+  if (!items.length) {
+    importError.value = errors.length ? errors.join('，') : '未识别到有效账号'
+    return
+  }
+  if (errors.length) {
+    importError.value = errors.slice(0, 3).join('，')
+    return
+  }
+
+  isImporting.value = true
+  try {
+    const list = await loadConfigList()
+    const next = [...list]
+    const indexMap = new Map(next.map((acc, idx) => [acc.id, idx]))
+    const importedIds: string[] = []
+
+    items.forEach((item) => {
+      const idx = indexMap.get(item.id || '')
+      if (idx === undefined) {
+        next.push(item)
+        importedIds.push(item.id)
+        return
+      }
+
+      const existing = next[idx]
+      const updated: AccountConfigItem = {
+        ...existing,
+        mail_provider: item.mail_provider,
+        mail_address: item.mail_address,
+      }
+
+      if (item.mail_provider === 'microsoft') {
+        updated.mail_client_id = item.mail_client_id
+        updated.mail_refresh_token = item.mail_refresh_token
+        updated.mail_tenant = item.mail_tenant
+        updated.mail_password = item.mail_password
+      } else {
+        updated.mail_password = item.mail_password
+        updated.mail_client_id = undefined
+        updated.mail_refresh_token = undefined
+        updated.mail_tenant = undefined
+      }
+
+      next[idx] = updated
+      importedIds.push(item.id)
+    })
+
+    await accountsStore.updateConfig(next)
+    await refreshAccounts()
+
+    selectedIds.value = new Set(importedIds)
+    closeRegisterModal()
+
+    const confirmed = await confirmDialog.ask({
+      title: '导入成功',
+      message: `已导入 ${importedIds.length} 个账户并自动选中。是否立即刷新这些账户以获取 Cookie？`,
+      confirmText: '立即刷新',
+      cancelText: '稍后手动刷新',
+    })
+
+    if (confirmed) {
+      await handleRefreshSelected()
+    }
+  } catch (error: any) {
+    importError.value = error.message || '导入失败'
+  } finally {
+    isImporting.value = false
+  }
+}
+
+const refreshTaskSnapshot = async () => {
+  try {
+    const tasks: Promise<void>[] = []
+    const registerId = registerTask.value?.id
+    const loginId = loginTask.value?.id
+
+    if (registerId && !isClearedRegisterTaskId(registerId)) {
+      tasks.push(updateRegisterTask(registerId))
+    }
+    if (loginId && !isClearedLoginTaskId(loginId)) {
+      tasks.push(updateLoginTask(loginId))
+    }
+
+    if (!tasks.length) {
+      await loadCurrentTasks()
+      return
+    }
+
+    await Promise.all(tasks)
+  } catch (error: any) {
+    automationError.value = error?.message || '任务状态更新失败'
+  }
+}
+
+const openTaskModal = async () => {
+  isTaskOpen.value = true
+  await refreshTaskSnapshot()
+}
+
+const closeTaskModal = () => {
+  isTaskOpen.value = false
+}
+
+const clearTaskLogs = () => {
+  const registerId = registerTask.value?.id || null
+  const loginId = loginTask.value?.id || null
+  clearedRegisterTaskId.value = registerId
+  clearedLoginTaskId.value = loginId
+  writeClearedTaskId(REGISTER_CLEARED_TASK_KEY, registerId)
+  writeClearedTaskId(LOGIN_CLEARED_TASK_KEY, loginId)
+  registerLogClearOffset.value = registerTask.value?.logs?.length || 0
+  loginLogClearOffset.value = loginTask.value?.logs?.length || 0
+  writeClearOffset(REGISTER_CLEAR_KEY, registerLogClearOffset.value)
+  writeClearOffset(LOGIN_CLEAR_KEY, loginLogClearOffset.value)
+  registerTask.value = null
+  loginTask.value = null
+  lastRegisterTaskId.value = null
+  lastLoginTaskId.value = null
+  automationError.value = ''
+  isRegistering.value = false
+  isRefreshing.value = false
+  clearRegisterTimer()
+  clearLoginTimer()
+  clearCachedTask(REGISTER_TASK_CACHE_KEY)
+  clearCachedTask(LOGIN_TASK_CACHE_KEY)
+}
+
+const isClearedRegisterTaskId = (taskId?: string | null) =>
+  Boolean(taskId && taskId === clearedRegisterTaskId.value)
+
+const isClearedLoginTaskId = (taskId?: string | null) =>
+  Boolean(taskId && taskId === clearedLoginTaskId.value)
+
+const toggleMoreActions = () => {
+  showMoreActions.value = !showMoreActions.value
+}
+
+const closeMoreActions = () => {
+  showMoreActions.value = false
+}
+
+const handleMoreActionsClick = (event: MouseEvent) => {
+  if (!showMoreActions.value) return
+  const target = event.target as Node
+  if (moreActionsRef.value && !moreActionsRef.value.contains(target)) {
+    showMoreActions.value = false
+  }
 }
 
 onMounted(async () => {
+  hydrateTaskCache()
   await refreshAccounts()
+  await loadCurrentTasks()
+  startBackgroundTaskPolling()
+  document.addEventListener('click', handleMoreActionsClick)
+})
+
+const registerLogs = computed(() => {
+  const logs = registerTask.value?.logs || []
+  if (!registerLogClearOffset.value) return logs
+  return logs.slice(registerLogClearOffset.value)
+})
+const loginLogs = computed(() => {
+  const logs = loginTask.value?.logs || []
+  if (!loginLogClearOffset.value) return logs
+  return logs.slice(loginLogClearOffset.value)
+})
+const hasTaskData = computed(() =>
+  Boolean(automationError.value) ||
+  Boolean(registerTask.value) ||
+  Boolean(loginTask.value) ||
+  registerLogs.value.length > 0 ||
+  loginLogs.value.length > 0
+)
+
+const scrollTaskLogsToBottom = async () => {
+  await nextTick()
+  const container = taskLogsRef.value
+  if (!container) return
+  container.scrollTop = container.scrollHeight
+}
+
+watch([registerLogs, loginLogs, isTaskOpen], async () => {
+  if (!isTaskOpen.value) return
+  await scrollTaskLogsToBottom()
+}, { deep: true })
+const isTaskRunning = computed(() => {
+  const registerStatus = registerTask.value?.status
+  const loginStatus = loginTask.value?.status
+  return registerStatus === 'running' ||
+    registerStatus === 'pending' ||
+    loginStatus === 'running' ||
+    loginStatus === 'pending'
+})
+const taskIndicatorClass = computed(() => {
+  if (automationError.value) return 'bg-rose-500'
+  if (isTaskRunning.value) return 'bg-sky-400'
+
+  const taskSummaries = []
+  if (registerTask.value) {
+    const success = registerTask.value.success_count ?? 0
+    const fail = registerTask.value.fail_count ?? 0
+    const total = registerTask.value.count ?? success + fail
+    taskSummaries.push({ success, fail, total, status: registerTask.value.status })
+  }
+  if (loginTask.value) {
+    const success = loginTask.value.success_count ?? 0
+    const fail = loginTask.value.fail_count ?? 0
+    const total = loginTask.value.account_ids?.length ?? success + fail
+    taskSummaries.push({ success, fail, total, status: loginTask.value.status })
+  }
+
+  if (!taskSummaries.length) return 'bg-muted-foreground'
+
+  const totalSuccess = taskSummaries.reduce((sum, item) => sum + item.success, 0)
+  const totalFail = taskSummaries.reduce((sum, item) => sum + item.fail, 0)
+  const totalCount = taskSummaries.reduce((sum, item) => sum + (item.total || 0), 0)
+
+  if (totalSuccess > 0 && totalFail > 0) return 'bg-amber-400'
+  if (totalFail > 0 && totalSuccess === 0) return 'bg-rose-500'
+  if (totalSuccess > 0 && totalFail === 0) return 'bg-emerald-400'
+
+  if (totalCount === 0) {
+    const allSuccess = taskSummaries.every(item => item.status === 'success')
+    const anyFailed = taskSummaries.some(item => item.status === 'failed')
+    if (anyFailed) return 'bg-rose-500'
+    if (allSuccess) return 'bg-emerald-400'
+  }
+
+  return 'bg-muted-foreground'
+})
+
+onBeforeUnmount(() => {
+  clearRegisterTimer()
+  clearLoginTimer()
+  clearBackgroundTaskTimer()
+  document.removeEventListener('click', handleMoreActionsClick)
 })
 
 const statusLabel = (account: AdminAccount) => {
@@ -625,6 +1391,9 @@ const loadConfigList = async () => {
   }))
 }
 
+const formatLogLine = (log: { time: string; level: string; message: string }) =>
+  `${log.time} [${log.level}] ${log.message}`
+
 const applyEditTarget = (list: AccountConfigItem[], accountId: string) => {
   let targetIndex = -1
   for (let i = 0; i < list.length; i += 1) {
@@ -698,7 +1467,15 @@ const maskValue = (value: unknown) => {
 }
 
 const maskConfig = (list: AccountConfigItem[]) => {
-  const fields = new Set(['secure_c_ses', 'csesidx', 'config_id', 'host_c_oses'])
+  const fields = new Set([
+    'secure_c_ses',
+    'csesidx',
+    'config_id',
+    'host_c_oses',
+    'mail_password',
+    'mail_refresh_token',
+    'mail_client_id',
+  ])
   return list.map((item) => {
     const next = { ...item }
     fields.forEach((field) => {
@@ -813,5 +1590,194 @@ const handleDelete = async (accountId: string) => {
   })
   if (!confirmed) return
   await accountsStore.deleteAccount(accountId)
+}
+
+let registerTimer: number | null = null
+let loginTimer: number | null = null
+let backgroundTaskTimer: number | null = null
+let backgroundTaskPending = false
+
+const clearRegisterTimer = () => {
+  if (registerTimer !== null) {
+    window.clearInterval(registerTimer)
+    registerTimer = null
+  }
+}
+
+const clearLoginTimer = () => {
+  if (loginTimer !== null) {
+    window.clearInterval(loginTimer)
+    loginTimer = null
+  }
+}
+
+const clearBackgroundTaskTimer = () => {
+  if (backgroundTaskTimer !== null) {
+    window.clearInterval(backgroundTaskTimer)
+    backgroundTaskTimer = null
+  }
+  backgroundTaskPending = false
+}
+
+const formatTaskStatus = (status: string) => {
+  if (status === 'pending') return '等待中'
+  if (status === 'running') return '执行中'
+  if (status === 'success') return '成功'
+  if (status === 'failed') return '失败'
+  return status
+}
+
+const updateRegisterTask = async (taskId: string) => {
+  if (isClearedRegisterTaskId(taskId)) {
+    clearRegisterTimer()
+    return
+  }
+  const task = await accountsApi.getRegisterTask(taskId)
+  if (isClearedRegisterTaskId(task.id)) {
+    clearRegisterTimer()
+    return
+  }
+  syncRegisterTask(task)
+  if (task.status !== 'running' && task.status !== 'pending') {
+    isRegistering.value = false
+    clearRegisterTimer()
+    await refreshAccounts()
+  }
+}
+
+const updateLoginTask = async (taskId: string) => {
+  if (isClearedLoginTaskId(taskId)) {
+    clearLoginTimer()
+    return
+  }
+  const task = await accountsApi.getLoginTask(taskId)
+  if (isClearedLoginTaskId(task.id)) {
+    clearLoginTimer()
+    return
+  }
+  syncLoginTask(task)
+  if (task.status !== 'running' && task.status !== 'pending') {
+    isRefreshing.value = false
+    clearLoginTimer()
+    await refreshAccounts()
+  }
+}
+
+const startRegisterPolling = (taskId: string) => {
+  clearRegisterTimer()
+  registerTimer = window.setInterval(() => {
+    updateRegisterTask(taskId).catch((error) => {
+      automationError.value = error?.message || '注册任务更新失败'
+      clearRegisterTimer()
+      isRegistering.value = false
+    })
+  }, 3000)
+}
+
+const startLoginPolling = (taskId: string) => {
+  clearLoginTimer()
+  loginTimer = window.setInterval(() => {
+    updateLoginTask(taskId).catch((error) => {
+      automationError.value = error?.message || '刷新任务更新失败'
+      clearLoginTimer()
+      isRefreshing.value = false
+    })
+  }, 3000)
+}
+
+const startBackgroundTaskPolling = () => {
+  if (backgroundTaskTimer !== null) return
+  backgroundTaskTimer = window.setInterval(async () => {
+    if (backgroundTaskPending) return
+    if (isTaskOpen.value) return
+    if (registerTimer !== null || loginTimer !== null) return
+    if (!isRegistering.value && !isRefreshing.value && !registerTask.value && !loginTask.value) return
+    backgroundTaskPending = true
+    try {
+      await loadCurrentTasks()
+    } catch (error: any) {
+      automationError.value = error?.message || '后台刷新失败'
+    } finally {
+      backgroundTaskPending = false
+    }
+  }, 6000)
+}
+
+const loadCurrentTasks = async () => {
+  try {
+    const registerCurrent = await accountsApi.getRegisterCurrent()
+    if (registerCurrent && 'id' in registerCurrent && !isClearedRegisterTaskId(registerCurrent.id)) {
+      syncRegisterTask(registerCurrent)
+      if (registerCurrent.status === 'running' || registerCurrent.status === 'pending') {
+        isRegistering.value = true
+        startRegisterPolling(registerCurrent.id)
+      }
+    }
+  } catch (error: any) {
+    automationError.value = error.message || '加载注册任务失败'
+  }
+
+  try {
+    const loginCurrent = await accountsApi.getLoginCurrent()
+    if (loginCurrent && 'id' in loginCurrent && !isClearedLoginTaskId(loginCurrent.id)) {
+      syncLoginTask(loginCurrent)
+      if (loginCurrent.status === 'running' || loginCurrent.status === 'pending') {
+        isRefreshing.value = true
+        startLoginPolling(loginCurrent.id)
+      }
+    }
+  } catch (error: any) {
+    automationError.value = error.message || '加载刷新任务失败'
+  }
+}
+
+const handleRegister = async () => {
+  automationError.value = ''
+  isRegistering.value = true
+  try {
+    const count = Number.isFinite(registerCount.value) && registerCount.value > 0
+      ? registerCount.value
+      : undefined
+    const task = await accountsApi.startRegister(count)
+    syncRegisterTask(task)
+    startRegisterPolling(task.id)
+    isRegisterOpen.value = false
+    isTaskOpen.value = true
+  } catch (error: any) {
+    automationError.value = error.message || '启动注册失败'
+    isRegistering.value = false
+  }
+}
+
+const handleRefreshSelected = async () => {
+  if (!selectedIds.value.size) return
+  automationError.value = ''
+  isRefreshing.value = true
+  try {
+    const task = await accountsApi.startLogin(Array.from(selectedIds.value))
+    syncLoginTask(task)
+    startLoginPolling(task.id)
+  } catch (error: any) {
+    automationError.value = error.message || '启动刷新失败'
+    isRefreshing.value = false
+  }
+}
+
+const handleRefreshExpiring = async () => {
+  automationError.value = ''
+  isRefreshing.value = true
+  try {
+    await accountsApi.checkLogin()
+    const current = await accountsApi.getLoginCurrent()
+    if (current && 'id' in current) {
+      syncLoginTask(current)
+      startLoginPolling(current.id)
+      return
+    }
+    isRefreshing.value = false
+  } catch (error: any) {
+    automationError.value = error.message || '触发刷新失败'
+    isRefreshing.value = false
+  }
 }
 </script>

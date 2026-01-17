@@ -26,6 +26,12 @@ export interface AccountConfigItem {
   config_id: string
   host_c_oses?: string
   expires_at?: string
+  mail_provider?: string
+  mail_address?: string
+  mail_password?: string
+  mail_client_id?: string
+  mail_refresh_token?: string
+  mail_tenant?: string
 }
 
 export interface AccountsConfigResponse {
@@ -48,6 +54,13 @@ export interface Settings {
     api_key?: string
     base_url?: string
     proxy?: string
+    duckmail_base_url?: string
+    duckmail_api_key?: string
+    duckmail_verify_ssl?: boolean
+    browser_headless?: boolean
+    refresh_window_hours?: number
+    register_default_count?: number
+    register_domain?: string
   }
   retry: {
     max_new_session_tries: number
@@ -56,6 +69,7 @@ export interface Settings {
     account_failure_threshold: number
     rate_limit_cooldown_seconds: number
     session_cache_ttl_seconds: number
+    auto_refresh_accounts_seconds: number
   }
   public_display: {
     logo_url?: string
@@ -187,4 +201,34 @@ export interface LoginRequest {
 export interface LoginResponse {
   success: boolean
   message?: string
+}
+
+export type AutomationStatus = 'pending' | 'running' | 'success' | 'failed'
+
+export interface RegisterTask {
+  id: string
+  count: number
+  status: AutomationStatus
+  progress: number
+  success_count: number
+  fail_count: number
+  created_at: number
+  finished_at?: number | null
+  results: Array<Record<string, any>>
+  error?: string | null
+  logs?: Array<{ time: string; level: string; message: string }>
+}
+
+export interface LoginTask {
+  id: string
+  account_ids: string[]
+  status: AutomationStatus
+  progress: number
+  success_count: number
+  fail_count: number
+  created_at: number
+  finished_at?: number | null
+  results: Array<Record<string, any>>
+  error?: string | null
+  logs?: Array<{ time: string; level: string; message: string }>
 }

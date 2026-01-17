@@ -1,5 +1,11 @@
 import apiClient from './client'
-import type { AccountsConfigResponse, AccountsListResponse, AccountConfigItem } from '@/types/api'
+import type {
+  AccountsConfigResponse,
+  AccountsListResponse,
+  AccountConfigItem,
+  RegisterTask,
+  LoginTask,
+} from '@/types/api'
 
 export const accountsApi = {
   // 获取账户列表
@@ -25,4 +31,25 @@ export const accountsApi = {
   // 启用账户
   enable: (accountId: string) =>
     apiClient.put(`/admin/accounts/${accountId}/enable`),
+
+  startRegister: (count?: number, domain?: string) =>
+    apiClient.post<never, RegisterTask>('/admin/register/start', { count, domain }),
+
+  getRegisterTask: (taskId: string) =>
+    apiClient.get<never, RegisterTask>(`/admin/register/task/${taskId}`),
+
+  getRegisterCurrent: () =>
+    apiClient.get<never, RegisterTask | { status: string }>('/admin/register/current'),
+
+  startLogin: (accountIds: string[]) =>
+    apiClient.post<never, LoginTask>('/admin/login/start', accountIds),
+
+  getLoginTask: (taskId: string) =>
+    apiClient.get<never, LoginTask>(`/admin/login/task/${taskId}`),
+
+  getLoginCurrent: () =>
+    apiClient.get<never, LoginTask | { status: string }>('/admin/login/current'),
+
+  checkLogin: () =>
+    apiClient.post('/admin/login/check'),
 }

@@ -1,5 +1,5 @@
 <template>
-  <div ref="root" class="relative w-full sm:w-44">
+  <div ref="root" class="relative w-full">
     <button
       type="button"
       class="flex w-full items-center justify-between gap-2 rounded-full border border-input bg-background px-4 py-2 text-sm

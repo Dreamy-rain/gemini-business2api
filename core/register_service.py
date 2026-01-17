@@ -116,12 +116,24 @@ class RegisterService(BaseTaskService[RegisterTask]):
         if not client.register_account(domain=domain):
             return {"success": False, "error": "duckmail register failed"}
 
-        automation = GeminiAutomationUC(
-            user_agent=self.user_agent,
-            proxy=config.basic.proxy,
-            headless=config.basic.browser_headless,
-            log_callback=log_cb,
-        )
+        # 根据配置选择浏览器引擎
+        browser_engine = (config.basic.browser_engine or "dp").lower()
+        if browser_engine == "dp":
+            # DrissionPage 引擎：仅有头模式，更稳定
+            automation = GeminiAutomation(
+                user_agent=self.user_agent,
+                proxy=config.basic.proxy,
+                headless=False,  # DP 不支持无头模式
+                log_callback=log_cb,
+            )
+        else:
+            # undetected-chromedriver 引擎：支持有头和无头
+            automation = GeminiAutomationUC(
+                user_agent=self.user_agent,
+                proxy=config.basic.proxy,
+                headless=config.basic.browser_headless,
+                log_callback=log_cb,
+            )
 
         try:
             result = automation.login_and_extract(client.email, client)

@@ -54,6 +54,29 @@
             <div class="rounded-2xl border border-border bg-card p-4">
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">自动注册/刷新</p>
               <div class="mt-4 space-y-3">
+                <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
+                  <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
+                    DuckMail SSL 校验
+                  </Checkbox>
+                  <div class="flex items-center justify-end gap-2">
+                    <Checkbox
+                      v-model="localSettings.basic.browser_headless"
+                      :disabled="localSettings.basic.browser_engine === 'dp'"
+                    >
+                      无头浏览器
+                    </Checkbox>
+                    <HelpTip text="仅 UC 引擎支持无头模式。若无头注册/刷新失败，建议关闭。" />
+                  </div>
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>浏览器引擎</span>
+                  <HelpTip text="UC: 支持无头/有头，但可能失败。DP: 仅有头模式，更稳定，UC 失败时推荐使用。" />
+                </div>
+                <SelectMenu
+                  v-model="localSettings.basic.browser_engine"
+                  :options="browserEngineOptions"
+                  class="w-full"
+                />
                 <label class="block text-xs text-muted-foreground">DuckMail API</label>
                 <input
                   v-model="localSettings.basic.duckmail_base_url"
@@ -61,17 +84,6 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="https://api.duckmail.sbs"
                 />
-                <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
-                  <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
-                    DuckMail SSL 校验
-                  </Checkbox>
-                  <div class="flex items-center justify-end gap-2">
-                    <Checkbox v-model="localSettings.basic.browser_headless">
-                      无头浏览器
-                    </Checkbox>
-                    <HelpTip text="若无头注册/刷新失败，建议关闭。" />
-                  </div>
-                </div>
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
                   <HelpTip text="当账号距离过期小于等于该值时，会触发自动登录刷新（更新 cookie/session）。" />
@@ -226,6 +238,10 @@ const toast = useToast()
 const localSettings = ref<Settings | null>(null)
 const isSaving = ref(false)
 const errorMessage = ref('')
+const browserEngineOptions = [
+  { label: 'UC - 支持无头/有头', value: 'uc' },
+  { label: 'DP - 有头模式（推荐）', value: 'dp' },
+]
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },
   { label: 'URL 链接', value: 'url' },
@@ -257,7 +273,8 @@ watch(settings, (value) => {
   next.basic = next.basic || {}
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
-  next.basic.browser_headless = next.basic.browser_headless ?? true
+  next.basic.browser_engine = next.basic.browser_engine || 'dp'
+  next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
     ? next.basic.refresh_window_hours
     : 1

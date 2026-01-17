@@ -39,6 +39,7 @@ class GeminiAutomationUC:
         self.timeout = timeout
         self.log_callback = log_callback
         self.driver = None
+        self.user_data_dir = None
 
     def login_and_extract(self, email: str, mail_client) -> dict:
         """执行登录并提取配置"""
@@ -53,9 +54,15 @@ class GeminiAutomationUC:
 
     def _create_driver(self):
         """创建浏览器驱动"""
+        import tempfile
         options = uc.ChromeOptions()
 
+        # 创建临时用户数据目录
+        self.user_data_dir = tempfile.mkdtemp(prefix='uc-profile-')
+        options.add_argument(f"--user-data-dir={self.user_data_dir}")
+
         # 基础参数
+        options.add_argument("--incognito")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-setuid-sandbox")
         options.add_argument("--window-size=1280,800")
@@ -436,6 +443,15 @@ class GeminiAutomationUC:
         if self.driver:
             try:
                 self.driver.quit()
+            except Exception:
+                pass
+
+        if self.user_data_dir:
+            try:
+                import shutil
+                import os
+                if os.path.exists(self.user_data_dir):
+                    shutil.rmtree(self.user_data_dir, ignore_errors=True)
             except Exception:
                 pass
 

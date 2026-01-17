@@ -36,8 +36,10 @@ class GeminiAutomation:
     def login_and_extract(self, email: str, mail_client) -> dict:
         """执行登录并提取配置"""
         page = None
+        user_data_dir = None
         try:
             page = self._create_page()
+            user_data_dir = getattr(page, 'user_data_dir', None)
             return self._run_flow(page, email, mail_client)
         except Exception as exc:
             self._log("error", f"automation error: {exc}")
@@ -48,10 +50,12 @@ class GeminiAutomation:
                     page.quit()
                 except Exception:
                     pass
+            self._cleanup_user_data(user_data_dir)
 
     def _create_page(self) -> ChromiumPage:
         """创建浏览器页面"""
         options = ChromiumOptions()
+        options.set_argument("--incognito")
         options.set_argument("--no-sandbox")
         options.set_argument("--disable-setuid-sandbox")
         options.set_argument("--disable-blink-features=AutomationControlled")
@@ -411,6 +415,17 @@ class GeminiAutomation:
                 self.log_callback(level, message)
             except Exception:
                 pass
+
+    def _cleanup_user_data(self, user_data_dir: Optional[str]) -> None:
+        """清理浏览器用户数据目录"""
+        if not user_data_dir:
+            return
+        try:
+            import shutil
+            if os.path.exists(user_data_dir):
+                shutil.rmtree(user_data_dir, ignore_errors=True)
+        except Exception:
+            pass
 
     @staticmethod
     def _get_ua() -> str:

@@ -1,31 +1,44 @@
+# Stage 1: 构建前端
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+
+# 先复制 package 文件利用 Docker 缓存
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm install --silent
+
+# 复制前端源码并构建
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: 最终运行时镜像
 FROM python:3.11-slim
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install Python dependencies
+# 安装 Python 依赖（合并为单一 RUN 指令以减少层数）
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    && pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y gcc \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc && \
+    pip install --no-cache-dir -r requirements.txt && \
+    apt-get purge -y gcc && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Copy backend code
+# 复制后端代码
 COPY main.py .
 COPY core ./core
 COPY util ./util
 
-# Copy prebuilt static assets
-COPY static ./static
+# 从 builder 阶段只复制构建好的静态文件
+COPY --from=frontend-builder /app/static ./static
 
-# Create data directory (local + HF Spaces Pro)
+# 创建数据目录
 RUN mkdir -p ./data
 
-# Declare data volume
+# 声明数据卷
 VOLUME ["/app/data"]
 
-# Start service
+# 启动服务
 CMD ["python", "-u", "main.py"]

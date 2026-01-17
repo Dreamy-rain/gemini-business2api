@@ -131,6 +131,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         config_data = result["config"]
         config_data["mail_provider"] = "duckmail"
+        config_data["mail_address"] = client.email
         config_data["mail_password"] = client.password
 
         accounts_data = load_accounts_from_source()

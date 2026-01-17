@@ -1,11 +1,12 @@
 import os
 import random
-import re
 import string
 import time
 from typing import Optional
 
 import requests
+
+from core.mail_utils import extract_verification_code
 
 
 class DuckMailClient:
@@ -122,7 +123,7 @@ class DuckMailClient:
         self._log("error", "DuckMail login failed")
         return False
 
-    def fetch_verification_code(self) -> Optional[str]:
+    def fetch_verification_code(self, since_time=None) -> Optional[str]:
         """获取验证码"""
         if not self.token:
             if not self.login():
@@ -147,12 +148,37 @@ class DuckMailClient:
             if not messages:
                 return None
 
-            # 获取第一封邮件的详情
+            # 获取第一封邮件的详情（最新的邮件）
             msg_id = messages[0].get("id")
+            msg_created_at = messages[0].get("createdAt", "unknown")
             if not msg_id:
                 return None
 
-            self._log("info", f"DuckMail fetching message: {msg_id}")
+            self._log("info", f"DuckMail fetching message: {msg_id} (created: {msg_created_at})")
+
+            # 检查邮件时间是否在 since_time 之后
+            self._log("info", f"DuckMail since_time check: since_time={since_time}, msg_created_at={msg_created_at}")
+            if since_time and msg_created_at != "unknown":
+                try:
+                    from dateutil import parser
+                    email_time = parser.parse(msg_created_at)
+                    # 移除时区信息进行比较
+                    if email_time.tzinfo:
+                        email_time = email_time.replace(tzinfo=None)
+                    if since_time.tzinfo:
+                        since_time = since_time.replace(tzinfo=None)
+
+                    self._log("info", f"DuckMail comparing times: email={email_time}, since={since_time}")
+                    if email_time < since_time:
+                        self._log("info", f"DuckMail email too old: {email_time} < {since_time}")
+                        return None
+                    else:
+                        self._log("info", f"DuckMail email is new: {email_time} >= {since_time}")
+                except Exception as e:
+                    self._log("warning", f"DuckMail time comparison failed: {e}")
+            else:
+                self._log("info", f"DuckMail skipping time check (since_time={since_time}, msg_created_at={msg_created_at})")
+
             detail = self._request(
                 "GET",
                 f"{self.base_url}/messages/{msg_id}",
@@ -164,7 +190,8 @@ class DuckMailClient:
 
             payload = detail.json() if detail.content else {}
             subject = payload.get("subject", "")
-            self._log("info", f"DuckMail message subject: {subject}")
+            created_at = payload.get("createdAt", "unknown")
+            self._log("info", f"DuckMail message subject: {subject} (created: {created_at})")
 
             # 获取邮件内容（text可能是字符串，html可能是列表）
             text_content = payload.get("text") or ""
@@ -177,11 +204,15 @@ class DuckMailClient:
                 text_content = "".join(str(item) for item in text_content)
 
             content = text_content + html_content
-            code = self._extract_code(content)
+            self._log("info", f"DuckMail email content length: {len(content)} chars")
+            code = extract_verification_code(content)
             if code:
                 self._log("info", f"DuckMail extracted code: {code}")
             else:
                 self._log("warning", f"DuckMail no code found in message")
+                # 打印部分内容用于调试
+                preview = content[:200] if content else "(empty)"
+                self._log("warning", f"DuckMail content preview: {preview}")
             return code
 
         except Exception as e:
@@ -192,7 +223,7 @@ class DuckMailClient:
         self,
         timeout: int = 120,
         interval: int = 4,
-        since_time=None,  # 保留参数兼容性，但不使用
+        since_time=None,
     ) -> Optional[str]:
         """轮询获取验证码"""
         if not self.token:
@@ -205,7 +236,7 @@ class DuckMailClient:
 
         for i in range(1, max_retries + 1):
             self._log("info", f"DuckMail attempt {i}/{max_retries}")
-            code = self.fetch_verification_code()
+            code = self.fetch_verification_code(since_time=since_time)
             if code:
                 self._log("info", f"DuckMail code found: {code}")
                 return code
@@ -238,27 +269,4 @@ class DuckMailClient:
 
     @staticmethod
     def _extract_code(text: str) -> Optional[str]:
-        """提取验证码"""
-        if not text:
-            return None
-
-        # 策略1: 上下文关键词匹配
-        context_pattern = r"(?:验证码|code|verification|passcode|pin).*?[:：]\s*([A-Za-z0-9]{4,8})\b"
-        match = re.search(context_pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1)
-
-        # 策略2: 6位数字
-        digits = re.findall(r"\b\d{6}\b", text)
-        if digits:
-            return digits[0]
-
-        # 策略3: 6位字母数字混合
-        alphanumeric = re.findall(r"\b[A-Z0-9]{6}\b", text)
-        for candidate in alphanumeric:
-            has_letter = any(c.isalpha() for c in candidate)
-            has_digit = any(c.isdigit() for c in candidate)
-            if has_letter and has_digit:
-                return candidate
-
-        return None
+        return extract_verification_code(text)

@@ -12,6 +12,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.gemini_automation import GeminiAutomation
+from core.microsoft_mail_client import MicrosoftMailClient
 
 logger = logging.getLogger("gemini.login")
 
@@ -106,20 +107,51 @@ class LoginService(BaseTaskService[LoginTask]):
         if account.get("disabled"):
             return {"success": False, "email": account_id, "error": "account disabled"}
 
+        # 获取邮件提供商
+        mail_provider = (account.get("mail_provider") or "").lower()
+        if not mail_provider:
+            if account.get("mail_client_id") or account.get("mail_refresh_token"):
+                mail_provider = "microsoft"
+            else:
+                mail_provider = "duckmail"
+
+        # 获取邮件配置
         mail_password = account.get("mail_password") or account.get("email_password")
-        if not mail_password:
-            return {"success": False, "email": account_id, "error": "mail password missing"}
+        mail_client_id = account.get("mail_client_id")
+        mail_refresh_token = account.get("mail_refresh_token")
+        mail_tenant = account.get("mail_tenant") or "consumers"
 
         log_cb = lambda level, message: self._append_log(task, level, f"[{account_id}] {message}")
-        client = DuckMailClient(
-            base_url=config.basic.duckmail_base_url,
-            proxy=config.basic.proxy,
-            verify_ssl=config.basic.duckmail_verify_ssl,
-            api_key=config.basic.duckmail_api_key,
-            log_callback=log_cb,
-        )
-        client.set_credentials(account_id, mail_password)
 
+        # 创建邮件客户端
+        if mail_provider == "microsoft":
+            if not mail_client_id or not mail_refresh_token:
+                return {"success": False, "email": account_id, "error": "microsoft oauth missing"}
+            mail_address = account.get("mail_address") or account_id
+            client = MicrosoftMailClient(
+                client_id=mail_client_id,
+                refresh_token=mail_refresh_token,
+                tenant=mail_tenant,
+                proxy=config.basic.proxy,
+                log_callback=log_cb,
+            )
+            client.set_credentials(mail_address)
+        elif mail_provider == "duckmail":
+            if not mail_password:
+                return {"success": False, "email": account_id, "error": "mail password missing"}
+            # DuckMail: account_id 就是邮箱地址
+            client = DuckMailClient(
+                base_url=config.basic.duckmail_base_url,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.duckmail_verify_ssl,
+                api_key=config.basic.duckmail_api_key,
+                log_callback=log_cb,
+            )
+            client.set_credentials(account_id, mail_password)
+        else:
+            return {"success": False, "email": account_id, "error": f"unsupported mail provider: {mail_provider}"}
+
+        # 执行自动化登录
         automation = GeminiAutomation(
             user_agent=self.user_agent,
             proxy=config.basic.proxy,
@@ -133,9 +165,15 @@ class LoginService(BaseTaskService[LoginTask]):
         if not result.get("success"):
             return {"success": False, "email": account_id, "error": result.get("error", "automation failed")}
 
+        # 更新账户配置
         config_data = result["config"]
-        config_data["mail_provider"] = account.get("mail_provider") or "duckmail"
+        config_data["mail_provider"] = mail_provider
         config_data["mail_password"] = mail_password
+        if mail_provider == "microsoft":
+            config_data["mail_address"] = account.get("mail_address") or account_id
+            config_data["mail_client_id"] = mail_client_id
+            config_data["mail_refresh_token"] = mail_refresh_token
+            config_data["mail_tenant"] = mail_tenant
         config_data["disabled"] = account.get("disabled", False)
 
         for acc in accounts:
@@ -156,9 +194,20 @@ class LoginService(BaseTaskService[LoginTask]):
         for account in accounts:
             if account.get("disabled"):
                 continue
+            mail_provider = (account.get("mail_provider") or "").lower()
+            if not mail_provider:
+                if account.get("mail_client_id") or account.get("mail_refresh_token"):
+                    mail_provider = "microsoft"
+                else:
+                    mail_provider = "duckmail"
+
             mail_password = account.get("mail_password") or account.get("email_password")
-            if not mail_password:
-                continue
+            if mail_provider == "microsoft":
+                if not account.get("mail_client_id") or not account.get("mail_refresh_token"):
+                    continue
+            else:
+                if not mail_password:
+                    continue
             expires_at = account.get("expires_at")
             if not expires_at:
                 continue

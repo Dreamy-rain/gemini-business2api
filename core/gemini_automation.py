@@ -94,12 +94,13 @@ class GeminiAutomation:
     def _run_flow(self, page, email: str, mail_client) -> dict:
         """执行登录流程"""
 
-        # Step 1: 导航到登录页面
+        # Step 1: 导航到首页并设置 Cookie
         self._log("info", f"navigating to login page for {email}")
 
         page.get(AUTH_HOME_URL, timeout=self.timeout)
         time.sleep(2)
 
+        # 设置两个关键 Cookie
         try:
             page.set.cookies({
                 "name": "__Host-AP_SignInXsrf",
@@ -108,8 +109,16 @@ class GeminiAutomation:
                 "path": "/",
                 "secure": True,
             })
-        except Exception:
-            pass
+            # 添加 reCAPTCHA Cookie
+            page.set.cookies({
+                "name": "_GRECAPTCHA",
+                "value": "09ABCL...",
+                "url": "https://google.com",
+                "path": "/",
+                "secure": True,
+            })
+        except Exception as e:
+            self._log("warning", f"failed to set cookies: {e}")
 
         login_hint = quote(email, safe="")
         login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"

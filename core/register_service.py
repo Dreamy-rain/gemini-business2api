@@ -11,6 +11,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.gemini_automation import GeminiAutomation
+from core.gemini_automation_uc import GeminiAutomationUC
 
 logger = logging.getLogger("gemini.register")
 
@@ -115,7 +116,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
         if not client.register_account(domain=domain):
             return {"success": False, "error": "duckmail register failed"}
 
-        automation = GeminiAutomation(
+        automation = GeminiAutomationUC(
             user_agent=self.user_agent,
             proxy=config.basic.proxy,
             headless=config.basic.browser_headless,

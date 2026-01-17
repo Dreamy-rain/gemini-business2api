@@ -12,6 +12,7 @@ from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
 from core.gemini_automation import GeminiAutomation
+from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
 
 logger = logging.getLogger("gemini.login")
@@ -151,8 +152,7 @@ class LoginService(BaseTaskService[LoginTask]):
         else:
             return {"success": False, "email": account_id, "error": f"unsupported mail provider: {mail_provider}"}
 
-        # 执行自动化登录
-        automation = GeminiAutomation(
+        automation = GeminiAutomationUC(
             user_agent=self.user_agent,
             proxy=config.basic.proxy,
             headless=config.basic.browser_headless,

@@ -67,23 +67,24 @@
 
 ## 🚀 Quick Start
 
-### Method 1: Using Deployment Script (Recommended)
+### Method 1: Using Setup Script (Recommended)
 
 **Linux/macOS:**
 ```bash
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
-bash deploy.sh
+bash setup.sh
 ```
 
 **Windows:**
 ```cmd
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
-deploy.bat
+setup.bat
 ```
 
-The deployment script automatically:
+The setup script automatically:
+- Syncs latest code
 - Builds frontend
 - Creates Python virtual environment
 - Installs dependencies
@@ -128,12 +129,12 @@ docker run -d -p 7860:7860 \
 
 **Linux/macOS:**
 ```bash
-bash update.sh
+bash setup.sh --update
 ```
 
 **Windows:**
 ```cmd
-update.bat
+setup.bat --update
 ```
 
 **HuggingFace:**

@@ -68,23 +68,24 @@
 
 ## 🚀 快速开始
 
-### 方式一：使用部署脚本（推荐）
+### 方式一：使用安装脚本（推荐）
 
 **Linux/macOS:**
 ```bash
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
-bash deploy.sh
+bash setup.sh
 ```
 
 **Windows:**
 ```cmd
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
-deploy.bat
+setup.bat
 ```
 
-部署脚本会自动完成：
+安装脚本会自动完成：
+- 同步最新代码
 - 构建前端
 - 创建 Python 虚拟环境
 - 安装依赖
@@ -133,12 +134,12 @@ docker run -d -p 7860:7860 \
 
 **Linux/macOS:**
 ```bash
-bash update.sh
+bash setup.sh --update
 ```
 
 **Windows:**
 ```cmd
-update.bat
+setup.bat --update
 ```
 
 **HuggingFace:**

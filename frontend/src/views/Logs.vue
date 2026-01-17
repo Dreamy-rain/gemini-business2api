@@ -102,7 +102,7 @@
     <div
       v-if="rawView"
       ref="rawLogContainer"
-      class="scrollbar-slim mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-2xl border border-border bg-black px-4 py-3 text-xs text-green-200"
+      class="scrollbar-slim mt-4 max-h-[60vh] overflow-x-auto overflow-y-auto rounded-2xl border border-border bg-muted/30 px-4 py-3 text-[11px] text-muted-foreground"
     >
       <pre class="whitespace-pre font-mono leading-relaxed">{{ rawLogView.text }}</pre>
     </div>

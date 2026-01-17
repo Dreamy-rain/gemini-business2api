@@ -130,6 +130,7 @@ class DuckMailClient:
                 return None
 
         try:
+            self._log("info", "fetching verification code")
             # 获取邮件列表
             res = self._request(
                 "GET",
@@ -138,46 +139,18 @@ class DuckMailClient:
             )
 
             if res.status_code != 200:
-                self._log("warning", f"DuckMail messages request failed: {res.status_code}")
                 return None
 
             data = res.json() if res.content else {}
             messages = data.get("hydra:member", [])
-            self._log("info", f"DuckMail messages count: {len(messages)}")
 
             if not messages:
                 return None
 
-            # 获取第一封邮件的详情（最新的邮件）
+            # 只获取最新一封邮件，不做时间过滤
             msg_id = messages[0].get("id")
-            msg_created_at = messages[0].get("createdAt", "unknown")
             if not msg_id:
                 return None
-
-            self._log("info", f"DuckMail fetching message: {msg_id} (created: {msg_created_at})")
-
-            # 检查邮件时间是否在 since_time 之后
-            self._log("info", f"DuckMail since_time check: since_time={since_time}, msg_created_at={msg_created_at}")
-            if since_time and msg_created_at != "unknown":
-                try:
-                    from dateutil import parser
-                    email_time = parser.parse(msg_created_at)
-                    # 移除时区信息进行比较
-                    if email_time.tzinfo:
-                        email_time = email_time.replace(tzinfo=None)
-                    if since_time.tzinfo:
-                        since_time = since_time.replace(tzinfo=None)
-
-                    self._log("info", f"DuckMail comparing times: email={email_time}, since={since_time}")
-                    if email_time < since_time:
-                        self._log("info", f"DuckMail email too old: {email_time} < {since_time}")
-                        return None
-                    else:
-                        self._log("info", f"DuckMail email is new: {email_time} >= {since_time}")
-                except Exception as e:
-                    self._log("warning", f"DuckMail time comparison failed: {e}")
-            else:
-                self._log("info", f"DuckMail skipping time check (since_time={since_time}, msg_created_at={msg_created_at})")
 
             detail = self._request(
                 "GET",
@@ -189,34 +162,24 @@ class DuckMailClient:
                 return None
 
             payload = detail.json() if detail.content else {}
-            subject = payload.get("subject", "")
-            created_at = payload.get("createdAt", "unknown")
-            self._log("info", f"DuckMail message subject: {subject} (created: {created_at})")
 
-            # 获取邮件内容（text可能是字符串，html可能是列表）
+            # 获取邮件内容
             text_content = payload.get("text") or ""
             html_content = payload.get("html") or ""
 
-            # 如果html是列表，转换为字符串
             if isinstance(html_content, list):
                 html_content = "".join(str(item) for item in html_content)
             if isinstance(text_content, list):
                 text_content = "".join(str(item) for item in text_content)
 
             content = text_content + html_content
-            self._log("info", f"DuckMail email content length: {len(content)} chars")
             code = extract_verification_code(content)
             if code:
-                self._log("info", f"DuckMail extracted code: {code}")
-            else:
-                self._log("warning", f"DuckMail no code found in message")
-                # 打印部分内容用于调试
-                preview = content[:200] if content else "(empty)"
-                self._log("warning", f"DuckMail content preview: {preview}")
+                self._log("info", f"code found: {code}")
             return code
 
         except Exception as e:
-            self._log("error", f"DuckMail fetch code failed: {e}")
+            self._log("error", f"fetch code failed: {e}")
             return None
 
     def poll_for_code(
@@ -228,23 +191,19 @@ class DuckMailClient:
         """轮询获取验证码"""
         if not self.token:
             if not self.login():
-                self._log("error", "DuckMail token missing")
                 return None
 
-        self._log("info", "DuckMail polling for code")
         max_retries = timeout // interval
 
         for i in range(1, max_retries + 1):
-            self._log("info", f"DuckMail attempt {i}/{max_retries}")
             code = self.fetch_verification_code(since_time=since_time)
             if code:
-                self._log("info", f"DuckMail code found: {code}")
                 return code
 
             if i < max_retries:
                 time.sleep(interval)
 
-        self._log("error", "DuckMail code timeout")
+        self._log("error", "verification code timeout")
         return None
 
     def _get_domain(self) -> str:

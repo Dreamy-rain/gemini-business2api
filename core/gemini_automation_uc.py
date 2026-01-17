@@ -130,9 +130,16 @@ class GeminiAutomationUC:
             self._save_screenshot("continue_button_failed")
             return {"success": False, "error": f"failed to click continue: {e}"}
 
+        # 记录发送验证码的时间
+        from datetime import datetime
+        send_time = datetime.now()
+
         # 检查是否需要点击"发送验证码"按钮
+        self._log("info", "clicking send verification code button")
         if not self._click_send_code_button():
-            self._log("warning", "send code button not found, proceeding to code input")
+            self._log("error", "send code button not found")
+            self._save_screenshot("send_code_button_missing")
+            return {"success": False, "error": "send code button not found"}
 
         # 等待验证码输入框出现
         code_input = self._wait_for_code_input()
@@ -141,11 +148,9 @@ class GeminiAutomationUC:
             self._save_screenshot("code_input_missing")
             return {"success": False, "error": "code input not found"}
 
-        time.sleep(3)
-
-        # 获取验证码
+        # 获取验证码（传入发送时间）
         self._log("info", "polling for verification code")
-        code = mail_client.poll_for_code(timeout=40, interval=4)
+        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
         if not code:
             self._log("error", "verification code timeout")
@@ -196,7 +201,8 @@ class GeminiAutomationUC:
         # 处理协议页面
         self._handle_agreement_page()
 
-        # 导航到业务页面
+        # 导航到业务页面并等待参数生成
+        self._log("info", "navigating to business page")
         self.driver.get("https://business.gemini.google/")
         time.sleep(3)
 
@@ -205,14 +211,20 @@ class GeminiAutomationUC:
             if self._handle_username_setup():
                 time.sleep(3)
 
-        # 提取配置
-        if "cid" in self.driver.current_url or self._wait_for_cid():
-            self._log("info", "login success")
-            return self._extract_config(email)
+        # 等待 URL 参数生成（csesidx 和 cid）
+        self._log("info", "waiting for URL parameters")
+        if not self._wait_for_business_params():
+            self._log("warning", "URL parameters not generated, trying refresh")
+            self.driver.refresh()
+            time.sleep(3)
+            if not self._wait_for_business_params():
+                self._log("error", "URL parameters generation failed")
+                self._save_screenshot("params_missing")
+                return {"success": False, "error": "URL parameters not found"}
 
-        self._log("error", "login failed")
-        self._save_screenshot("login_failed")
-        return {"success": False, "error": "login failed"}
+        # 提取配置
+        self._log("info", "login success")
+        return self._extract_config(email)
 
     def _click_send_code_button(self) -> bool:
         """点击发送验证码按钮（如果需要）"""
@@ -223,7 +235,6 @@ class GeminiAutomationUC:
             direct_btn = WebDriverWait(self.driver, 5).until(
                 EC.element_to_be_clickable((By.ID, "sign-in-with-email"))
             )
-            self._log("info", "clicking send code button (by ID)")
             self.driver.execute_script("arguments[0].click();", direct_btn)
             time.sleep(2)
             return True
@@ -237,7 +248,6 @@ class GeminiAutomationUC:
             for btn in buttons:
                 text = btn.text.strip() if btn.text else ""
                 if text and any(kw in text for kw in keywords):
-                    self._log("info", f"clicking send code button (by text: {text[:30]})")
                     self.driver.execute_script("arguments[0].click();", btn)
                     time.sleep(2)
                     return True
@@ -248,7 +258,6 @@ class GeminiAutomationUC:
         try:
             code_input = self.driver.find_element(By.CSS_SELECTOR, "input[name='pinInput']")
             if code_input:
-                self._log("info", "already on code input page")
                 return True
         except NoSuchElementException:
             pass
@@ -306,6 +315,16 @@ class GeminiAutomationUC:
         """等待URL包含cid"""
         for _ in range(timeout):
             if "cid" in self.driver.current_url:
+                return True
+            time.sleep(1)
+        return False
+
+    def _wait_for_business_params(self, timeout: int = 30) -> bool:
+        """等待业务页面参数生成（csesidx 和 cid）"""
+        for _ in range(timeout):
+            url = self.driver.current_url
+            if "csesidx=" in url and "/cid/" in url:
+                self._log("info", f"business params ready: {url}")
                 return True
             time.sleep(1)
         return False

@@ -132,7 +132,11 @@ class GeminiAutomation:
         if has_business_params:
             return self._extract_config(page, email)
 
-        # Step 3: 尝试触发发送验证码
+        # Step 3: 记录发送验证码的时间并触发发送
+        from datetime import datetime
+        send_time = datetime.now()
+
+        self._log("info", "clicking send verification code button")
         if not self._click_send_code_button(page):
             self._log("error", "send code button not found")
             self._save_screenshot(page, "send_code_button_missing")
@@ -145,11 +149,9 @@ class GeminiAutomation:
             self._save_screenshot(page, "code_input_missing")
             return {"success": False, "error": "code input not found"}
 
-        time.sleep(3)
-
-        # Step 5: 轮询邮件获取验证码
+        # Step 5: 轮询邮件获取验证码（传入发送时间）
         self._log("info", "polling for verification code")
-        code = mail_client.poll_for_code(timeout=40, interval=4)
+        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
         if not code:
             self._log("error", "verification code timeout")
@@ -184,7 +186,8 @@ class GeminiAutomation:
         # Step 7: 处理协议页面（如果有）
         self._handle_agreement_page(page)
 
-        # Step 8: 导航到业务页面
+        # Step 8: 导航到业务页面并等待参数生成
+        self._log("info", "navigating to business page")
         page.get("https://business.gemini.google/", timeout=self.timeout)
         time.sleep(3)
 
@@ -193,14 +196,20 @@ class GeminiAutomation:
             if self._handle_username_setup(page):
                 time.sleep(3)
 
-        # Step 10: 提取配置
-        if "cid" in page.url or self._wait_for_cid(page):
-            self._log("info", "login success")
-            return self._extract_config(page, email)
+        # Step 10: 等待 URL 参数生成（csesidx 和 cid）
+        self._log("info", "waiting for URL parameters")
+        if not self._wait_for_business_params(page):
+            self._log("warning", "URL parameters not generated, trying refresh")
+            page.refresh()
+            time.sleep(3)
+            if not self._wait_for_business_params(page):
+                self._log("error", "URL parameters generation failed")
+                self._save_screenshot(page, "params_missing")
+                return {"success": False, "error": "URL parameters not found"}
 
-        self._log("error", "login failed")
-        self._save_screenshot(page, "login_failed")
-        return {"success": False, "error": "login failed"}
+        # Step 11: 提取配置
+        self._log("info", "login success")
+        return self._extract_config(page, email)
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
@@ -280,6 +289,16 @@ class GeminiAutomation:
         """等待URL包含cid"""
         for _ in range(timeout):
             if "cid" in page.url:
+                return True
+            time.sleep(1)
+        return False
+
+    def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
+        """等待业务页面参数生成（csesidx 和 cid）"""
+        for _ in range(timeout):
+            url = page.url
+            if "csesidx=" in url and "/cid/" in url:
+                self._log("info", f"business params ready: {url}")
                 return True
             time.sleep(1)
         return False

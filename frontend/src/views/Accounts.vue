@@ -12,6 +12,7 @@
           <SelectMenu
             v-model="statusFilter"
             :options="statusOptions"
+            class="!w-full sm:!w-40"
           />
         </div>
         <div class="flex w-full flex-wrap items-center gap-3 text-xs text-muted-foreground sm:w-auto sm:flex-nowrap">

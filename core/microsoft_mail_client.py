@@ -54,6 +54,8 @@ class MicrosoftMailClient:
     def fetch_verification_code(self, since_time: Optional[datetime] = None) -> Optional[str]:
         if not self.email:
             return None
+
+        self._log("info", "fetching verification code")
         token = self._get_access_token()
         if not token:
             return None
@@ -63,15 +65,14 @@ class MicrosoftMailClient:
         try:
             client.authenticate("XOAUTH2", lambda _: auth_string)
         except Exception as exc:
-            self._log("error", f"Microsoft IMAP auth failed: {exc}")
+            self._log("error", f"IMAP auth failed: {exc}")
             try:
                 client.logout()
             except Exception:
                 pass
             return None
 
-        search_since = since_time or (datetime.utcnow() - timedelta(minutes=5))
-        since_str = search_since.strftime("%d-%b-%Y")
+        search_since = since_time or (datetime.now() - timedelta(minutes=5))
 
         try:
             for mailbox in ("INBOX", "Junk"):
@@ -82,12 +83,13 @@ class MicrosoftMailClient:
                 except Exception:
                     continue
 
-                status, data = client.search(None, "SINCE", since_str)
+                # 搜索所有邮件
+                status, data = client.search(None, "ALL")
                 if status != "OK" or not data or not data[0]:
                     continue
 
-                ids = data[0].split()
-                ids = ids[-20:]
+                ids = data[0].split()[-5:]  # 只检查最近 5 封
+
                 for msg_id in reversed(ids):
                     status, msg_data = client.fetch(msg_id, "(RFC822)")
                     if status != "OK" or not msg_data:
@@ -102,12 +104,17 @@ class MicrosoftMailClient:
 
                     msg = message_from_bytes(raw_bytes)
                     msg_date = self._parse_message_date(msg.get("Date"))
+
+                    # 按时间过滤
                     if msg_date and msg_date < search_since:
                         continue
 
                     content = self._message_to_text(msg)
-                    code = extract_verification_code(content)
-                    if code:
+                    import re
+                    match = re.search(r'[A-Z0-9]{6}', content)
+                    if match:
+                        code = match.group(0)
+                        self._log("info", f"code found in {mailbox}: {code}")
                         return code
         finally:
             try:
@@ -127,12 +134,15 @@ class MicrosoftMailClient:
             return None
 
         max_retries = max(1, timeout // interval)
-        for _ in range(max_retries):
+
+        for i in range(1, max_retries + 1):
             code = self.fetch_verification_code(since_time=since_time)
             if code:
                 return code
-            if interval:
+            if i < max_retries:
                 time.sleep(interval)
+
+        self._log("error", "verification code timeout")
         return None
 
     @staticmethod

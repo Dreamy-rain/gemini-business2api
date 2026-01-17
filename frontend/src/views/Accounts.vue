@@ -51,7 +51,7 @@
       <div class="mt-4 flex flex-wrap items-center gap-2">
         <button
           class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
-                 hover:border-primary hover:text-primary"
+                 hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="isLoading"
           @click="refreshAccounts"
         >
@@ -66,7 +66,7 @@
         </button>
         <button
           class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
-                 hover:border-primary hover:text-primary"
+                 hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="isRegistering"
           @click="openRegisterModal"
         >
@@ -435,7 +435,7 @@
               class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
             />
             <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              默认域名来自设置面板（可在“配置面板”中修改）
+              默认域名（可在配置面板修改，推荐使用）
             </div>
           </div>
 
@@ -457,45 +457,9 @@
             </div>
           </div>
 
-          <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-            <div class="space-y-2">
-              <p class="text-xs font-bold text-rose-600">⚠️ 严禁滥用：禁止将本工具用于商业用途或任何形式的滥用（无论规模大小）</p>
-
-              <div class="space-y-1">
-                <p><strong>本工具严禁用于以下行为：</strong></p>
-                <p class="pl-3">• 商业用途或盈利性使用</p>
-                <p class="pl-3">• 任何形式的批量操作或自动化滥用（无论规模大小）</p>
-                <p class="pl-3">• 破坏市场秩序或恶意竞争</p>
-                <p class="pl-3">• 违反 Google 服务条款的任何行为</p>
-                <p class="pl-3">• 违反 Microsoft 服务条款的任何行为</p>
-              </div>
-
-              <div class="space-y-1">
-                <p><strong>违规后果：</strong>滥用行为可能导致账号永久封禁、法律追责，一切后果由使用者自行承担。</p>
-              </div>
-
-              <div class="space-y-1">
-                <p class="font-semibold text-foreground">📖 合法用途</p>
-                <p>本项目仅限于以下场景：</p>
-                <p class="pl-3">• 个人学习与技术研究</p>
-                <p class="pl-3">• 浏览器自动化技术探索</p>
-                <p class="pl-3">• 非商业性技术交流</p>
-              </div>
-
-              <div class="space-y-1">
-                <p class="font-semibold text-foreground">⚖️ 法律责任</p>
-                <p><strong>使用者责任：</strong>使用本工具产生的一切后果（包括但不限于账号封禁、数据损失、法律纠纷）由使用者完全承担。</p>
-                <p><strong>合规义务：</strong>使用者必须遵守所在地法律法规及第三方服务条款（包括但不限于 Google Workspace、Microsoft 365 等服务条款）。</p>
-                <p><strong>作者免责：</strong>作者不对任何违规使用、滥用行为或由此产生的后果承担责任。</p>
-              </div>
-
-              <div class="space-y-1">
-                <p class="font-semibold text-foreground">📋 技术声明</p>
-                <p class="pl-3">• 本项目按"现状"提供，不提供任何形式的担保</p>
-                <p class="pl-3">• 依赖的第三方服务（如 DuckMail API、Microsoft Graph API 等）可用性不受作者控制</p>
-                <p class="pl-3">• 作者保留随时停止维护、变更功能或关闭项目的权利</p>
-              </div>
-            </div>
+          <div class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] leading-relaxed">
+            <p class="text-xs font-bold text-rose-600">⚠️ 严禁滥用：禁止将本工具用于商业用途或任何形式的滥用（无论规模大小）</p>
+            <p class="mt-1 text-muted-foreground">详细声明请查看项目 <a href="https://github.com/Dreamy-rain/gemini-business2api/blob/main/docs/DISCLAIMER.md" target="_blank" class="text-primary hover:underline font-medium">DISCLAIMER.md</a></p>
           </div>
           <Checkbox v-model="registerAgreed">
             我已阅读并同意上述说明与限制
@@ -515,7 +479,7 @@
             <button
               v-if="addMode === 'register'"
               class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
-                     hover:opacity-90"
+                     hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="isRegistering || !registerAgreed"
               @click="handleRegister"
             >
@@ -524,7 +488,7 @@
             <button
               v-else
               class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
-                     hover:opacity-90"
+                     hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="isImporting || !registerAgreed"
               @click="handleImport"
             >
@@ -547,7 +511,7 @@
           <div class="flex items-center gap-2">
             <button
               class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors
-                     hover:border-primary hover:text-primary"
+                     hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
               :disabled="!registerLogs.length && !loginLogs.length && !registerTask && !loginTask && !automationError"
               @click="clearTaskLogs"
             >
@@ -568,7 +532,14 @@
 
           <div v-if="registerTask || loginTask" class="grid gap-3 text-xs text-muted-foreground">
             <div v-if="registerTask" class="space-y-1">
-              <div class="font-medium text-foreground">注册任务</div>
+              <div class="flex items-center gap-2 font-medium text-foreground">
+                <span
+                  class="h-2.5 w-2.5 rounded-full"
+                  :class="getTaskStatusIndicatorClass(registerTask)"
+                  aria-hidden="true"
+                ></span>
+                注册任务
+              </div>
               <div class="flex flex-wrap gap-x-4 gap-y-1">
                 <span>状态：{{ formatTaskStatus(registerTask.status) }}</span>
                 <span>进度：{{ registerTask.progress }}/{{ registerTask.count }}</span>
@@ -577,7 +548,14 @@
               </div>
             </div>
             <div v-if="loginTask" class="space-y-1">
-              <div class="font-medium text-foreground">刷新任务</div>
+              <div class="flex items-center gap-2 font-medium text-foreground">
+                <span
+                  class="h-2.5 w-2.5 rounded-full"
+                  :class="getTaskStatusIndicatorClass(loginTask)"
+                  aria-hidden="true"
+                ></span>
+                刷新任务
+              </div>
               <div class="flex flex-wrap gap-x-4 gap-y-1">
                 <span>状态：{{ formatTaskStatus(loginTask.status) }}</span>
                 <span>进度：{{ loginTask.progress }}/{{ loginTask.account_ids.length }}</span>
@@ -751,7 +729,7 @@
           </button>
           <button
             class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
-                   hover:opacity-90"
+                   hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             @click="saveConfigPanel"
             :disabled="configMasked"
           >
@@ -771,6 +749,7 @@ import SelectMenu from '@/components/ui/SelectMenu.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
+import { useToast } from '@/composables/useToast'
 import HelpTip from '@/components/ui/HelpTip.vue'
 import { accountsApi } from '@/api'
 import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
@@ -778,6 +757,7 @@ import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@
 const accountsStore = useAccountsStore()
 const { accounts, isLoading } = storeToRefs(accountsStore)
 const confirmDialog = useConfirmDialog()
+const toast = useToast()
 
 const searchQuery = ref('')
 const statusFilter = ref('all')
@@ -1101,6 +1081,7 @@ const handleImport = async () => {
     await refreshAccounts()
 
     selectedIds.value = new Set(importedIds)
+    toast.success(`成功导入 ${importedIds.length} 个账户`)
     closeRegisterModal()
 
     const confirmed = await confirmDialog.ask({
@@ -1115,6 +1096,7 @@ const handleImport = async () => {
     }
   } catch (error: any) {
     importError.value = error.message || '导入失败'
+    toast.error(error.message || '导入失败')
   } finally {
     isImporting.value = false
   }
@@ -1511,9 +1493,11 @@ const saveConfigPanel = async () => {
   try {
     const parsed = getConfigFromEditor()
     await accountsStore.updateConfig(parsed)
+    toast.success('配置保存成功')
     closeConfigPanel()
   } catch (error: any) {
     configError.value = error.message || '保存失败'
+    toast.error(error.message || '保存失败')
   }
 }
 
@@ -1537,15 +1521,22 @@ const saveEdit = async () => {
 
   try {
     await accountsStore.updateConfig(next)
+    toast.success('账号编辑成功')
     closeEdit()
   } catch (error: any) {
     editError.value = error.message || '保存失败'
+    toast.error(error.message || '保存失败')
   }
 }
 
 const handleBulkEnable = async () => {
-  await accountsStore.bulkEnable(Array.from(selectedIds.value))
-  selectedIds.value = new Set()
+  try {
+    await accountsStore.bulkEnable(Array.from(selectedIds.value))
+    toast.success('批量启用成功')
+    selectedIds.value = new Set()
+  } catch (error: any) {
+    toast.error(error.message || '批量启用失败')
+  }
 }
 
 const handleBulkDisable = async () => {
@@ -1554,8 +1545,13 @@ const handleBulkDisable = async () => {
     message: '确定要批量禁用选中的账号吗？',
   })
   if (!confirmed) return
-  await accountsStore.bulkDisable(Array.from(selectedIds.value))
-  selectedIds.value = new Set()
+  try {
+    await accountsStore.bulkDisable(Array.from(selectedIds.value))
+    toast.success('批量禁用成功')
+    selectedIds.value = new Set()
+  } catch (error: any) {
+    toast.error(error.message || '批量禁用失败')
+  }
 }
 
 const handleBulkDelete = async () => {
@@ -1565,12 +1561,22 @@ const handleBulkDelete = async () => {
     confirmText: '删除',
   })
   if (!confirmed) return
-  await accountsStore.bulkDelete(Array.from(selectedIds.value))
-  selectedIds.value = new Set()
+  try {
+    await accountsStore.bulkDelete(Array.from(selectedIds.value))
+    toast.success('批量删除成功')
+    selectedIds.value = new Set()
+  } catch (error: any) {
+    toast.error(error.message || '批量删除失败')
+  }
 }
 
 const handleEnable = async (accountId: string) => {
-  await accountsStore.enableAccount(accountId)
+  try {
+    await accountsStore.enableAccount(accountId)
+    toast.success('账号已启用')
+  } catch (error: any) {
+    toast.error(error.message || '启用失败')
+  }
 }
 
 const handleDisable = async (accountId: string) => {
@@ -1579,7 +1585,12 @@ const handleDisable = async (accountId: string) => {
     message: '确定要禁用该账号吗？',
   })
   if (!confirmed) return
-  await accountsStore.disableAccount(accountId)
+  try {
+    await accountsStore.disableAccount(accountId)
+    toast.success('账号已禁用')
+  } catch (error: any) {
+    toast.error(error.message || '禁用失败')
+  }
 }
 
 const handleDelete = async (accountId: string) => {
@@ -1589,7 +1600,12 @@ const handleDelete = async (accountId: string) => {
     confirmText: '删除',
   })
   if (!confirmed) return
-  await accountsStore.deleteAccount(accountId)
+  try {
+    await accountsStore.deleteAccount(accountId)
+    toast.success('账号已删除')
+  } catch (error: any) {
+    toast.error(error.message || '删除失败')
+  }
 }
 
 let registerTimer: number | null = null
@@ -1627,6 +1643,36 @@ const formatTaskStatus = (status: string) => {
   return status
 }
 
+const getTaskStatusIndicatorClass = (task: RegisterTask | LoginTask) => {
+  const status = task.status
+  const success = task.success_count ?? 0
+  const fail = task.fail_count ?? 0
+
+  // 执行中或等待中 - 蓝色
+  if (status === 'running' || status === 'pending') {
+    return 'bg-sky-400'
+  }
+
+  // 任务完成后根据成功失败情况判断
+  if (status === 'success' || status === 'failed') {
+    // 全部成功 - 绿色
+    if (success > 0 && fail === 0) {
+      return 'bg-emerald-400'
+    }
+    // 全部失败 - 红色
+    if (fail > 0 && success === 0) {
+      return 'bg-rose-500'
+    }
+    // 部分成功部分失败 - 黄色
+    if (success > 0 && fail > 0) {
+      return 'bg-amber-400'
+    }
+  }
+
+  // 默认灰色
+  return 'bg-muted-foreground'
+}
+
 const updateRegisterTask = async (taskId: string) => {
   if (isClearedRegisterTaskId(taskId)) {
     clearRegisterTimer()
@@ -1642,6 +1688,19 @@ const updateRegisterTask = async (taskId: string) => {
     isRegistering.value = false
     clearRegisterTimer()
     await refreshAccounts()
+
+    // 显示任务完成通知
+    const successCount = task.success_count || 0
+    const failCount = task.fail_count || 0
+    if (successCount > 0 && failCount > 0) {
+      toast.success(`注册任务完成：成功 ${successCount}，失败 ${failCount}`)
+    } else if (successCount > 0 && failCount === 0) {
+      toast.success(`注册任务完成：全部成功 (${successCount})`)
+    } else if (failCount > 0 && successCount === 0) {
+      toast.error(`注册任务完成：全部失败 (${failCount})`)
+    } else {
+      toast.error('注册任务失败')
+    }
   }
 }
 
@@ -1660,6 +1719,19 @@ const updateLoginTask = async (taskId: string) => {
     isRefreshing.value = false
     clearLoginTimer()
     await refreshAccounts()
+
+    // 显示任务完成通知
+    const successCount = task.success_count || 0
+    const failCount = task.fail_count || 0
+    if (successCount > 0 && failCount > 0) {
+      toast.success(`刷新任务完成：成功 ${successCount}，失败 ${failCount}`)
+    } else if (successCount > 0 && failCount === 0) {
+      toast.success(`刷新任务完成：全部成功 (${successCount})`)
+    } else if (failCount > 0 && successCount === 0) {
+      toast.error(`刷新任务完成：全部失败 (${failCount})`)
+    } else {
+      toast.error('刷新任务失败')
+    }
   }
 }
 
@@ -1757,6 +1829,8 @@ const handleRefreshSelected = async () => {
     const task = await accountsApi.startLogin(Array.from(selectedIds.value))
     syncLoginTask(task)
     startLoginPolling(task.id)
+    // 自动打开任务状态弹窗
+    openTaskModal()
   } catch (error: any) {
     automationError.value = error.message || '启动刷新失败'
     isRefreshing.value = false
@@ -1772,6 +1846,8 @@ const handleRefreshExpiring = async () => {
     if (current && 'id' in current) {
       syncLoginTask(current)
       startLoginPolling(current.id)
+      // 自动打开任务状态弹窗
+      openTaskModal()
       return
     }
     isRefreshing.value = false

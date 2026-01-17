@@ -9,7 +9,7 @@
         <p class="text-base font-semibold text-foreground">配置面板</p>
         <button
           class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
-                 hover:opacity-90"
+                 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="isSaving || !localSettings"
           @click="handleSave"
         >
@@ -65,9 +65,12 @@
                   <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
                     DuckMail SSL 校验
                   </Checkbox>
-                  <Checkbox v-model="localSettings.basic.browser_headless" class="w-full justify-end justify-self-end">
-                    无头浏览器
-                  </Checkbox>
+                  <div class="flex items-center justify-end gap-2">
+                    <Checkbox v-model="localSettings.basic.browser_headless">
+                      无头浏览器
+                    </Checkbox>
+                    <HelpTip text="若无头注册/刷新失败，建议关闭。" />
+                  </div>
                 </div>
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
@@ -210,6 +213,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useSettingsStore } from '@/stores'
+import { useToast } from '@/composables/useToast'
 import SelectMenu from '@/components/ui/SelectMenu.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
 import HelpTip from '@/components/ui/HelpTip.vue'
@@ -217,6 +221,7 @@ import type { Settings } from '@/types/api'
 
 const settingsStore = useSettingsStore()
 const { settings, isLoading } = storeToRefs(settingsStore)
+const toast = useToast()
 
 const localSettings = ref<Settings | null>(null)
 const isSaving = ref(false)
@@ -283,8 +288,10 @@ const handleSave = async () => {
 
   try {
     await settingsStore.updateSettings(localSettings.value)
+    toast.success('设置保存成功')
   } catch (error: any) {
     errorMessage.value = error.message || '保存失败'
+    toast.error(error.message || '保存失败')
   } finally {
     isSaving.value = false
   }

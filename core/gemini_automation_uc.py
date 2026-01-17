@@ -130,6 +130,10 @@ class GeminiAutomationUC:
             self._save_screenshot("continue_button_failed")
             return {"success": False, "error": f"failed to click continue: {e}"}
 
+        # 检查是否需要点击"发送验证码"按钮
+        if not self._click_send_code_button():
+            self._log("warning", "send code button not found, proceeding to code input")
+
         # 等待验证码输入框出现
         code_input = self._wait_for_code_input()
         if not code_input:
@@ -209,6 +213,47 @@ class GeminiAutomationUC:
         self._log("error", "login failed")
         self._save_screenshot("login_failed")
         return {"success": False, "error": "login failed"}
+
+    def _click_send_code_button(self) -> bool:
+        """点击发送验证码按钮（如果需要）"""
+        time.sleep(2)
+
+        # 方法1: 直接通过ID查找
+        try:
+            direct_btn = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.ID, "sign-in-with-email"))
+            )
+            self._log("info", "clicking send code button (by ID)")
+            self.driver.execute_script("arguments[0].click();", direct_btn)
+            time.sleep(2)
+            return True
+        except TimeoutException:
+            pass
+
+        # 方法2: 通过关键词查找按钮
+        keywords = ["通过电子邮件发送验证码", "通过电子邮件发送", "email", "Email", "Send code", "Send verification", "Verification code"]
+        try:
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                text = btn.text.strip() if btn.text else ""
+                if text and any(kw in text for kw in keywords):
+                    self._log("info", f"clicking send code button (by text: {text[:30]})")
+                    self.driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(2)
+                    return True
+        except Exception:
+            pass
+
+        # 方法3: 检查是否已经在验证码输入页面
+        try:
+            code_input = self.driver.find_element(By.CSS_SELECTOR, "input[name='pinInput']")
+            if code_input:
+                self._log("info", "already on code input page")
+                return True
+        except NoSuchElementException:
+            pass
+
+        return False
 
     def _wait_for_code_input(self, timeout: int = 30):
         """等待验证码输入框出现"""

@@ -435,7 +435,8 @@
               class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
             />
             <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              默认域名（可在配置面板修改，推荐使用）
+              <p>默认域名（可在配置面板修改，推荐使用）</p>
+              <p class="mt-1">注册失败建议关闭无头浏览器再试</p>
             </div>
           </div>
 
@@ -450,7 +451,8 @@
               <p>支持两种格式：</p>
               <p class="mt-1 font-mono">duckmail----email----password</p>
               <p class="mt-1 font-mono">email----password----clientId----refreshToken</p>
-              <p class="mt-2 text-[11px]">导入后请执行一次"刷新选中"以获取 Cookie。</p>
+              <p class="mt-2">导入后请执行一次"刷新选中"以获取 Cookie。</p>
+              <p class="mt-1">注册失败建议关闭无头浏览器再试</p>
             </div>
             <div v-if="importError" class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
               {{ importError }}

@@ -228,6 +228,42 @@
               </div>
             </div>
           </div>
+
+          <div class="space-y-2">
+            <p class="text-sm font-semibold">常见问题</p>
+            <div class="mt-3 space-y-3 text-xs text-muted-foreground">
+              <div class="rounded-2xl border border-border bg-muted/30 p-4">
+                <p class="font-medium text-foreground">❓ 自动注册/刷新失败怎么办？</p>
+                <p class="mt-2">关闭无头浏览器可以直接看到问题所在：</p>
+                <ul class="mt-2 space-y-1 pl-4">
+                  <li>• 前往"配置面板"，找到"自动化配置"部分</li>
+                  <li>• 取消勾选"无头模式"</li>
+                  <li>• 重新执行注册/刷新操作，观察浏览器窗口</li>
+                </ul>
+                <p class="mt-3 font-medium text-foreground">可能的原因：</p>
+                <ul class="mt-2 space-y-1 pl-4">
+                  <li>• <strong>IP 被检测拦截：</strong>同一 IP 多次注册有风控，建议更换合适的 IP</li>
+                  <li>• <strong>验证码问题：</strong>Google 可能要求人机验证</li>
+                  <li>• <strong>网络问题：</strong>检查网络连接是否稳定</li>
+                </ul>
+              </div>
+
+              <div class="rounded-2xl border border-border bg-muted/30 p-4">
+                <p class="font-medium text-foreground">❓ 503 Service Unavailable 错误</p>
+                <p class="mt-2">如果后台日志出现以下错误：</p>
+                <pre class="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl border border-border bg-card px-3 py-2 text-[11px] font-mono">INFO:     127.0.0.1:7860 - "GET /admin/register/current HTTP/1.1" 503 Service Unavailable
+INFO:     127.0.0.1:7860 - "GET /admin/login/current HTTP/1.1" 503 Service Unavailable
+INFO:     127.0.0.1:7860 - "POST /admin/register/start HTTP/1.1" 503 Service Unavailable</pre>
+                <p class="mt-3 font-medium text-foreground">解决方法：</p>
+                <ul class="mt-2 space-y-1 pl-4">
+                  <li>• 这是 undetected-chromedriver 没有正常启动导致的</li>
+                  <li>• 在虚拟环境内重新安装依赖：<code class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px]">pip install -r requirements.txt</code></li>
+                  <li>• 删除之前的进程（检查是否有残留的 Chrome 进程）</li>
+                  <li>• 重新启动服务</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- 使用声明 -->

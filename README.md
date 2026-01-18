@@ -17,6 +17,8 @@
 
 <p align="center"><em>注意：HF Spaces 部署不支持自动注册/刷新功能（需 Chrome 浏览器），请手动添加账号</em></p>
 
+<p align="center"><em>💡 提示：远程环境(Hugging Face/Linux)和本地环境可共用同一数据库，账户数据将自动保持同步</em></p>
+
 <p align="center">将 Gemini Business 转换为 OpenAI 兼容接口，支持多账号负载均衡、图像生成、多模态能力与内置管理面板。</p>
 
 ---
@@ -126,9 +128,12 @@ pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```bash
 docker build -t gemini-business2api .
 docker run -d -p 7860:7860 \
+  -v ./data:/app/data \
   -e ADMIN_KEY=your_admin_key \
   gemini-business2api
 ```
+
+感谢 [PR #9](https://github.com/Dreamy-rain/gemini-business2api/pull/9) 优化 Dockerfile 构建
 
 ### 更新
 
@@ -149,7 +154,9 @@ setup.bat --update
 
 更新脚本会自动备份配置、拉取最新代码、更新依赖并构建前端。
 
-### 数据库持久化（可选）
+### 数据库持久化（可选）（强烈推荐）
+
+💡 提示：远程环境(Hugging Face/Linux)和本地环境可共用同一数据库，账户数据将自动保持同步
 
 - HF Spaces 环境建议开启，否则重启会丢数据
 - 设置 `DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require`

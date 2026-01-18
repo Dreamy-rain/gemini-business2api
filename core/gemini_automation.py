@@ -86,7 +86,6 @@ class GeminiAutomation:
         if self.proxy:
             options.set_argument(f"--proxy-server={self.proxy}")
 
-        options.auto_port()
         page = ChromiumPage(options)
         page.set.timeouts(self.timeout)
 

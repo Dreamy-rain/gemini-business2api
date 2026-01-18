@@ -147,36 +147,52 @@ class DuckMailClient:
             if not messages:
                 return None
 
-            # 只获取最新一封邮件，不做时间过滤
-            msg_id = messages[0].get("id")
-            if not msg_id:
-                return None
+            # 遍历邮件，过滤时间
+            for msg in messages:
+                msg_id = msg.get("id")
+                if not msg_id:
+                    continue
 
-            detail = self._request(
-                "GET",
-                f"{self.base_url}/messages/{msg_id}",
-                headers={"Authorization": f"Bearer {self.token}"},
-            )
+                # 时间过滤
+                if since_time:
+                    created_at = msg.get("createdAt")
+                    if created_at:
+                        from datetime import datetime
+                        import re
+                        # 截断纳秒到微秒（fromisoformat 只支持6位小数）
+                        created_at = re.sub(r'(\.\d{6})\d+', r'\1', created_at)
+                        # 转换 UTC 时间到本地时区
+                        msg_time = datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone().replace(tzinfo=None)
+                        if msg_time < since_time:
+                            continue
 
-            if detail.status_code != 200:
-                return None
+                detail = self._request(
+                    "GET",
+                    f"{self.base_url}/messages/{msg_id}",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                )
 
-            payload = detail.json() if detail.content else {}
+                if detail.status_code != 200:
+                    continue
 
-            # 获取邮件内容
-            text_content = payload.get("text") or ""
-            html_content = payload.get("html") or ""
+                payload = detail.json() if detail.content else {}
 
-            if isinstance(html_content, list):
-                html_content = "".join(str(item) for item in html_content)
-            if isinstance(text_content, list):
-                text_content = "".join(str(item) for item in text_content)
+                # 获取邮件内容
+                text_content = payload.get("text") or ""
+                html_content = payload.get("html") or ""
 
-            content = text_content + html_content
-            code = extract_verification_code(content)
-            if code:
-                self._log("info", f"code found: {code}")
-            return code
+                if isinstance(html_content, list):
+                    html_content = "".join(str(item) for item in html_content)
+                if isinstance(text_content, list):
+                    text_content = "".join(str(item) for item in text_content)
+
+                content = text_content + html_content
+                code = extract_verification_code(content)
+                if code:
+                    self._log("info", f"code found: {code}")
+                    return code
+
+            return None
 
         except Exception as e:
             self._log("error", f"fetch code failed: {e}")

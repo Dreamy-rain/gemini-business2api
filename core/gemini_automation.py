@@ -118,6 +118,10 @@ class GeminiAutomation:
     def _run_flow(self, page, email: str, mail_client) -> dict:
         """执行登录流程"""
 
+        # 记录开始时间，用于邮件时间过滤
+        from datetime import datetime
+        send_time = datetime.now()
+
         # Step 1: 导航到首页并设置 Cookie
         self._log("info", f"navigating to login page for {email}")
 
@@ -156,10 +160,7 @@ class GeminiAutomation:
         if has_business_params:
             return self._extract_config(page, email)
 
-        # Step 3: 记录发送验证码的时间并触发发送
-        from datetime import datetime
-        send_time = datetime.now()
-
+        # Step 3: 点击发送验证码按钮
         self._log("info", "clicking send verification code button")
         if not self._click_send_code_button(page):
             self._log("error", "send code button not found")
@@ -179,12 +180,11 @@ class GeminiAutomation:
 
         if not code:
             self._log("warning", "verification code timeout, trying to resend")
+            # 更新发送时间（在点击按钮之前记录）
+            send_time = datetime.now()
             # 尝试点击重新发送按钮
             if self._click_resend_code_button(page):
                 self._log("info", "resend button clicked, waiting for new code")
-                # 更新发送时间
-                from datetime import datetime
-                send_time = datetime.now()
                 # 再次轮询验证码
                 code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
                 if not code:

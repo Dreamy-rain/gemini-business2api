@@ -79,6 +79,10 @@ bash setup.sh
 
 cp .env.example .env
 # Edit .env to set ADMIN_KEY
+
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
 python main.py
 
 # Run with pm2 in background
@@ -94,6 +98,10 @@ setup.bat
 
 copy .env.example .env
 # Edit .env to set ADMIN_KEY
+
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
 python main.py
 
 # Run with pm2 in background
@@ -135,16 +143,33 @@ cp .env.example .env
 # win copy .env.example .env
 # Edit .env to set ADMIN_KEY
 python main.py
+
+# Run with pm2 in background
+# Make sure you're in the project directory
+pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```
 
-### Method 3: Docker
+### Method 3: Docker Compose (Recommended for Production)
+
+**Supports ARM64 and AMD64 architectures**
 
 ```bash
-docker build -t gemini-business2api .
-docker run -d -p 7860:7860 \
-  -v ./data:/app/data \
-  -e ADMIN_KEY=your_admin_key \
-  gemini-business2api
+# 1. Clone the repository
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+
+# 2. Configure environment variables
+cp .env.example .env
+# Edit .env to set ADMIN_KEY
+
+# 3. Start the service
+docker-compose up -d
+
+# 4. View logs
+docker-compose logs -f
+
+# 5. Update to the latest version
+docker-compose pull && docker-compose up -d
 ```
 
 Thanks to [PR #9](https://github.com/Dreamy-rain/gemini-business2api/pull/9) for optimizing the Dockerfile build

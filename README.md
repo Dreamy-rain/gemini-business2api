@@ -80,6 +80,10 @@ bash setup.sh
 
 cp .env.example .env
 # 编辑 .env 设置 ADMIN_KEY
+
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
 python main.py
 
 # pm2后台运行
@@ -95,6 +99,10 @@ setup.bat
 
 copy .env.example .env
 # 编辑 .env 设置 ADMIN_KEY
+
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate.bat  # Windows
+
 python main.py
 
 # pm2后台运行
@@ -142,14 +150,27 @@ python main.py
 pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```
 
-### 方式三：Docker
+### 方式三：Docker Compose（推荐用于生产环境）
+
+**支持 ARM64 和 AMD64 架构**
 
 ```bash
-docker build -t gemini-business2api .
-docker run -d -p 7860:7860 \
-  -v ./data:/app/data \
-  -e ADMIN_KEY=your_admin_key \
-  gemini-business2api
+# 1. 克隆仓库
+git clone https://github.com/Dreamy-rain/gemini-business2api.git
+cd gemini-business2api
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 设置 ADMIN_KEY
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 查看日志
+docker-compose logs -f
+
+# 5. 更新到最新版本
+docker-compose pull && docker-compose up -d
 ```
 
 感谢 [PR #9](https://github.com/Dreamy-rain/gemini-business2api/pull/9) 优化 Dockerfile 构建

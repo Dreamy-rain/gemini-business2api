@@ -98,6 +98,23 @@ class GeminiAutomation:
                     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
                     Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
                     window.chrome = {runtime: {}};
+
+                    // 额外的反检测措施
+                    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 1});
+                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                    Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+
+                    // 隐藏 headless 特征
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                    // 模拟真实的 permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({state: Notification.permission}) :
+                            originalQuery(parameters)
+                    );
                 """)
             except Exception:
                 pass
@@ -167,9 +184,23 @@ class GeminiAutomation:
         code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
         if not code:
-            self._log("error", "verification code timeout")
-            self._save_screenshot(page, "code_timeout")
-            return {"success": False, "error": "verification code timeout"}
+            self._log("warning", "verification code timeout, trying to resend")
+            # 尝试点击重新发送按钮
+            if self._click_resend_code_button(page):
+                self._log("info", "resend button clicked, waiting for new code")
+                # 更新发送时间
+                from datetime import datetime
+                send_time = datetime.now()
+                # 再次轮询验证码
+                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+                if not code:
+                    self._log("error", "verification code timeout after resend")
+                    self._save_screenshot(page, "code_timeout_after_resend")
+                    return {"success": False, "error": "verification code timeout after resend"}
+            else:
+                self._log("error", "verification code timeout and resend button not found")
+                self._save_screenshot(page, "code_timeout")
+                return {"success": False, "error": "verification code timeout"}
 
         self._log("info", f"code received: {code}")
 
@@ -194,33 +225,53 @@ class GeminiAutomation:
             else:
                 code_input.input("\n")
 
-        time.sleep(5)
+        # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
+        self._log("info", "waiting for auto-redirect after verification")
+        time.sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
 
-        # Step 7: 处理协议页面（如果有）
+        # 记录当前 URL 状态
+        current_url = page.url
+        self._log("info", f"current URL after verification: {current_url}")
+
+        # Step 8: 处理协议页面（如果有）
         self._handle_agreement_page(page)
 
-        # Step 8: 导航到业务页面并等待参数生成
-        self._log("info", "navigating to business page")
-        page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(3)
+        # Step 9: 检查是否已经在正确的页面
+        current_url = page.url
+        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
 
-        # Step 9: 检查是否需要设置用户名
+        if has_business_params:
+            # 已经在正确的页面，不需要再次导航
+            self._log("info", "already on business page with parameters")
+            return self._extract_config(page, email)
+
+        # Step 10: 如果不在正确的页面，尝试导航
+        if "business.gemini.google" not in current_url:
+            self._log("info", "navigating to business page")
+            page.get("https://business.gemini.google/", timeout=self.timeout)
+            time.sleep(5)  # 增加等待时间
+            current_url = page.url
+            self._log("info", f"URL after navigation: {current_url}")
+
+        # Step 11: 检查是否需要设置用户名
         if "cid" not in page.url:
             if self._handle_username_setup(page):
-                time.sleep(3)
+                time.sleep(5)  # 增加等待时间
 
-        # Step 10: 等待 URL 参数生成（csesidx 和 cid）
+        # Step 12: 等待 URL 参数生成（csesidx 和 cid）
         self._log("info", "waiting for URL parameters")
         if not self._wait_for_business_params(page):
             self._log("warning", "URL parameters not generated, trying refresh")
             page.refresh()
-            time.sleep(3)
+            time.sleep(5)  # 增加等待时间
             if not self._wait_for_business_params(page):
                 self._log("error", "URL parameters generation failed")
+                current_url = page.url
+                self._log("error", f"final URL: {current_url}")
                 self._save_screenshot(page, "params_missing")
                 return {"success": False, "error": "URL parameters not found"}
 
-        # Step 11: 提取配置
+        # Step 13: 提取配置
         self._log("info", "login success")
         return self._extract_config(page, email)
 
@@ -289,6 +340,28 @@ class GeminiAutomation:
         except Exception:
             pass
         return None
+
+    def _click_resend_code_button(self, page) -> bool:
+        """点击重新发送验证码按钮"""
+        time.sleep(2)
+
+        # 查找包含重新发送关键词的按钮（与 _find_verify_button 相反）
+        try:
+            buttons = page.eles("tag:button")
+            for btn in buttons:
+                text = (btn.text or "").strip().lower()
+                if text and ("重新" in text or "resend" in text):
+                    try:
+                        self._log("info", f"found resend button: {text}")
+                        btn.click()
+                        time.sleep(2)
+                        return True
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return False
 
     def _handle_agreement_page(self, page) -> None:
         """处理协议页面"""

@@ -55,37 +55,32 @@ class GeminiAutomation:
     def _create_page(self) -> ChromiumPage:
         """创建浏览器页面"""
         options = ChromiumOptions()
-
-        # Docker 环境检测：检查是否存在 /usr/bin/chromium
-        import os
-        if os.path.exists("/usr/bin/chromium"):
-            options.set_browser_path("/usr/bin/chromium")
-
-        # 核心参数（Docker 必需）
+        options.set_argument("--incognito")
         options.set_argument("--no-sandbox")
         options.set_argument("--disable-setuid-sandbox")
-        options.set_argument("--disable-dev-shm-usage")
-        options.set_argument("--disable-gpu")
-
-        # 无头模式配置
-        if self.headless:
-            options.set_argument("--headless=new")
-            options.set_argument("--remote-debugging-port=9222")
-            options.set_argument("--user-data-dir=/tmp/chrome-profile")
-
-        # 反检测参数
-        options.set_argument("--incognito")
         options.set_argument("--disable-blink-features=AutomationControlled")
         options.set_argument("--window-size=1280,800")
-        options.set_argument("--no-first-run")
-        options.set_argument("--disable-extensions")
-        options.set_argument("--disable-infobars")
-        options.set_argument("--lang=zh-CN,zh")
         options.set_user_agent(self.user_agent)
+
+        # 语言设置（确保使用中文界面）
+        options.set_argument("--lang=zh-CN")
+        options.set_pref("intl.accept_languages", "zh-CN,zh")
 
         if self.proxy:
             options.set_argument(f"--proxy-server={self.proxy}")
 
+        if self.headless:
+            # 使用新版无头模式，更接近真实浏览器
+            options.set_argument("--headless=new")
+            options.set_argument("--disable-gpu")
+            options.set_argument("--disable-dev-shm-usage")
+            options.set_argument("--no-first-run")
+            options.set_argument("--disable-extensions")
+            # 反检测参数
+            options.set_argument("--disable-infobars")
+            options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
+
+        options.auto_port()
         page = ChromiumPage(options)
         page.set.timeouts(self.timeout)
 
@@ -97,6 +92,23 @@ class GeminiAutomation:
                     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
                     Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
                     window.chrome = {runtime: {}};
+
+                    // 额外的反检测措施
+                    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 1});
+                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                    Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+
+                    // 隐藏 headless 特征
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                    // 模拟真实的 permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' ?
+                            Promise.resolve({state: Notification.permission}) :
+                            originalQuery(parameters)
+                    );
                 """)
             except Exception:
                 pass
@@ -105,6 +117,10 @@ class GeminiAutomation:
 
     def _run_flow(self, page, email: str, mail_client) -> dict:
         """执行登录流程"""
+
+        # 记录开始时间，用于邮件时间过滤
+        from datetime import datetime
+        send_time = datetime.now()
 
         # Step 1: 导航到首页并设置 Cookie
         self._log("info", f"navigating to login page for {email}")
@@ -144,10 +160,7 @@ class GeminiAutomation:
         if has_business_params:
             return self._extract_config(page, email)
 
-        # Step 3: 记录发送验证码的时间并触发发送
-        from datetime import datetime
-        send_time = datetime.now()
-
+        # Step 3: 点击发送验证码按钮
         self._log("info", "clicking send verification code button")
         if not self._click_send_code_button(page):
             self._log("error", "send code button not found")
@@ -166,9 +179,22 @@ class GeminiAutomation:
         code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
         if not code:
-            self._log("error", "verification code timeout")
-            self._save_screenshot(page, "code_timeout")
-            return {"success": False, "error": "verification code timeout"}
+            self._log("warning", "verification code timeout, trying to resend")
+            # 更新发送时间（在点击按钮之前记录）
+            send_time = datetime.now()
+            # 尝试点击重新发送按钮
+            if self._click_resend_code_button(page):
+                self._log("info", "resend button clicked, waiting for new code")
+                # 再次轮询验证码
+                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+                if not code:
+                    self._log("error", "verification code timeout after resend")
+                    self._save_screenshot(page, "code_timeout_after_resend")
+                    return {"success": False, "error": "verification code timeout after resend"}
+            else:
+                self._log("error", "verification code timeout and resend button not found")
+                self._save_screenshot(page, "code_timeout")
+                return {"success": False, "error": "verification code timeout"}
 
         self._log("info", f"code received: {code}")
 
@@ -180,46 +206,76 @@ class GeminiAutomation:
             self._log("error", "code input expired")
             return {"success": False, "error": "code input expired"}
 
+        self._log("info", "inputting verification code")
         code_input.input(code, clear=True)
         time.sleep(0.5)
 
         verify_btn = page.ele("css:button[jsname='XooR8e']", timeout=3)
         if verify_btn:
+            self._log("info", "clicking verify button (method 1)")
             verify_btn.click()
         else:
             verify_btn = self._find_verify_button(page)
             if verify_btn:
+                self._log("info", "clicking verify button (method 2)")
                 verify_btn.click()
             else:
+                self._log("info", "pressing enter to submit")
                 code_input.input("\n")
 
-        time.sleep(5)
+        # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
+        self._log("info", "waiting for auto-redirect after verification")
+        time.sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
 
-        # Step 7: 处理协议页面（如果有）
+        # 记录当前 URL 状态
+        current_url = page.url
+        self._log("info", f"current URL after verification: {current_url}")
+
+        # 检查是否还停留在验证码页面（说明提交失败）
+        if "verify-oob-code" in current_url:
+            self._log("error", "verification code submission failed, still on verification page")
+            self._save_screenshot(page, "verification_submit_failed")
+            return {"success": False, "error": "verification code submission failed"}
+
+        # Step 8: 处理协议页面（如果有）
         self._handle_agreement_page(page)
 
-        # Step 8: 导航到业务页面并等待参数生成
-        self._log("info", "navigating to business page")
-        page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(3)
+        # Step 9: 检查是否已经在正确的页面
+        current_url = page.url
+        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
 
-        # Step 9: 检查是否需要设置用户名
+        if has_business_params:
+            # 已经在正确的页面，不需要再次导航
+            self._log("info", "already on business page with parameters")
+            return self._extract_config(page, email)
+
+        # Step 10: 如果不在正确的页面，尝试导航
+        if "business.gemini.google" not in current_url:
+            self._log("info", "navigating to business page")
+            page.get("https://business.gemini.google/", timeout=self.timeout)
+            time.sleep(5)  # 增加等待时间
+            current_url = page.url
+            self._log("info", f"URL after navigation: {current_url}")
+
+        # Step 11: 检查是否需要设置用户名
         if "cid" not in page.url:
             if self._handle_username_setup(page):
-                time.sleep(3)
+                time.sleep(5)  # 增加等待时间
 
-        # Step 10: 等待 URL 参数生成（csesidx 和 cid）
+        # Step 12: 等待 URL 参数生成（csesidx 和 cid）
         self._log("info", "waiting for URL parameters")
         if not self._wait_for_business_params(page):
             self._log("warning", "URL parameters not generated, trying refresh")
             page.refresh()
-            time.sleep(3)
+            time.sleep(5)  # 增加等待时间
             if not self._wait_for_business_params(page):
                 self._log("error", "URL parameters generation failed")
+                current_url = page.url
+                self._log("error", f"final URL: {current_url}")
                 self._save_screenshot(page, "params_missing")
                 return {"success": False, "error": "URL parameters not found"}
 
-        # Step 11: 提取配置
+        # Step 13: 提取配置
         self._log("info", "login success")
         return self._extract_config(page, email)
 
@@ -288,6 +344,28 @@ class GeminiAutomation:
         except Exception:
             pass
         return None
+
+    def _click_resend_code_button(self, page) -> bool:
+        """点击重新发送验证码按钮"""
+        time.sleep(2)
+
+        # 查找包含重新发送关键词的按钮（与 _find_verify_button 相反）
+        try:
+            buttons = page.eles("tag:button")
+            for btn in buttons:
+                text = (btn.text or "").strip().lower()
+                if text and ("重新" in text or "resend" in text):
+                    try:
+                        self._log("info", f"found resend button: {text}")
+                        btn.click()
+                        time.sleep(2)
+                        return True
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return False
 
     def _handle_agreement_page(self, page) -> None:
         """处理协议页面"""

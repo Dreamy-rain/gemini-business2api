@@ -67,6 +67,12 @@ class GeminiAutomationUC:
         options.add_argument("--disable-setuid-sandbox")
         options.add_argument("--window-size=1280,800")
 
+        # 语言设置（确保使用中文界面）
+        options.add_argument("--lang=zh-CN")
+        options.add_experimental_option("prefs", {
+            "intl.accept_languages": "zh-CN,zh"
+        })
+
         # 代理设置
         if self.proxy:
             options.add_argument(f"--proxy-server={self.proxy}")
@@ -94,6 +100,10 @@ class GeminiAutomationUC:
 
     def _run_flow(self, email: str, mail_client) -> dict:
         """执行登录流程"""
+
+        # 记录开始时间，用于邮件时间过滤
+        from datetime import datetime
+        send_time = datetime.now()
 
         self._log("info", f"navigating to login page for {email}")
 
@@ -136,10 +146,6 @@ class GeminiAutomationUC:
             self._log("error", f"failed to click continue: {e}")
             self._save_screenshot("continue_button_failed")
             return {"success": False, "error": f"failed to click continue: {e}"}
-
-        # 记录发送验证码的时间
-        from datetime import datetime
-        send_time = datetime.now()
 
         # 检查是否需要点击"发送验证码"按钮
         self._log("info", "clicking send verification code button")

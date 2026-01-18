@@ -212,17 +212,21 @@ class GeminiAutomation:
             self._log("error", "code input expired")
             return {"success": False, "error": "code input expired"}
 
+        self._log("info", "inputting verification code")
         code_input.input(code, clear=True)
         time.sleep(0.5)
 
         verify_btn = page.ele("css:button[jsname='XooR8e']", timeout=3)
         if verify_btn:
+            self._log("info", "clicking verify button (method 1)")
             verify_btn.click()
         else:
             verify_btn = self._find_verify_button(page)
             if verify_btn:
+                self._log("info", "clicking verify button (method 2)")
                 verify_btn.click()
             else:
+                self._log("info", "pressing enter to submit")
                 code_input.input("\n")
 
         # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）

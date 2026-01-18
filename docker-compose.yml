@@ -1,10 +1,16 @@
 services:
   gemini-api:
-    build: .
+    image: cooooookk/gemini-business2api:latest
+    container_name: gemini-business2api
+    restart: unless-stopped
     ports:
-      - "7860:7860"
+      - "127.0.0.1:7860:7860"
     volumes:
       - ./data:/app/data
+    environment:
+      - ADMIN_KEY=${ADMIN_KEY}
     env_file:
       - .env
-    restart: unless-stopped
+    shm_size: 2g
+    security_opt:
+      - seccomp:unconfined

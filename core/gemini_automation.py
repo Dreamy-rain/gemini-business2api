@@ -55,27 +55,36 @@ class GeminiAutomation:
     def _create_page(self) -> ChromiumPage:
         """创建浏览器页面"""
         options = ChromiumOptions()
-        options.set_argument("--incognito")
+
+        # Docker 环境检测：检查是否存在 /usr/bin/chromium
+        import os
+        if os.path.exists("/usr/bin/chromium"):
+            options.set_browser_path("/usr/bin/chromium")
+
+        # 核心参数（Docker 必需）
         options.set_argument("--no-sandbox")
         options.set_argument("--disable-setuid-sandbox")
+        options.set_argument("--disable-dev-shm-usage")
+        options.set_argument("--disable-gpu")
+
+        # 无头模式配置
+        if self.headless:
+            options.set_argument("--headless=new")
+            options.set_argument("--remote-debugging-port=9222")
+            options.set_argument("--user-data-dir=/tmp/chrome-profile")
+
+        # 反检测参数
+        options.set_argument("--incognito")
         options.set_argument("--disable-blink-features=AutomationControlled")
         options.set_argument("--window-size=1280,800")
+        options.set_argument("--no-first-run")
+        options.set_argument("--disable-extensions")
+        options.set_argument("--disable-infobars")
+        options.set_argument("--lang=zh-CN,zh")
         options.set_user_agent(self.user_agent)
 
         if self.proxy:
             options.set_argument(f"--proxy-server={self.proxy}")
-
-        if self.headless:
-            # 使用新版无头模式，更接近真实浏览器
-            options.set_argument("--headless=new")
-            options.set_argument("--disable-gpu")
-            options.set_argument("--disable-dev-shm-usage")
-            options.set_argument("--no-first-run")
-            options.set_argument("--disable-extensions")
-            # 反检测参数
-            options.set_argument("--disable-infobars")
-            options.set_argument("--lang=zh-CN,zh")
-            options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
 
         options.auto_port()
         page = ChromiumPage(options)

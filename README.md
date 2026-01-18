@@ -77,6 +77,14 @@
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
 bash setup.sh
+
+cp .env.example .env
+# 编辑 .env 设置 ADMIN_KEY
+python main.py
+
+# pm2后台运行
+# 确保你在项目目录下
+pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```
 
 **Windows:**
@@ -84,16 +92,26 @@ bash setup.sh
 git clone https://github.com/Dreamy-rain/gemini-business2api.git
 cd gemini-business2api
 setup.bat
+
+copy .env.example .env
+# 编辑 .env 设置 ADMIN_KEY
+python main.py
+
+# pm2后台运行
+# 确保你在项目目录下
+pm2 start main.py --name gemini-api --interpreter ./.venv/bin/python3
 ```
 
-安装脚本会自动完成：
-- 同步最新代码
-- 构建前端
-- 创建 Python 虚拟环境
-- 安装依赖
-- 创建配置文件
+**脚本功能：**
+- ✅ 自动同步最新代码
+- ✅ 更新前端到最新版本
+- ✅ 创建/更新 Python 虚拟环境
+- ✅ 安装/更新依赖
+- ✅ 自动创建 `.env` 配置文件（如不存在）
 
-完成后编辑 `.env` 设置 `ADMIN_KEY`，然后运行 `python main.py`
+**首次安装：** 完成后编辑 `.env` 设置 `ADMIN_KEY`，然后运行 `python main.py`
+
+**更新项目：** 直接运行相同命令即可，脚本会自动更新所有组件（代码、依赖、前端）
 
 ### 方式二：手动部署
 
@@ -115,6 +133,7 @@ source .venv/bin/activate  # Linux/macOS
 # 安装 Python 依赖
 pip install -r requirements.txt
 cp .env.example .env
+# win copy .env.example .env
 # 编辑 .env 设置 ADMIN_KEY
 python main.py
 
@@ -135,24 +154,6 @@ docker run -d -p 7860:7860 \
 
 感谢 [PR #9](https://github.com/Dreamy-rain/gemini-business2api/pull/9) 优化 Dockerfile 构建
 
-### 更新
-
-**Linux/macOS:**
-```bash
-bash setup.sh --update
-```
-
-**Windows:**
-```cmd
-setup.bat --update
-```
-
-**HuggingFace:**
-```
-暂时只能重新部署更新，记得保存数据，建议用 PostgreSQL
-```
-
-更新脚本会自动备份配置、拉取最新代码、更新依赖并构建前端。
 
 ### 数据库持久化（可选）（强烈推荐）
 

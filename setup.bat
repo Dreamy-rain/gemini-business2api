@@ -1,25 +1,13 @@
 @echo off
-REM Gemini Business2API Unified Setup Script for Windows
-REM This script handles both initial deployment and updates
-REM Usage:
-REM   setup.bat          - Initial deployment
-REM   setup.bat --update - Update existing installation
+REM Gemini Business2API Setup Script
+REM Handles both installation and updates automatically
+REM Usage: setup.bat
 
 setlocal enabledelayedexpansion
 
 echo ==========================================
 echo Gemini Business2API Setup Script
 echo ==========================================
-echo.
-
-REM Determine mode (initial deployment or update)
-set UPDATE_MODE=false
-if "%1"=="--update" (
-    set UPDATE_MODE=true
-    echo [INFO] Running in UPDATE mode
-) else (
-    echo [INFO] Running in INITIAL DEPLOYMENT mode
-)
 echo.
 
 REM Check if git is installed
@@ -36,20 +24,8 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Step 1: Backup .env file (update mode only)
-if "%UPDATE_MODE%"=="true" (
-    echo [STEP] Step 1: Backing up configuration...
-    if exist .env (
-        copy .env .env.backup >nul
-        echo [SUCCESS] .env backed up to .env.backup
-    ) else (
-        echo [INFO] No .env file found, skipping backup
-    )
-    echo.
-)
-
-REM Step 2: Pull latest code from git (both modes)
-echo [STEP] Step 2: Syncing code from repository...
+REM Step 1: Pull latest code from git
+echo [STEP] Step 1: Syncing code from repository...
 echo [INFO] Fetching latest changes...
 git fetch origin
 
@@ -58,39 +34,28 @@ git pull origin main 2>nul || git pull origin master 2>nul
 if %errorlevel% equ 0 (
     echo [SUCCESS] Code synchronized successfully
 ) else (
-    echo [INFO] No remote changes to pull (this is normal for initial deployment)
+    echo [INFO] No remote changes to pull
 )
 echo.
 
-REM Step 3: Restore .env file (update mode only)
-if "%UPDATE_MODE%"=="true" (
-    if exist .env.backup (
-        echo [STEP] Step 3: Restoring configuration...
-        move /y .env.backup .env >nul
-        echo [SUCCESS] .env restored
-        echo.
-    )
-)
-
-REM Step 4: Setup .env file (initial deployment only)
-if "%UPDATE_MODE%"=="false" (
-    echo [STEP] Step 3: Setting up configuration...
-    if exist .env (
-        echo [INFO] .env file already exists, skipping
+REM Step 2: Setup .env file if it doesn't exist
+echo [STEP] Step 2: Checking configuration...
+if exist .env (
+    echo [INFO] .env file exists
+) else (
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo [SUCCESS] .env file created from .env.example
+        echo [INFO] Please edit .env and configure your ADMIN_KEY
     ) else (
-        if exist .env.example (
-            copy .env.example .env >nul
-            echo [SUCCESS] .env file created from .env.example
-        ) else (
-            echo [ERROR] .env.example not found
-            exit /b 1
-        )
+        echo [ERROR] .env.example not found
+        exit /b 1
     )
-    echo.
 )
+echo.
 
-REM Step 5: Setup Python virtual environment
-echo [STEP] Step 4: Setting up Python environment...
+REM Step 3: Setup Python virtual environment
+echo [STEP] Step 3: Setting up Python environment...
 if exist .venv (
     echo [INFO] Virtual environment already exists
 ) else (
@@ -107,39 +72,30 @@ python -m pip install --upgrade pip --quiet
 echo [SUCCESS] Pip upgraded
 echo.
 
-REM Step 6: Install/Update Python dependencies
-echo [STEP] Step 5: Installing Python dependencies...
-if "%UPDATE_MODE%"=="true" (
-    pip install -r requirements.txt --upgrade
-    echo [SUCCESS] Python dependencies updated
-) else (
-    pip install -r requirements.txt
-    echo [SUCCESS] Python dependencies installed
-)
+REM Step 4: Install/Update Python dependencies
+echo [STEP] Step 4: Installing Python dependencies...
+pip install -r requirements.txt --upgrade
+echo [SUCCESS] Python dependencies installed
 echo.
 
-REM Step 7: Setup frontend
-echo [STEP] Step 6: Setting up frontend...
+REM Step 5: Setup frontend
+echo [STEP] Step 5: Setting up frontend...
 if exist frontend (
     cd frontend
 
     REM Check if npm is installed
     where npm >nul 2>nul
     if %errorlevel% equ 0 (
-        echo [INFO] Installing frontend dependencies...
+        echo [INFO] Installing dependencies...
         call npm install
 
         echo [INFO] Building frontend...
         call npm run build
         echo [SUCCESS] Frontend built successfully
     ) else (
-        if "%UPDATE_MODE%"=="false" (
-            echo [ERROR] npm is not installed. Please install Node.js and npm first.
-            cd ..
-            exit /b 1
-        ) else (
-            echo [ERROR] npm is not installed. Skipping frontend update.
-        )
+        echo [ERROR] npm is not installed. Please install Node.js and npm first.
+        cd ..
+        exit /b 1
     )
 
     cd ..
@@ -149,21 +105,16 @@ if exist frontend (
 )
 echo.
 
-REM Step 8: Show completion message
+REM Step 6: Show completion message
 echo ==========================================
 echo [SUCCESS] Setup completed successfully!
 echo ==========================================
 echo.
 
-if "%UPDATE_MODE%"=="true" (
-    echo [INFO] Update completed. To restart the service:
+if exist .env (
+    echo [INFO] Next steps:
     echo.
-    echo   python main.py
-    echo.
-) else (
-    echo [INFO] Initial deployment completed. Next steps:
-    echo.
-    echo   1. Edit .env file and set your ADMIN_KEY:
+    echo   1. Edit .env file if needed:
     echo      notepad .env
     echo.
     echo   2. Start the service:

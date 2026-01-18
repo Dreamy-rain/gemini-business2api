@@ -59,18 +59,15 @@
                     DuckMail SSL 校验
                   </Checkbox>
                   <div class="flex items-center justify-end gap-2">
-                    <Checkbox
-                      v-model="localSettings.basic.browser_headless"
-                      :disabled="localSettings.basic.browser_engine === 'dp'"
-                    >
+                    <Checkbox v-model="localSettings.basic.browser_headless">
                       无头浏览器
                     </Checkbox>
-                    <HelpTip text="仅 UC 引擎支持无头模式。若无头注册/刷新失败，建议关闭。" />
+                    <HelpTip text="无头模式适用于服务器环境（如 Docker）。若注册/刷新失败，建议关闭。" />
                   </div>
                 </div>
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>浏览器引擎</span>
-                  <HelpTip text="UC: 支持无头/有头，但可能失败。DP: 仅有头模式，更稳定，UC 失败时推荐使用。" />
+                  <HelpTip text="UC: 支持无头/有头，但可能失败。DP: 支持无头/有头，更稳定，推荐使用。" />
                 </div>
                 <SelectMenu
                   v-model="localSettings.basic.browser_engine"
@@ -240,7 +237,7 @@ const isSaving = ref(false)
 const errorMessage = ref('')
 const browserEngineOptions = [
   { label: 'UC - 支持无头/有头', value: 'uc' },
-  { label: 'DP - 有头模式（推荐）', value: 'dp' },
+  { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
 ]
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },

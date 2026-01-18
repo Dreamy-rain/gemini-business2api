@@ -62,6 +62,10 @@ class GeminiAutomation:
         options.set_argument("--window-size=1280,800")
         options.set_user_agent(self.user_agent)
 
+        # 语言设置（确保使用中文界面）
+        options.set_argument("--lang=zh-CN")
+        options.set_pref("intl.accept_languages", "zh-CN,zh")
+
         if self.proxy:
             options.set_argument(f"--proxy-server={self.proxy}")
 
@@ -74,7 +78,6 @@ class GeminiAutomation:
             options.set_argument("--disable-extensions")
             # 反检测参数
             options.set_argument("--disable-infobars")
-            options.set_argument("--lang=zh-CN,zh")
             options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
 
         options.auto_port()

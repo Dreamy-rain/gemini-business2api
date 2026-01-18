@@ -67,6 +67,12 @@ class GeminiAutomationUC:
         options.add_argument("--disable-setuid-sandbox")
         options.add_argument("--window-size=1280,800")
 
+        # 语言设置（确保使用中文界面）
+        options.add_argument("--lang=zh-CN")
+        options.add_experimental_option("prefs", {
+            "intl.accept_languages": "zh-CN,zh"
+        })
+
         # 代理设置
         if self.proxy:
             options.add_argument(f"--proxy-server={self.proxy}")

@@ -5,7 +5,7 @@ Gemini自动化登录模块（使用 undetected-chromedriver）
 import random
 import string
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote
 
@@ -414,12 +414,15 @@ class GeminiAutomationUC:
             ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
             host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
 
-            # 计算过期时间
+            # 计算过期时间（使用北京时区，确保时间计算正确）
             ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
+            beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
-                expires_at = datetime.fromtimestamp(ses_obj["expiry"] - 43200).strftime("%Y-%m-%d %H:%M:%S")
+                # Cookie expiry 是 UTC 时间戳，转为北京时间后减去12小时作为刷新窗口
+                cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
+                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
             else:
-                expires_at = (datetime.now() + timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
 
             config = {
                 "id": email,

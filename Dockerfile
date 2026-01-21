@@ -16,7 +16,8 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TZ=Asia/Shanghai
+    TZ=Asia/Shanghai \
+    DISPLAY=:99
 
 # 安装 Python 依赖和浏览器依赖（合并为单一 RUN 指令以减少层数）
 COPY requirements.txt .
@@ -49,9 +50,9 @@ COPY --from=frontend-builder /app/static ./static
 # 创建数据目录
 RUN mkdir -p ./data
 
-# 复制启动脚本
+# 复制启动脚本并转换行尾符
 COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 # 声明数据卷
 VOLUME ["/app/data"]

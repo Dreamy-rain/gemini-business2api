@@ -500,14 +500,16 @@
             <textarea
               v-model="importText"
               class="min-h-[140px] w-full rounded-2xl border border-input bg-background px-3 py-2 text-xs font-mono"
-              placeholder="duckmail----you@example.com----password&#10;user@outlook.com----loginPassword----clientId----refreshToken"
+              placeholder="duckmail----you@example.com----password&#10;freemail----email（使用全局配置）&#10;freemail----email----jwtToken----baseUrl（自定义配置）&#10;user@outlook.com----loginPassword----clientId----refreshToken"
             ></textarea>
             <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <p>支持两种格式：</p>
-              <p class="mt-1 font-mono">duckmail----email----password</p>
-              <p class="mt-1 font-mono">email----password----clientId----refreshToken</p>
-              <p class="mt-2">导入后请执行一次"刷新选中"以获取 Cookie。</p>
-              <p class="mt-1">注册失败建议关闭无头浏览器再试</p>
+              <p>支持四种格式：</p>
+              <p class="mt-1 font-mono">duckmail----email----password（邮箱密码）</p>
+              <p class="mt-1 font-mono">freemail----email（使用全局配置，推荐）</p>
+              <p class="mt-1 font-mono">freemail----email----jwtToken----baseUrl（自定义配置）</p>
+              <p class="mt-1 font-mono">email----password----clientId----refreshToken（Microsoft OAuth）</p>
+              <p class="mt-2">💡 导入的是邮箱凭据，导入后需执行"刷新选中"以登录 Gemini 获取 Cookie。</p>
+              <p class="mt-1">⚠️ 刷新失败建议关闭无头浏览器再试</p>
             </div>
             <div v-if="importError" class="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-600">
               {{ importError }}
@@ -801,7 +803,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useAccountsStore } from '@/stores'
+import { useAccountsStore, useSettingsStore } from '@/stores'
 import SelectMenu from '@/components/ui/SelectMenu.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -812,6 +814,8 @@ import { accountsApi } from '@/api'
 import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
 
 const accountsStore = useAccountsStore()
+const settingsStore = useSettingsStore()
+const { settings } = storeToRefs(settingsStore)
 const { accounts, isLoading } = storeToRefs(accountsStore)
 const confirmDialog = useConfirmDialog()
 const toast = useToast()
@@ -1068,6 +1072,55 @@ const parseImportLines = (raw: string) => {
       return
     }
 
+    if (parts[0].toLowerCase() === 'freemail') {
+      if (parts.length >= 4 && parts[1] && parts[2] && parts[3]) {
+        // 完整格式：freemail----email----jwtToken----baseUrl
+        const email = parts[1]
+        const jwtToken = parts[2]
+        const baseUrl = parts[3]
+        items.push({
+          id: email,
+          secure_c_ses: '',
+          csesidx: '',
+          config_id: '',
+          expires_at: IMPORT_EXPIRES_AT,
+          mail_provider: 'freemail',
+          mail_address: email,
+          mail_password: null,
+          mail_jwt_token: jwtToken,
+          mail_base_url: baseUrl,
+        })
+        return
+      } else if (parts.length === 2 && parts[1]) {
+        // 简化格式：freemail----email（使用全局配置）
+        const email = parts[1]
+        const globalJwtToken = settings.value?.basic?.freemail_jwt_token || ''
+        const globalBaseUrl = settings.value?.basic?.freemail_base_url || 'http://your-freemail-server.com'
+        
+        if (!globalJwtToken) {
+          errors.push(`第 ${lineNo} 行：使用简化格式但未配置全局 JWT Token，请先在设置页面保存 Freemail 配置`)
+          return
+        }
+        
+        items.push({
+          id: email,
+          secure_c_ses: '',
+          csesidx: '',
+          config_id: '',
+          expires_at: IMPORT_EXPIRES_AT,
+          mail_provider: 'freemail',
+          mail_address: email,
+          mail_password: null,
+          mail_jwt_token: globalJwtToken,
+          mail_base_url: globalBaseUrl,
+        })
+        return
+      } else {
+        errors.push(`第 ${lineNo} 行格式错误（freemail）：需要 freemail----email 或 freemail----email----jwtToken----baseUrl`)
+        return
+      }
+    }
+
     if (parts.length >= 4 && parts[0] && parts[2] && parts[3]) {
       const email = parts[0]
       const password = parts[1] || ''
@@ -1133,16 +1186,27 @@ const handleImport = async () => {
         mail_address: item.mail_address,
       }
 
-      if (item.mail_provider === 'microsoft') {
+      if (item.mail_provider === 'freemail') {
+        updated.mail_password = null
+        updated.mail_jwt_token = item.mail_jwt_token
+        updated.mail_base_url = item.mail_base_url
+        updated.mail_client_id = undefined
+        updated.mail_refresh_token = undefined
+        updated.mail_tenant = undefined
+      } else if (item.mail_provider === 'microsoft') {
         updated.mail_client_id = item.mail_client_id
         updated.mail_refresh_token = item.mail_refresh_token
         updated.mail_tenant = item.mail_tenant
         updated.mail_password = item.mail_password
+        updated.mail_jwt_token = undefined
+        updated.mail_base_url = undefined
       } else {
         updated.mail_password = item.mail_password
         updated.mail_client_id = undefined
         updated.mail_refresh_token = undefined
         updated.mail_tenant = undefined
+        updated.mail_jwt_token = undefined
+        updated.mail_base_url = undefined
       }
 
       next[idx] = updated

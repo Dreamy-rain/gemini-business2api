@@ -54,16 +54,64 @@
             <div class="rounded-2xl border border-border bg-card p-4">
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">自动注册/刷新</p>
               <div class="mt-4 space-y-3">
-                <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>邮箱服务</span>
+                  <HelpTip text="选择用于自动注册的邮箱服务提供商" />
+                </div>
+                <SelectMenu
+                  v-model="localSettings.basic.mail_service"
+                  :options="mailServiceOptions"
+                  class="w-full"
+                />
+                
+                <!-- DuckMail 配置 -->
+                <template v-if="localSettings.basic.mail_service === 'duckmail'">
+                  <label class="block text-xs text-muted-foreground">DuckMail API</label>
+                  <input
+                    v-model="localSettings.basic.duckmail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://api.duckmail.sbs"
+                  />
+                  <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
+                  <input
+                    v-model="localSettings.basic.duckmail_api_key"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="dk_xxx"
+                  />
                   <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
                     DuckMail SSL 校验
                   </Checkbox>
-                  <div class="flex items-center justify-end gap-2">
-                    <Checkbox v-model="localSettings.basic.browser_headless">
-                      无头浏览器
-                    </Checkbox>
-                    <HelpTip text="无头模式适用于服务器环境（如 Docker）。若注册/刷新失败，建议关闭。" />
-                  </div>
+                </template>
+                
+                <!-- Freemail 配置 -->
+                <template v-if="localSettings.basic.mail_service === 'freemail'">
+                  <label class="block text-xs text-muted-foreground">Freemail API 地址</label>
+                  <input
+                    v-model="localSettings.basic.freemail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="http://your-freemail-server.com"
+                  />
+                  <label class="block text-xs text-muted-foreground">JWT Token</label>
+                  <input
+                    v-model="localSettings.basic.freemail_jwt_token"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm font-mono"
+                    placeholder="输入管理员 JWT Token"
+                    @blur="loadFreemailDomains"
+                  />
+                  <Checkbox v-model="localSettings.basic.freemail_verify_ssl">
+                    Freemail SSL 校验
+                  </Checkbox>
+                </template>
+                
+                <div class="flex items-center justify-end gap-2">
+                  <Checkbox v-model="localSettings.basic.browser_headless">
+                    无头浏览器
+                  </Checkbox>
+                  <HelpTip text="无头模式适用于服务器环境（如 Docker）。若注册/刷新失败，建议关闭。" />
                 </div>
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>浏览器引擎</span>
@@ -73,13 +121,6 @@
                   v-model="localSettings.basic.browser_engine"
                   :options="browserEngineOptions"
                   class="w-full"
-                />
-                <label class="block text-xs text-muted-foreground">DuckMail API</label>
-                <input
-                  v-model="localSettings.basic.duckmail_base_url"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://api.duckmail.sbs"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
@@ -105,13 +146,6 @@
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="留空则自动选择"
-                />
-                <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
-                <input
-                  v-model="localSettings.basic.duckmail_api_key"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="dk_xxx"
                 />
               </div>
             </div>
@@ -235,9 +269,14 @@ const toast = useToast()
 const localSettings = ref<Settings | null>(null)
 const isSaving = ref(false)
 const errorMessage = ref('')
+const freemailDomains = ref<string[]>([])
 const browserEngineOptions = [
   { label: 'UC - 支持无头/有头', value: 'uc' },
   { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
+]
+const mailServiceOptions = [
+  { label: 'DuckMail（默认）', value: 'duckmail' },
+  { label: 'Freemail（自建服务）', value: 'freemail' },
 ]
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },
@@ -262,14 +301,30 @@ const imageModelOptions = computed(() => {
   return baseOptions
 })
 
+const freemailDomainOptions = computed(() => {
+  const options = [{ label: '自动选择', value: '' }]
+  for (const domain of freemailDomains.value) {
+    options.push({ label: domain, value: domain })
+  }
+  return options
+})
+
 watch(settings, (value) => {
   if (!value) return
   const next = JSON.parse(JSON.stringify(value))
   next.image_generation = next.image_generation || { enabled: false, supported_models: [], output_format: 'base64' }
   next.image_generation.output_format ||= 'base64'
   next.basic = next.basic || {}
+  // 只在未设置时才使用默认值，保留已保存的配置
+  if (!next.basic.mail_service) {
+    next.basic.mail_service = 'duckmail'
+  }
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
+  next.basic.freemail_base_url = next.basic.freemail_base_url || 'http://your-freemail-server.com'
+  next.basic.freemail_jwt_token = next.basic.freemail_jwt_token || ''
+  next.basic.freemail_verify_ssl = next.basic.freemail_verify_ssl ?? true
+  next.basic.freemail_domain = next.basic.freemail_domain || ''
   next.basic.browser_engine = next.basic.browser_engine || 'dp'
   next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
@@ -294,6 +349,27 @@ watch(settings, (value) => {
 onMounted(async () => {
   await settingsStore.loadSettings()
 })
+
+const loadFreemailDomains = async () => {
+  if (!localSettings.value?.basic.freemail_jwt_token || !localSettings.value?.basic.freemail_base_url) {
+    return
+  }
+
+  try {
+    const baseUrl = localSettings.value.basic.freemail_base_url
+    const token = localSettings.value.basic.freemail_jwt_token
+    const response = await fetch(`${baseUrl}/api/domains?admin_token=${token}`)
+    
+    if (response.ok) {
+      const domains = await response.json()
+      if (Array.isArray(domains)) {
+        freemailDomains.value = domains
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load Freemail domains:', error)
+  }
+}
 
 const handleSave = async () => {
   if (!localSettings.value) return

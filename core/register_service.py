@@ -10,6 +10,7 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
+from core.freemail_client import FreemailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 
@@ -106,15 +107,34 @@ class RegisterService(BaseTaskService[RegisterTask]):
     def _register_one(self, domain: Optional[str], task: RegisterTask) -> dict:
         """注册单个账户"""
         log_cb = lambda level, message: self._append_log(task, level, message)
-        client = DuckMailClient(
-            base_url=config.basic.duckmail_base_url,
-            proxy=config.basic.proxy,
-            verify_ssl=config.basic.duckmail_verify_ssl,
-            api_key=config.basic.duckmail_api_key,
-            log_callback=log_cb,
-        )
-        if not client.register_account(domain=domain):
-            return {"success": False, "error": "duckmail register failed"}
+        
+        # 根据配置选择邮箱服务
+        mail_service = (config.basic.mail_service or "duckmail").lower()
+        
+        if mail_service == "freemail":
+            # 使用 Freemail 服务
+            client = FreemailClient(
+                base_url=config.basic.freemail_base_url,
+                jwt_token=config.basic.freemail_jwt_token,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.freemail_verify_ssl,
+                log_callback=log_cb,
+            )
+            # 使用配置的域名或参数传入的域名
+            freemail_domain = config.basic.freemail_domain or domain
+            if not client.register_account(domain=freemail_domain):
+                return {"success": False, "error": "freemail register failed"}
+        else:
+            # 使用 DuckMail 服务（默认）
+            client = DuckMailClient(
+                base_url=config.basic.duckmail_base_url,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.duckmail_verify_ssl,
+                api_key=config.basic.duckmail_api_key,
+                log_callback=log_cb,
+            )
+            if not client.register_account(domain=domain):
+                return {"success": False, "error": "duckmail register failed"}
 
         # 根据配置选择浏览器引擎
         browser_engine = (config.basic.browser_engine or "dp").lower()
@@ -148,9 +168,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
             return {"success": False, "error": result.get("error", "automation failed")}
 
         config_data = result["config"]
-        config_data["mail_provider"] = "duckmail"
-        config_data["mail_address"] = client.email
-        config_data["mail_password"] = client.password
+        
+        # 保存邮箱服务提供商信息
+        if mail_service == "freemail":
+            config_data["mail_provider"] = "freemail"
+            config_data["mail_address"] = client.email
+            config_data["mail_password"] = None
+            config_data["mail_jwt_token"] = config.basic.freemail_jwt_token
+            config_data["mail_base_url"] = config.basic.freemail_base_url
+        else:
+            config_data["mail_provider"] = "duckmail"
+            config_data["mail_address"] = client.email
+            config_data["mail_password"] = client.password
 
         accounts_data = load_accounts_from_source()
         updated = False

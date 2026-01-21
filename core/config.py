@@ -54,6 +54,8 @@ class BasicConfig(BaseModel):
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
     register_default_count: int = Field(default=1, ge=1, le=30, description="默认注册数量")
     register_domain: str = Field(default="", description="默认注册域名（推荐）")
+    pool_target_accounts: int = Field(default=0, ge=0, le=100, description="账号池目标数量（0=禁用自动补号）")
+    pool_prune_disabled: bool = Field(default=False, description="是否自动删除 disabled=true 的账号")
 
 
 class ImageGenerationConfig(BaseModel):
@@ -146,6 +148,8 @@ class ConfigManager:
         register_default_raw = basic_data.get("register_default_count", 1)
         register_domain_raw = basic_data.get("register_domain", "")
         duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
+        pool_target_raw = basic_data.get("pool_target_accounts", 0)
+        pool_prune_disabled_raw = basic_data.get("pool_prune_disabled", False)
 
         basic_config = BasicConfig(
             api_key=basic_data.get("api_key") or "",
@@ -159,6 +163,8 @@ class ConfigManager:
             refresh_window_hours=int(refresh_window_raw),
             register_default_count=int(register_default_raw),
             register_domain=str(register_domain_raw or "").strip(),
+            pool_target_accounts=int(pool_target_raw),
+            pool_prune_disabled=_parse_bool(pool_prune_disabled_raw, False),
         )
 
         # 4. 加载其他配置（从 YAML）

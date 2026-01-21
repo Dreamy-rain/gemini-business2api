@@ -106,6 +106,20 @@
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="留空则自动选择"
                 />
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>账号池目标数量（0禁用）</span>
+                  <HelpTip text="自动维护账号池：清理过期/失效账号，并在可用账号不足时触发自动注册补号。" />
+                </div>
+                <input
+                  v-model.number="localSettings.basic.pool_target_accounts"
+                  type="number"
+                  min="0"
+                  max="100"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                />
+                <Checkbox v-model="localSettings.basic.pool_prune_disabled">
+                  自动删除已禁用账号
+                </Checkbox>
                 <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
                 <input
                   v-model="localSettings.basic.duckmail_api_key"

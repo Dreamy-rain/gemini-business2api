@@ -10,6 +10,7 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
+from core.gptmail_client import GPTMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 
@@ -20,11 +21,13 @@ logger = logging.getLogger("gemini.register")
 class RegisterTask(BaseTask):
     """注册任务数据类"""
     count: int = 0
+    mail_provider: str = "duckmail"
 
     def to_dict(self) -> dict:
         """转换为字典"""
         base_dict = super().to_dict()
         base_dict["count"] = self.count
+        base_dict["mail_provider"] = self.mail_provider
         return base_dict
 
 
@@ -54,7 +57,12 @@ class RegisterService(BaseTaskService[RegisterTask]):
             log_prefix="REGISTER",
         )
 
-    async def start_register(self, count: Optional[int] = None, domain: Optional[str] = None) -> RegisterTask:
+    async def start_register(
+        self,
+        count: Optional[int] = None,
+        domain: Optional[str] = None,
+        mail_provider: Optional[str] = None,
+    ) -> RegisterTask:
         """启动注册任务"""
         async with self._lock:
             if os.environ.get("ACCOUNTS_CONFIG"):
@@ -68,16 +76,20 @@ class RegisterService(BaseTaskService[RegisterTask]):
             if not domain_value:
                 domain_value = (config.basic.register_domain or "").strip() or None
 
+            mail_provider_value = (mail_provider or "").strip().lower() or "duckmail"
+            if mail_provider_value not in ("duckmail", "gptmail"):
+                mail_provider_value = "duckmail"
+
             register_count = count or config.basic.register_default_count
             register_count = max(1, min(30, int(register_count)))
-            task = RegisterTask(id=str(uuid.uuid4()), count=register_count)
+            task = RegisterTask(id=str(uuid.uuid4()), count=register_count, mail_provider=mail_provider_value)
             self._tasks[task.id] = task
             self._current_task_id = task.id
-            self._append_log(task, "info", f"📝 创建注册任务 (数量={register_count})")
-            asyncio.create_task(self._run_register_async(task, domain_value))
+            self._append_log(task, "info", f"📝 创建注册任务 (数量={register_count}, 邮箱={mail_provider_value})")
+            asyncio.create_task(self._run_register_async(task, domain_value, mail_provider_value))
             return task
 
-    async def _run_register_async(self, task: RegisterTask, domain: Optional[str]) -> None:
+    async def _run_register_async(self, task: RegisterTask, domain: Optional[str], mail_provider: str) -> None:
         """异步执行注册任务"""
         task.status = TaskStatus.RUNNING
         loop = asyncio.get_running_loop()
@@ -86,7 +98,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
         for idx in range(task.count):
             try:
                 self._append_log(task, "info", f"📊 进度: {idx + 1}/{task.count}")
-                result = await loop.run_in_executor(self._executor, self._register_one, domain, task)
+                result = await loop.run_in_executor(self._executor, self._register_one, domain, mail_provider, task)
             except Exception as exc:
                 result = {"success": False, "error": str(exc)}
             task.progress += 1
@@ -106,7 +118,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
         self._current_task_id = None
         self._append_log(task, "info", f"🏁 注册任务完成 (成功: {task.success_count}, 失败: {task.fail_count}, 总计: {task.count})")
 
-    def _register_one(self, domain: Optional[str], task: RegisterTask) -> dict:
+    def _register_one(self, domain: Optional[str], mail_provider: str, task: RegisterTask) -> dict:
         """注册单个账户"""
         log_cb = lambda level, message: self._append_log(task, level, message)
 
@@ -114,20 +126,36 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "🆕 开始注册新账户")
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        client = DuckMailClient(
-            base_url=config.basic.duckmail_base_url,
-            proxy=config.basic.proxy,
-            verify_ssl=config.basic.duckmail_verify_ssl,
-            api_key=config.basic.duckmail_api_key,
-            log_callback=log_cb,
-        )
+        client = None
+        if mail_provider == "gptmail":
+            client = GPTMailClient(
+                base_url=config.basic.gptmail_base_url,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.gptmail_verify_ssl,
+                api_key=config.basic.gptmail_api_key or "gpt-test",
+                log_callback=log_cb,
+            )
+            log_cb("info", "📧 步骤 1/3: 生成 GPTMail 邮箱...")
+            email = client.generate_email(domain=domain)
+            if not email:
+                log_cb("error", "❌ GPTMail 邮箱生成失败")
+                return {"success": False, "error": "GPTMail 生成邮箱失败"}
+            log_cb("info", f"✅ GPTMail 邮箱生成成功: {client.email}")
+        else:
+            client = DuckMailClient(
+                base_url=config.basic.duckmail_base_url,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.duckmail_verify_ssl,
+                api_key=config.basic.duckmail_api_key,
+                log_callback=log_cb,
+            )
 
-        log_cb("info", "📧 步骤 1/3: 注册 DuckMail 邮箱...")
-        if not client.register_account(domain=domain):
-            log_cb("error", "❌ DuckMail 邮箱注册失败")
-            return {"success": False, "error": "DuckMail 注册失败"}
+            log_cb("info", "📧 步骤 1/3: 注册 DuckMail 邮箱...")
+            if not client.register_account(domain=domain):
+                log_cb("error", "❌ DuckMail 邮箱注册失败")
+                return {"success": False, "error": "DuckMail 注册失败"}
 
-        log_cb("info", f"✅ DuckMail 邮箱注册成功: {client.email}")
+            log_cb("info", f"✅ DuckMail 邮箱注册成功: {client.email}")
 
         # 根据配置选择浏览器引擎
         browser_engine = (config.basic.browser_engine or "dp").lower()
@@ -170,9 +198,12 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "✅ Gemini 登录成功，正在保存配置...")
 
         config_data = result["config"]
-        config_data["mail_provider"] = "duckmail"
+        config_data["mail_provider"] = mail_provider
         config_data["mail_address"] = client.email
-        config_data["mail_password"] = client.password
+        if mail_provider == "duckmail":
+            config_data["mail_password"] = getattr(client, "password", "") or ""
+        else:
+            config_data["mail_password"] = ""
 
         accounts_data = load_accounts_from_source()
         updated = False

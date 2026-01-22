@@ -187,13 +187,13 @@
         <!-- 使用教程 -->
         <div v-if="activeTab === 'tutorials'" class="space-y-6">
           <div class="space-y-2">
-            <p class="text-sm font-semibold">DuckMail 自动注册教程</p>
+            <p class="text-sm font-semibold">临时邮箱（DuckMail / GPTMail）自动注册教程</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              DuckMail 是一个临时邮箱服务，可用于自动注册 Google 账号。
+              DuckMail / GPTMail 都是临时邮箱服务，可用于自动注册 Google 账号。
             </p>
             <div class="mt-3 space-y-3 text-xs text-muted-foreground">
               <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">步骤 1：配置 DuckMail</p>
+                <p class="font-medium text-foreground">步骤 1：配置邮箱服务</p>
                 <p class="mt-2">访问 <a href="https://domain.duckmail.sbs/" target="_blank" class="text-primary hover:underline">https://domain.duckmail.sbs/</a>，登录注册后：</p>
                 <ul class="mt-2 space-y-1 pl-4">
                   <li>• 添加域名，按照提示进行 DNS 解析</li>
@@ -201,6 +201,11 @@
                   <li>• 前往本系统"配置面板"，找到"DuckMail 配置"部分</li>
                   <li>• 填写 DuckMail API Key</li>
                   <li>• <strong>推荐：</strong>在"默认注册域名"中填入自己的域名（DuckMail 可能会出现密码错误情况，建议使用自己的域名）</li>
+                </ul>
+                <p class="mt-3">如果你使用 GPTMail：</p>
+                <ul class="mt-2 space-y-1 pl-4">
+                  <li>• 前往本系统"配置面板"，找到"GPTMail 配置"部分</li>
+                  <li>• 填写 GPTMail API Key（可使用测试 Key: <code class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px]">gpt-test</code>）</li>
                 </ul>
               </div>
 
@@ -210,6 +215,7 @@
                 <ul class="mt-2 space-y-1 pl-4">
                   <li>• 点击"添加账户"按钮</li>
                   <li>• 选择"自动注册"标签</li>
+                  <li>• 选择邮箱服务（DuckMail 或 GPTMail）</li>
                   <li>• 设置注册数量</li>
                   <li>• 勾选同意声明</li>
                   <li>• 点击"开始注册"</li>

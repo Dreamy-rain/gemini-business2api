@@ -449,7 +449,7 @@
           <div>
             <p class="text-sm font-medium text-foreground">添加账户</p>
             <p class="mt-1 text-xs text-muted-foreground">
-              {{ addMode === 'register' ? '创建 DuckMail 账号并自动注册' : '批量导入账户配置' }}
+              {{ addMode === 'register' ? registerModeDescription : '批量导入账户配置' }}
             </p>
           </div>
           <button
@@ -482,6 +482,12 @@
           </div>
 
           <div v-if="addMode === 'register'" class="space-y-4">
+            <label class="block text-xs text-muted-foreground">邮箱服务</label>
+            <SelectMenu
+              v-model="registerMailProvider"
+              :options="registerMailProviderOptions"
+              class="w-full"
+            />
             <label class="block text-xs text-muted-foreground">注册数量</label>
             <input
               v-model.number="registerCount"
@@ -491,6 +497,9 @@
             />
             <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <p>默认域名（可在配置面板修改，推荐使用）</p>
+              <p v-if="registerMailProvider === 'gptmail'" class="mt-1">
+                GPTMail 需要在配置面板填写 API Key（可使用测试 Key: gpt-test）
+              </p>
               <p class="mt-1">注册失败建议关闭无头浏览器再试</p>
             </div>
           </div>
@@ -500,11 +509,12 @@
             <textarea
               v-model="importText"
               class="min-h-[140px] w-full rounded-2xl border border-input bg-background px-3 py-2 text-xs font-mono"
-              placeholder="duckmail----you@example.com----password&#10;user@outlook.com----loginPassword----clientId----refreshToken"
+              placeholder="duckmail----you@example.com----password&#10;gptmail----you@example.com&#10;user@outlook.com----loginPassword----clientId----refreshToken"
             ></textarea>
             <div class="rounded-2xl border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <p>支持两种格式：</p>
               <p class="mt-1 font-mono">duckmail----email----password</p>
+              <p class="mt-1 font-mono">gptmail----email</p>
               <p class="mt-1 font-mono">email----password----clientId----refreshToken</p>
               <p class="mt-2">导入后请执行一次"刷新选中"以获取 Cookie。</p>
               <p class="mt-1">注册失败建议关闭无头浏览器再试</p>
@@ -830,6 +840,7 @@ const configJson = ref('')
 const configMasked = ref(false)
 const configData = ref<AccountConfigItem[]>([])
 const registerCount = ref(1)
+const registerMailProvider = ref<'duckmail' | 'gptmail'>('duckmail')
 const isRegisterOpen = ref(false)
 const addMode = ref<'register' | 'import'>('register')
 const importText = ref('')
@@ -877,6 +888,17 @@ const statusOptions = [
   { label: '错误禁用', value: '错误禁用' },
   { label: '429限流', value: '429限流' },
 ]
+
+const registerMailProviderOptions = [
+  { label: 'DuckMail（账号+密码）', value: 'duckmail' },
+  { label: 'GPTMail（API Key）', value: 'gptmail' },
+]
+
+const registerModeDescription = computed(() => {
+  return registerMailProvider.value === 'gptmail'
+    ? '创建 GPTMail 邮箱并自动注册'
+    : '创建 DuckMail 账号并自动注册'
+})
 
 const filteredAccounts = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -1064,6 +1086,25 @@ const parseImportLines = (raw: string) => {
         mail_provider: 'duckmail',
         mail_address: email,
         mail_password: password,
+      })
+      return
+    }
+
+    if (parts[0].toLowerCase() === 'gptmail') {
+      if (parts.length < 2 || !parts[1]) {
+        errors.push(`第 ${lineNo} 行格式错误（gptmail）`)
+        return
+      }
+      const email = parts[1]
+      items.push({
+        id: email,
+        secure_c_ses: '',
+        csesidx: '',
+        config_id: '',
+        expires_at: IMPORT_EXPIRES_AT,
+        mail_provider: 'gptmail',
+        mail_address: email,
+        mail_password: '',
       })
       return
     }
@@ -1888,7 +1929,7 @@ const handleRegister = async () => {
     const count = Number.isFinite(registerCount.value) && registerCount.value > 0
       ? registerCount.value
       : undefined
-    const task = await accountsApi.startRegister(count)
+    const task = await accountsApi.startRegister(count, undefined, registerMailProvider.value)
     syncRegisterTask(task)
     startRegisterPolling(task.id)
     isRegisterOpen.value = false

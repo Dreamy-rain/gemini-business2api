@@ -55,9 +55,14 @@
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">自动注册/刷新</p>
               <div class="mt-4 space-y-3">
                 <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
-                  <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
-                    DuckMail SSL 校验
-                  </Checkbox>
+                  <div class="space-y-2">
+                    <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
+                      DuckMail SSL 校验
+                    </Checkbox>
+                    <Checkbox v-model="localSettings.basic.gptmail_verify_ssl">
+                      GPTMail SSL 校验
+                    </Checkbox>
+                  </div>
                   <div class="flex items-center justify-end gap-2">
                     <Checkbox v-model="localSettings.basic.browser_headless">
                       无头浏览器
@@ -80,6 +85,13 @@
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="https://api.duckmail.sbs"
+                />
+                <label class="block text-xs text-muted-foreground">GPTMail API</label>
+                <input
+                  v-model="localSettings.basic.gptmail_base_url"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="https://mail.chatgpt.org.uk"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
@@ -112,6 +124,13 @@
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
                   placeholder="dk_xxx"
+                />
+                <label class="block text-xs text-muted-foreground">GPTMail API 密钥</label>
+                <input
+                  v-model="localSettings.basic.gptmail_api_key"
+                  type="text"
+                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                  placeholder="gpt-test"
                 />
               </div>
             </div>
@@ -286,6 +305,8 @@ watch(settings, (value) => {
   next.basic = next.basic || {}
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
+  next.basic.gptmail_base_url ||= 'https://mail.chatgpt.org.uk'
+  next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
   next.basic.browser_engine = next.basic.browser_engine || 'dp'
   next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
@@ -299,6 +320,9 @@ watch(settings, (value) => {
     : ''
   next.basic.duckmail_api_key = typeof next.basic.duckmail_api_key === 'string'
     ? next.basic.duckmail_api_key
+    : ''
+  next.basic.gptmail_api_key = typeof next.basic.gptmail_api_key === 'string'
+    ? next.basic.gptmail_api_key
     : ''
   next.retry = next.retry || {}
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)

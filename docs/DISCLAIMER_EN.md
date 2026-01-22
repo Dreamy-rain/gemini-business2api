@@ -26,7 +26,7 @@ This project is limited to the following scenarios:
 ## 📋 Technical Disclaimer
 
 - **No Warranty**: This project is provided "as is" without any form of warranty
-- **Third-Party Dependencies**: Depends on third-party services (such as DuckMail API) whose availability is not controlled by the author
+- **Third-Party Dependencies**: Depends on third-party services (such as DuckMail API / GPTMail API) whose availability is not controlled by the author
 - **Maintenance Rights**: The author reserves the right to stop maintenance, change functionality, or shut down the project at any time
 
 ---

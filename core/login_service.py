@@ -11,6 +11,7 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskStatus
 from core.config import config
 from core.duckmail_client import DuckMailClient
+from core.gptmail_client import GPTMailClient
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
@@ -149,6 +150,16 @@ class LoginService(BaseTaskService[LoginTask]):
                 log_callback=log_cb,
             )
             client.set_credentials(mail_address)
+        elif mail_provider == "gptmail":
+            mail_address = account.get("mail_address") or account_id
+            client = GPTMailClient(
+                base_url=config.basic.gptmail_base_url,
+                proxy=config.basic.proxy,
+                verify_ssl=config.basic.gptmail_verify_ssl,
+                api_key=config.basic.gptmail_api_key or "gpt-test",
+                log_callback=log_cb,
+            )
+            client.set_credentials(mail_address)
         elif mail_provider == "duckmail":
             if not mail_password:
                 return {"success": False, "email": account_id, "error": "邮箱密码缺失"}
@@ -205,12 +216,18 @@ class LoginService(BaseTaskService[LoginTask]):
         # 更新账户配置
         config_data = result["config"]
         config_data["mail_provider"] = mail_provider
-        config_data["mail_password"] = mail_password
         if mail_provider == "microsoft":
             config_data["mail_address"] = account.get("mail_address") or account_id
             config_data["mail_client_id"] = mail_client_id
             config_data["mail_refresh_token"] = mail_refresh_token
             config_data["mail_tenant"] = mail_tenant
+            config_data["mail_password"] = mail_password or ""
+        elif mail_provider == "duckmail":
+            config_data["mail_address"] = account.get("mail_address") or account_id
+            config_data["mail_password"] = mail_password or ""
+        else:
+            config_data["mail_address"] = account.get("mail_address") or account_id
+            config_data["mail_password"] = ""
         config_data["disabled"] = account.get("disabled", False)
 
         for acc in accounts:
@@ -243,7 +260,7 @@ class LoginService(BaseTaskService[LoginTask]):
             if mail_provider == "microsoft":
                 if not account.get("mail_client_id") or not account.get("mail_refresh_token"):
                     continue
-            else:
+            elif mail_provider == "duckmail":
                 if not mail_password:
                     continue
             expires_at = account.get("expires_at")

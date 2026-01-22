@@ -1002,10 +1002,15 @@ async def admin_update_config(request: Request, accounts_data: list = Body(...))
 
 @app.post("/admin/register/start")
 @require_login()
-async def admin_start_register(request: Request, count: Optional[int] = Body(default=None), domain: Optional[str] = Body(default=None)):
+async def admin_start_register(
+    request: Request,
+    count: Optional[int] = Body(default=None),
+    domain: Optional[str] = Body(default=None),
+    mail_provider: Optional[str] = Body(default=None),
+):
     if not register_service:
         raise HTTPException(503, "register service unavailable")
-    task = await register_service.start_register(count=count, domain=domain)
+    task = await register_service.start_register(count=count, domain=domain, mail_provider=mail_provider)
     return task.to_dict()
 
 @app.get("/admin/register/task/{task_id}")
@@ -1162,6 +1167,9 @@ async def admin_get_settings(request: Request):
             "duckmail_base_url": config.basic.duckmail_base_url,
             "duckmail_api_key": config.basic.duckmail_api_key,
             "duckmail_verify_ssl": config.basic.duckmail_verify_ssl,
+            "gptmail_base_url": config.basic.gptmail_base_url,
+            "gptmail_api_key": config.basic.gptmail_api_key,
+            "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
             "browser_engine": config.basic.browser_engine,
             "browser_headless": config.basic.browser_headless,
             "refresh_window_hours": config.basic.refresh_window_hours,
@@ -1206,6 +1214,9 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
         basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
         basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
+        basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
+        basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
+        basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
         basic.setdefault("browser_engine", config.basic.browser_engine)
         basic.setdefault("browser_headless", config.basic.browser_headless)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)

@@ -37,7 +37,7 @@
 
 - ✅ Full OpenAI API compatibility - Seamless integration with existing tools
 - ✅ Multi-account load balancing - Round-robin with automatic failover
-- ✅ Automated account management - Auto registration and login with DuckMail and Microsoft email integration, supports headless browser mode
+- ✅ Automated account management - Auto registration and login with DuckMail / GPTMail / Microsoft email integration, supports headless browser mode
 - ✅ Streaming output - Real-time responses
 - ✅ Multimodal input - 100+ file types (images, PDF, Office docs, audio, video, code, etc.)
 - ✅ Image generation & image-to-image - Configurable models, Base64 or URL output

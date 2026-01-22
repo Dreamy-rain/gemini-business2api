@@ -233,6 +233,8 @@ class ProxyAwareAsyncClient:
             return False
         if no_proxy_matches(host, self._no_proxy):
             return False
+        if not self._proxied_host_suffixes:
+            return True
         return host_matches_any_suffix(host, self._proxied_host_suffixes)
 
     async def aclose(self) -> None:

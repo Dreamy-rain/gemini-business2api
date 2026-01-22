@@ -52,7 +52,7 @@
             </div>
 
             <div class="rounded-2xl border border-border bg-card p-4">
-              <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">出站代理（仅注册 + Gemini）</p>
+              <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">出站代理（全局）</p>
               <div class="mt-4 space-y-3">
                 <Checkbox v-model="localSettings.basic.outbound_proxy.enabled">
                   启用出站代理

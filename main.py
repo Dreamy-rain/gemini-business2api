@@ -301,7 +301,7 @@ def _build_http_client():
             proxy_url=proxy_url or None,
             no_proxy=outbound.no_proxy,
             direct_fallback=outbound.direct_fallback,
-            proxied_host_suffixes=DEFAULT_GEMINI_PROXY_HOST_SUFFIXES,
+            proxied_host_suffixes=(),
             client_kwargs=client_kwargs,
         )
 

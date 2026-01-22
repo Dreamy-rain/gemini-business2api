@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import patch
 
@@ -5,7 +6,14 @@ from requests import Response
 
 from core.duckmail_client import DuckMailClient
 from core.gptmail_client import GPTMailClient
-from core.outbound_proxy import OutboundProxyConfig, decrypt_secret, encrypt_secret, no_proxy_matches, normalize_proxy_url
+from core.outbound_proxy import (
+    OutboundProxyConfig,
+    ProxyAwareAsyncClient,
+    decrypt_secret,
+    encrypt_secret,
+    no_proxy_matches,
+    normalize_proxy_url,
+)
 
 
 def _make_response(status_code: int, json_text: str = "") -> Response:
@@ -61,6 +69,34 @@ class TestOutboundProxyConfig(unittest.TestCase):
 
     def test_normalize_proxy_url_plain_host_port(self) -> None:
         self.assertEqual(normalize_proxy_url("127.0.0.1:7890"), "http://127.0.0.1:7890")
+
+
+class TestProxyAwareAsyncClientShouldUseProxy(unittest.TestCase):
+    def test_global_proxy_when_suffixes_empty(self) -> None:
+        client = ProxyAwareAsyncClient(
+            proxy_url="http://127.0.0.1:7890",
+            no_proxy="",
+            direct_fallback=True,
+            proxied_host_suffixes=(),
+            client_kwargs={"verify": False, "timeout": 1.0, "trust_env": False},
+        )
+        try:
+            self.assertTrue(client._should_use_proxy("https://example.com/v1"))
+        finally:
+            asyncio.run(client.aclose())
+
+    def test_no_proxy_skips_proxy(self) -> None:
+        client = ProxyAwareAsyncClient(
+            proxy_url="http://127.0.0.1:7890",
+            no_proxy="example.com",
+            direct_fallback=True,
+            proxied_host_suffixes=(),
+            client_kwargs={"verify": False, "timeout": 1.0, "trust_env": False},
+        )
+        try:
+            self.assertFalse(client._should_use_proxy("https://example.com/v1"))
+        finally:
+            asyncio.run(client.aclose())
 
 
 class TestRequestsProxyFallback(unittest.TestCase):

@@ -79,6 +79,7 @@ from core import storage
 from core.outbound_proxy import (
     DEFAULT_GEMINI_PROXY_HOST_SUFFIXES,
     ProxyAwareAsyncClient,
+    normalize_proxy_url,
 )
 
 # ---------- 日志配置 ----------
@@ -304,7 +305,15 @@ def _build_http_client():
             client_kwargs=client_kwargs,
         )
 
-    return httpx.AsyncClient(proxy=PROXY or None, **client_kwargs)
+    proxy_url = normalize_proxy_url(PROXY or "")
+    if proxy_url:
+        try:
+            return httpx.AsyncClient(proxy=proxy_url, **client_kwargs)
+        except httpx.InvalidURL:
+            logger.warning(f"[CONFIG] 全局代理格式无效，已忽略: {PROXY}")
+            return httpx.AsyncClient(proxy=None, **client_kwargs)
+
+    return httpx.AsyncClient(proxy=None, **client_kwargs)
 
 
 http_client = _build_http_client()
@@ -1244,6 +1253,8 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
     try:
         basic = dict(new_settings.get("basic") or {})
+        if "proxy" in basic:
+            basic["proxy"] = normalize_proxy_url(str(basic.get("proxy") or ""))
         basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
         basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
         basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)

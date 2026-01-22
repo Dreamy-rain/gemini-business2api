@@ -5,7 +5,7 @@ from requests import Response
 
 from core.duckmail_client import DuckMailClient
 from core.gptmail_client import GPTMailClient
-from core.outbound_proxy import OutboundProxyConfig, decrypt_secret, encrypt_secret, no_proxy_matches
+from core.outbound_proxy import OutboundProxyConfig, decrypt_secret, encrypt_secret, no_proxy_matches, normalize_proxy_url
 
 
 def _make_response(status_code: int, json_text: str = "") -> Response:
@@ -52,6 +52,15 @@ class TestOutboundProxyConfig(unittest.TestCase):
         )
         cfg.password_enc = cfg.encrypt_password("p", "admin-key")
         self.assertEqual(cfg.to_proxy_url("admin-key"), "socks5://u:p@127.0.0.1:7890")
+
+    def test_normalize_proxy_url_legacy_host_port_user_pass(self) -> None:
+        self.assertEqual(
+            normalize_proxy_url("42.111.48.253:7030:ebugimzj:moq3ydvtga9x"),
+            "http://ebugimzj:moq3ydvtga9x@42.111.48.253:7030",
+        )
+
+    def test_normalize_proxy_url_plain_host_port(self) -> None:
+        self.assertEqual(normalize_proxy_url("127.0.0.1:7890"), "http://127.0.0.1:7890")
 
 
 class TestRequestsProxyFallback(unittest.TestCase):

@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, validator
 from dotenv import load_dotenv
 
 from core import storage
-from core.outbound_proxy import OutboundProxyConfig
+from core.outbound_proxy import OutboundProxyConfig, normalize_proxy_url
 
 # 加载 .env 文件
 load_dotenv()
@@ -193,7 +193,7 @@ class ConfigManager:
         basic_config = BasicConfig(
             api_key=basic_data.get("api_key") or "",
             base_url=basic_data.get("base_url") or "",
-            proxy=basic_data.get("proxy") or "",
+            proxy=normalize_proxy_url(str(basic_data.get("proxy") or "")),
             outbound_proxy=outbound_proxy_config,
             duckmail_base_url=basic_data.get("duckmail_base_url") or "https://api.duckmail.sbs",
             duckmail_api_key=str(duckmail_api_key_raw or "").strip(),

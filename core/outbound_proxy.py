@@ -3,6 +3,7 @@ import hashlib
 import ipaddress
 from contextlib import asynccontextmanager
 from typing import Iterable, Optional, Sequence
+from urllib.parse import quote
 from urllib.parse import urlparse
 
 import httpx
@@ -116,6 +117,37 @@ def host_matches_any_suffix(host: str, suffixes: Iterable[str]) -> bool:
         if host == s or host.endswith(f".{s}"):
             return True
     return False
+
+
+def normalize_proxy_url(raw: str, *, default_scheme: str = "http") -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+
+    if "://" in value:
+        return value
+
+    if "@" in value:
+        return f"{default_scheme}://{value}"
+
+    parts = value.split(":")
+    if len(parts) == 2:
+        host, port = parts
+        if port.isdigit():
+            return f"{default_scheme}://{host}:{port}"
+        return value
+
+    if len(parts) >= 4:
+        host = parts[0]
+        port = parts[1]
+        username = parts[2]
+        password = ":".join(parts[3:])
+        if port.isdigit():
+            u = quote(username, safe="")
+            p = quote(password, safe="")
+            return f"{default_scheme}://{u}:{p}@{host}:{port}"
+
+    return value
 
 
 class OutboundProxyConfig(BaseModel):

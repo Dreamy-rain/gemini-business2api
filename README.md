@@ -79,10 +79,13 @@
 | `ADMIN_KEY`    | ✅    | 管理面板登录密钥，自己设置一个                |
 | `DATABASE_URL` | 推荐 | PostgreSQL 连接串（见下方"数据库持久化"说明） |
 
-> 💡 **强烈建议配置 DATABASE_URL**，否则 Zeabur 重启后数据会丢失。免费数据库获取：[neon.tech](https://neon.tech)
+> 💡 **强烈建议配置 `DATABASE_URL` 或挂载 `/data`（二选一即可）**，否则 Zeabur 重启后数据会丢失。免费数据库获取：[neon.tech](https://neon.tech)
 
-4. 点击 **重新部署** 使环境变量生效
-5. 等待构建完成（约 1-2 分钟）
+4. （推荐）点击服务卡片 → **存储/Storage** → 添加一个 Volume，并将挂载路径设置为：`/data`
+   - 本项目检测到 `/data` 目录存在时，会将 `accounts.json` / `settings.yaml` / `stats.json` / `images/` 等数据写入该目录以实现持久化
+   - 如果你已经配置了 `DATABASE_URL`（数据库持久化），挂载 `/data` 可选
+5. 点击 **重新部署** 使环境变量/挂载生效
+6. 等待构建完成（约 1-2 分钟）
 
 #### 如何更新？
 

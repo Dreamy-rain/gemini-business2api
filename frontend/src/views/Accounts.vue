@@ -120,6 +120,28 @@
             >
               任务状态
             </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="isExporting
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="isExporting"
+              @click="handleExportAccounts('json'); closeMoreActions()"
+            >
+              导出账号（JSON）
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-colors"
+              :class="isExporting
+                ? 'cursor-not-allowed text-muted-foreground'
+                : 'text-foreground hover:bg-accent'"
+              :disabled="isExporting"
+              @click="handleExportAccounts('txt'); closeMoreActions()"
+            >
+              导出账号（TXT）
+            </button>
             <div class="my-1 border-t border-border/60"></div>
             <button
               type="button"
@@ -505,6 +527,16 @@
           </div>
 
           <div v-else class="space-y-4">
+            <div class="flex items-center justify-between gap-2">
+              <label class="block text-xs text-muted-foreground">导入文件（TXT/JSON）</label>
+              <input
+                ref="importFileInputRef"
+                type="file"
+                accept=".txt,.json,text/plain,application/json"
+                class="text-xs text-muted-foreground file:mr-3 file:rounded-full file:border-0 file:bg-muted file:px-4 file:py-2 file:text-xs file:font-medium file:text-foreground hover:file:bg-accent"
+                @change="handleImportFileChange"
+              />
+            </div>
             <label class="block text-xs text-muted-foreground">批量导入（每行一个）</label>
             <textarea
               v-model="importText"
@@ -846,8 +878,10 @@ const addMode = ref<'register' | 'import'>('register')
 const importText = ref('')
 const importError = ref('')
 const isImporting = ref(false)
+const importFileInputRef = ref<HTMLInputElement | null>(null)
 const isTaskOpen = ref(false)
 const showMoreActions = ref(false)
+const isExporting = ref(false)
 const moreActionsRef = ref<HTMLDivElement | null>(null)
 const lastRegisterTaskId = ref<string | null>(null)
 const lastLoginTaskId = ref<string | null>(null)
@@ -1136,8 +1170,262 @@ const parseImportLines = (raw: string) => {
   return { items, errors }
 }
 
+const downloadFile = (filename: string, content: string, mimeType: string) => {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+const buildTextExport = (list: AccountConfigItem[]) => {
+  const lines: string[] = []
+  let skipped = 0
+
+  list.forEach((item) => {
+    const provider = String(item.mail_provider || 'duckmail').toLowerCase()
+    const email = String(item.mail_address || item.id || '').trim()
+
+    if (provider === 'gptmail') {
+      if (!email) {
+        skipped += 1
+        return
+      }
+      lines.push(`gptmail----${email}`)
+      return
+    }
+
+    if (provider === 'duckmail') {
+      const password = String(item.mail_password || '')
+      if (!email || !password) {
+        skipped += 1
+        return
+      }
+      lines.push(`duckmail----${email}----${password}`)
+      return
+    }
+
+    if (provider === 'microsoft') {
+      const password = String(item.mail_password || '')
+      const clientId = String(item.mail_client_id || '')
+      const refreshToken = String(item.mail_refresh_token || '')
+      if (!email || !clientId || !refreshToken) {
+        skipped += 1
+        return
+      }
+      lines.push(`${email}----${password}----${clientId}----${refreshToken}`)
+      return
+    }
+
+    skipped += 1
+  })
+
+  return { text: lines.join('\n'), skipped, exported: lines.length }
+}
+
+const getExportTimestamp = () => {
+  const now = new Date()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`
+}
+
+const handleExportAccounts = async (format: 'json' | 'txt') => {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    const list = await loadConfigList()
+    const stamp = getExportTimestamp()
+
+    if (format === 'json') {
+      const filename = `accounts-config_${stamp}.json`
+      downloadFile(filename, JSON.stringify(list, null, 2), 'application/json;charset=utf-8')
+      toast.success('已导出账号配置（JSON）')
+      return
+    }
+
+    const { text, skipped, exported } = buildTextExport(list)
+    const filename = `accounts-config_${stamp}.txt`
+    downloadFile(filename, text, 'text/plain;charset=utf-8')
+    if (skipped > 0) {
+      toast.warning(`已导出 TXT：${exported} 条，跳过 ${skipped} 条（建议使用 JSON 完整备份）`)
+    } else {
+      toast.success(`已导出账号配置（TXT）：${exported} 条`)
+    }
+  } catch (error: any) {
+    toast.error(error?.message || '导出失败')
+  } finally {
+    isExporting.value = false
+  }
+}
+
+const applyImportedItems = async (next: AccountConfigItem[], importedIds: string[]) => {
+  await accountsStore.updateConfig(next)
+  await refreshAccounts()
+
+  selectedIds.value = new Set(importedIds)
+  toast.success(`成功导入 ${importedIds.length} 个账户`)
+  closeRegisterModal()
+
+  const confirmed = await confirmDialog.ask({
+    title: '导入成功',
+    message: `已导入 ${importedIds.length} 个账户并自动选中。是否立即刷新这些账户以获取 Cookie？`,
+    confirmText: '立即刷新',
+    cancelText: '稍后手动刷新',
+  })
+
+  if (confirmed) {
+    await handleRefreshSelected()
+  }
+}
+
+const mergeTextImport = async (items: AccountConfigItem[]) => {
+  const list = await loadConfigList()
+  const next = [...list]
+  const indexMap = new Map(next.map((acc, idx) => [acc.id, idx]))
+  const importedIds: string[] = []
+
+  items.forEach((item) => {
+    const idx = indexMap.get(item.id || '')
+    if (idx === undefined) {
+      next.push(item)
+      importedIds.push(item.id)
+      return
+    }
+
+    const existing = next[idx]
+    const updated: AccountConfigItem = {
+      ...existing,
+      mail_provider: item.mail_provider,
+      mail_address: item.mail_address,
+    }
+
+    if (item.mail_provider === 'microsoft') {
+      updated.mail_client_id = item.mail_client_id
+      updated.mail_refresh_token = item.mail_refresh_token
+      updated.mail_tenant = item.mail_tenant
+      updated.mail_password = item.mail_password
+    } else {
+      updated.mail_password = item.mail_password
+      updated.mail_client_id = undefined
+      updated.mail_refresh_token = undefined
+      updated.mail_tenant = undefined
+    }
+
+    next[idx] = updated
+    importedIds.push(item.id)
+  })
+
+  await applyImportedItems(next, importedIds)
+}
+
+const normalizeJsonImportItem = (raw: any, index: number): AccountConfigItem => {
+  const id = String(raw?.id || raw?.mail_address || '').trim() || `account_${index + 1}`
+  return {
+    secure_c_ses: String(raw?.secure_c_ses || ''),
+    csesidx: String(raw?.csesidx || ''),
+    config_id: String(raw?.config_id || ''),
+    id,
+    host_c_oses: raw?.host_c_oses ? String(raw.host_c_oses) : undefined,
+    expires_at: raw?.expires_at ? String(raw.expires_at) : undefined,
+    mail_provider: raw?.mail_provider ? String(raw.mail_provider) : undefined,
+    mail_address: raw?.mail_address ? String(raw.mail_address) : undefined,
+    mail_password: raw?.mail_password ? String(raw.mail_password) : undefined,
+    mail_client_id: raw?.mail_client_id ? String(raw.mail_client_id) : undefined,
+    mail_refresh_token: raw?.mail_refresh_token ? String(raw.mail_refresh_token) : undefined,
+    mail_tenant: raw?.mail_tenant ? String(raw.mail_tenant) : undefined,
+  }
+}
+
+const mergeJsonImport = async (rawItems: any[]) => {
+  const items = rawItems.map((raw, index) => normalizeJsonImportItem(raw, index))
+  const list = await loadConfigList()
+  const next = [...list]
+  const indexMap = new Map(next.map((acc, idx) => [acc.id, idx]))
+  const importedIds: string[] = []
+
+  items.forEach((item) => {
+    const idx = indexMap.get(item.id || '')
+    if (idx === undefined) {
+      next.push(item)
+      importedIds.push(item.id)
+      return
+    }
+    next[idx] = item
+    importedIds.push(item.id)
+  })
+
+  await applyImportedItems(next, importedIds)
+}
+
+const readFileAsText = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result || ''))
+  reader.onerror = () => reject(new Error('读取文件失败'))
+  reader.readAsText(file)
+})
+
+const handleImportFileChange = async (event: Event) => {
+  importError.value = ''
+  if (!registerAgreed.value) {
+    importError.value = '请先勾选同意声明与限制'
+    toast.error(importError.value)
+    if (importFileInputRef.value) importFileInputRef.value.value = ''
+    return
+  }
+
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  isImporting.value = true
+  try {
+    const content = (await readFileAsText(file)).trim()
+    if (!content) {
+      throw new Error('导入文件为空')
+    }
+
+    const looksLikeJson = file.name.toLowerCase().endsWith('.json') || content.startsWith('[') || content.startsWith('{')
+    if (looksLikeJson) {
+      const parsed = JSON.parse(content)
+      if (Array.isArray(parsed)) {
+        await mergeJsonImport(parsed)
+        return
+      }
+      if (parsed && typeof parsed === 'object' && Array.isArray((parsed as any).accounts)) {
+        await mergeJsonImport((parsed as any).accounts)
+        return
+      }
+      throw new Error('JSON 文件格式错误：需要数组或 { accounts: [] }')
+    }
+
+    const { items, errors } = parseImportLines(content)
+    if (!items.length) {
+      throw new Error(errors.length ? errors.join('，') : '未识别到有效账号')
+    }
+    if (errors.length) {
+      throw new Error(errors.slice(0, 3).join('，'))
+    }
+    await mergeTextImport(items)
+  } catch (error: any) {
+    importError.value = error?.message || '导入失败'
+    toast.error(importError.value)
+  } finally {
+    isImporting.value = false
+    if (importFileInputRef.value) importFileInputRef.value.value = ''
+  }
+}
+
 const handleImport = async () => {
   importError.value = ''
+  if (!registerAgreed.value) {
+    importError.value = '请先勾选同意声明与限制'
+    toast.error(importError.value)
+    return
+  }
   if (!importText.value.trim()) {
     importError.value = '请输入导入内容'
     return
@@ -1154,59 +1442,7 @@ const handleImport = async () => {
 
   isImporting.value = true
   try {
-    const list = await loadConfigList()
-    const next = [...list]
-    const indexMap = new Map(next.map((acc, idx) => [acc.id, idx]))
-    const importedIds: string[] = []
-
-    items.forEach((item) => {
-      const idx = indexMap.get(item.id || '')
-      if (idx === undefined) {
-        next.push(item)
-        importedIds.push(item.id)
-        return
-      }
-
-      const existing = next[idx]
-      const updated: AccountConfigItem = {
-        ...existing,
-        mail_provider: item.mail_provider,
-        mail_address: item.mail_address,
-      }
-
-      if (item.mail_provider === 'microsoft') {
-        updated.mail_client_id = item.mail_client_id
-        updated.mail_refresh_token = item.mail_refresh_token
-        updated.mail_tenant = item.mail_tenant
-        updated.mail_password = item.mail_password
-      } else {
-        updated.mail_password = item.mail_password
-        updated.mail_client_id = undefined
-        updated.mail_refresh_token = undefined
-        updated.mail_tenant = undefined
-      }
-
-      next[idx] = updated
-      importedIds.push(item.id)
-    })
-
-    await accountsStore.updateConfig(next)
-    await refreshAccounts()
-
-    selectedIds.value = new Set(importedIds)
-    toast.success(`成功导入 ${importedIds.length} 个账户`)
-    closeRegisterModal()
-
-    const confirmed = await confirmDialog.ask({
-      title: '导入成功',
-      message: `已导入 ${importedIds.length} 个账户并自动选中。是否立即刷新这些账户以获取 Cookie？`,
-      confirmText: '立即刷新',
-      cancelText: '稍后手动刷新',
-    })
-
-    if (confirmed) {
-      await handleRefreshSelected()
-    }
+    await mergeTextImport(items)
   } catch (error: any) {
     importError.value = error.message || '导入失败'
     toast.error(error.message || '导入失败')

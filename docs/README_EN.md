@@ -78,10 +78,13 @@ Click the **Fork** button in the top-right corner to copy this project to your G
 | `ADMIN_KEY` | ✅ | Admin panel login key (set your own) |
 | `DATABASE_URL` | Recommended | PostgreSQL connection string (see "Database Persistence" below) |
 
-> 💡 **Strongly recommended to configure DATABASE_URL**, otherwise data will be lost when Zeabur restarts. Get a free database at [neon.tech](https://neon.tech)
+> 💡 **Strongly recommended to configure `DATABASE_URL` or mount `/data` (either one)**, otherwise data will be lost when Zeabur restarts. Get a free database at [neon.tech](https://neon.tech)
 
-4. Click **Redeploy** to apply the environment variables
-5. Wait for the build to complete (~1-2 minutes)
+4. (Recommended) Open the service card → **Storage** → add a Volume and set mount path to: `/data`
+   - When `/data` exists, the app stores `accounts.json` / `settings.yaml` / `stats.json` / `images/` under `/data` for persistence
+   - If you already configured `DATABASE_URL`, mounting `/data` is optional
+5. Click **Redeploy** to apply the variables/storage
+6. Wait for the build to complete (~1-2 minutes)
 
 #### How to Update?
 

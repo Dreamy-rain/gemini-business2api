@@ -335,7 +335,8 @@ MODEL_MAPPING = {
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-pro": "gemini-2.5-pro",
     "gemini-3-flash-preview": "gemini-3-flash-preview",
-    "gemini-3-pro-preview": "gemini-3-pro-preview"
+    "gemini-3-pro-preview": "gemini-3-pro-preview",
+    "banana": None  # banana 模型使用特殊配置
 }
 
 # ---------- HTTP 客户端 ----------
@@ -2095,7 +2096,15 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     headers = get_common_headers(jwt, USER_AGENT)
 
 
-    tools_spec = get_tools_spec(model_name)
+    # 特殊处理：banana 模型使用固定配置
+    if model_name == "banana":
+        # 玄学问题：偶然发现如果text_content开头是"User:"，那么banana无法生图
+        # 检查开头是否有User:，结尾是否有\n（可能会有多个\n），有的话全删了
+        text_content = text_content[5:] if text_content.startswith("User:") else text_content
+        text_content = text_content.rstrip("\n")
+        tools_spec = {"imageGenerationSpec": {}}
+    else:
+        tools_spec = get_tools_spec(model_name)
 
     body = {
         "configId": account_manager.config.config_id,
@@ -2104,7 +2113,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
             "session": session,
             "query": {"parts": [{"text": text_content}]},
             "filter": "",
-            "fileIds": file_ids, # 注入文件 ID
+            "fileIds": file_ids,  # 注入文件 ID
             "answerGenerationMode": "NORMAL",
             "toolsSpec": tools_spec,
             "languageCode": "zh-CN",
@@ -2113,11 +2122,13 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         }
     }
 
-    target_model_id = MODEL_MAPPING.get(model_name)
-    if target_model_id:
-        body["streamAssistRequest"]["assistGenerationConfig"] = {
-            "modelId": target_model_id
-        }
+    # 普通模型需要指定 modelId
+    if model_name != "banana":
+        target_model_id = MODEL_MAPPING.get(model_name)
+        if target_model_id:
+            body["streamAssistRequest"]["assistGenerationConfig"] = {
+                "modelId": target_model_id
+            }
 
     if is_stream:
         chunk = create_chunk(chat_id, created_time, model_name, {"role": "assistant"}, None)
@@ -2126,7 +2137,7 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     # 使用流式请求
     json_objects = []  # 收集所有响应对象用于图片解析
     file_ids_info = None  # 保存图片信息
-
+    print("BODY:"+str(body))
     async with http_client.stream(
         "POST",
         "https://biz-discoveryengine.googleapis.com/v1alpha/locations/global/widgetStreamAssist",

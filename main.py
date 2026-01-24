@@ -1394,11 +1394,14 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         new_settings["retry"] = retry
 
         # 保存旧配置用于对比
-        old_proxy = PROXY
+        old_proxy = config.basic.proxy
+        old_outbound = config.basic.outbound_proxy.model_dump()
+        old_proxy_auth = config.basic.proxy_for_auth
+        old_proxy_chat = config.basic.proxy_for_chat
         old_retry_config = {
-            "account_failure_threshold": ACCOUNT_FAILURE_THRESHOLD,
-            "rate_limit_cooldown_seconds": RATE_LIMIT_COOLDOWN_SECONDS,
-            "session_cache_ttl_seconds": SESSION_CACHE_TTL_SECONDS
+            "account_failure_threshold": config.retry.account_failure_threshold,
+            "rate_limit_cooldown_seconds": config.retry.rate_limit_cooldown_seconds,
+            "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds
         }
 
         # 保存到 YAML
@@ -1425,32 +1428,39 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
         SESSION_EXPIRE_HOURS = config.session.expire_hours
 
-        # 检查是否需要重建 HTTP 客户端（代理变化）
-        if old_proxy != PROXY:
-            logger.info(f"[CONFIG] 代理配置已变化，重建 HTTP 客户端")
-            await http_client.aclose()  # 关闭旧客户端
-            http_client = httpx.AsyncClient(
-                proxy=PROXY or None,
-                verify=False,
-                http2=False,
-                timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
-                limits=httpx.Limits(
-                    max_keepalive_connections=100,
-                    max_connections=200
-                )
+        # 检查是否需要重建 HTTP 客户端（代理配置发生任何变化）
+        proxy_changed = (
+            old_proxy != config.basic.proxy or
+            old_outbound != config.basic.outbound_proxy.model_dump() or
+            old_proxy_auth != config.basic.proxy_for_auth or
+            old_proxy_chat != config.basic.proxy_for_chat
+        )
+
+        if proxy_changed:
+            logger.info(f"[CONFIG] 代理配置已变化，正在重建所有 HTTP 客户端...")
+            
+            # 关闭旧客户端
+            await asyncio.gather(
+                http_client.aclose(),
+                http_client_chat.aclose(),
+                http_client_auth.aclose()
             )
-            # 更新所有账户的 http_client 引用
+
+            # 重建客户端
+            http_client = _build_http_client(PROXY_FOR_CHAT)
+            http_client_chat = _build_http_client(PROXY_FOR_CHAT)
+            http_client_auth = _build_http_client(PROXY_FOR_AUTH)
+
+            # 更新所有依赖组件的引用
             multi_account_mgr.update_http_client(http_client)
             if register_service:
                 register_service.http_client = http_client
+                register_service.http_client_auth = http_client_auth
             if login_service:
                 login_service.http_client = http_client
+                login_service.http_client_auth = http_client_auth
 
-            # 更新注册/登录服务的 http_client 引用（账户操作用）
-            if register_service:
-                register_service.http_client = http_client_auth
-            if login_service:
-                login_service.http_client = http_client_auth
+            logger.info("[CONFIG] HTTP 客户端重建完成")
 
         # 检查是否需要更新账户管理器配置（重试策略变化）
         retry_changed = (

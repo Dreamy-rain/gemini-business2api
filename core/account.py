@@ -404,11 +404,18 @@ def load_accounts_from_source() -> list:
             logger.warning(f"[CONFIG] 账户配置为空，请在管理面板添加账户或编辑 {ACCOUNTS_FILE}")
         return accounts_data
 
-    # 4. 无配置，创建空配置
-    logger.warning(f"[CONFIG] 未找到配置，已创建空配置")
-    logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或设置 DATABASE_URL 使用数据库存储")
-    save_accounts_to_file([])
-    return []
+    # 4. 无配置处理
+    if storage.is_database_enabled():
+        # 数据库模式：不自动创建空配置，避免覆盖数据库
+        logger.error(f"[CONFIG] 数据库模式下未找到配置，请检查数据库连接或在管理面板添加账户")
+        logger.error(f"[CONFIG] ⚠️ 为防止数据覆盖，不会自动创建空配置")
+        return []
+    else:
+        # 文件模式：创建空配置文件
+        logger.warning(f"[CONFIG] 未找到配置，已创建空配置")
+        logger.info(f"[CONFIG] 💡 请在管理面板添加账户，或设置 DATABASE_URL 使用数据库存储")
+        save_accounts_to_file([])
+        return []
 
 
 def get_account_id(acc: dict, index: int) -> str:

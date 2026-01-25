@@ -884,8 +884,9 @@ const showMoreActions = ref(false)
 const moreActionsRef = ref<HTMLDivElement | null>(null)
 const lastRegisterTaskId = ref<string | null>(null)
 const lastLoginTaskId = ref<string | null>(null)
-const registerLogClearOffset = ref(0)
-const loginLogClearOffset = ref(0)
+type TaskLogLine = { time: string; level: string; message: string }
+const registerLogClearMarker = ref<TaskLogLine | null>(null)
+const loginLogClearMarker = ref<TaskLogLine | null>(null)
 const registerAgreed = ref(false)
 const registerTask = ref<RegisterTask | null>(null)
 const loginTask = ref<LoginTask | null>(null)
@@ -1003,15 +1004,34 @@ const removeCachedTask = (key: string) => {
   }
 }
 
-const readClearOffset = (key: string) => {
+const readClearMarker = (key: string): TaskLogLine | null => {
   const raw = localStorage.getItem(key)
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : 0
+  if (!raw) return null
+
+  // Backward compatibility: older versions stored numeric offsets.
+  // If we see a number, ignore it so logs still render.
+  const asNumber = Number(raw)
+  if (Number.isFinite(asNumber)) return null
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<TaskLogLine> | null
+    if (!parsed || typeof parsed !== 'object') return null
+    if (typeof parsed.time !== 'string' || typeof parsed.level !== 'string' || typeof parsed.message !== 'string') {
+      return null
+    }
+    return { time: parsed.time, level: parsed.level, message: parsed.message }
+  } catch {
+    return null
+  }
 }
 
-const writeClearOffset = (key: string, value: number) => {
+const writeClearMarker = (key: string, value: TaskLogLine | null) => {
   try {
-    localStorage.setItem(key, String(value))
+    if (!value) {
+      localStorage.removeItem(key)
+      return
+    }
+    localStorage.setItem(key, JSON.stringify(value))
   } catch {
     // ignore storage errors
   }
@@ -1021,10 +1041,10 @@ const syncRegisterTask = (task: RegisterTask | null, persist = true) => {
   if (!task) {
     registerTask.value = null
     lastRegisterTaskId.value = null
-    registerLogClearOffset.value = 0
+    registerLogClearMarker.value = null
     if (persist) {
       removeCachedTask(REGISTER_TASK_CACHE_KEY)
-      writeClearOffset(REGISTER_CLEAR_KEY, 0)
+      writeClearMarker(REGISTER_CLEAR_KEY, null)
     }
     return
   }
@@ -1042,8 +1062,8 @@ const syncRegisterTask = (task: RegisterTask | null, persist = true) => {
   registerTask.value = task
   if (task.id && task.id !== lastRegisterTaskId.value) {
     lastRegisterTaskId.value = task.id
-    registerLogClearOffset.value = 0
-    writeClearOffset(REGISTER_CLEAR_KEY, 0)
+    registerLogClearMarker.value = null
+    writeClearMarker(REGISTER_CLEAR_KEY, null)
   }
   if (persist) {
     writeCachedTask(REGISTER_TASK_CACHE_KEY, task)
@@ -1054,10 +1074,10 @@ const syncLoginTask = (task: LoginTask | null, persist = true) => {
   if (!task) {
     loginTask.value = null
     lastLoginTaskId.value = null
-    loginLogClearOffset.value = 0
+    loginLogClearMarker.value = null
     if (persist) {
       removeCachedTask(LOGIN_TASK_CACHE_KEY)
-      writeClearOffset(LOGIN_CLEAR_KEY, 0)
+      writeClearMarker(LOGIN_CLEAR_KEY, null)
     }
     return
   }
@@ -1075,8 +1095,8 @@ const syncLoginTask = (task: LoginTask | null, persist = true) => {
   loginTask.value = task
   if (task.id && task.id !== lastLoginTaskId.value) {
     lastLoginTaskId.value = task.id
-    loginLogClearOffset.value = 0
-    writeClearOffset(LOGIN_CLEAR_KEY, 0)
+    loginLogClearMarker.value = null
+    writeClearMarker(LOGIN_CLEAR_KEY, null)
   }
   if (persist) {
     writeCachedTask(LOGIN_TASK_CACHE_KEY, task)
@@ -1084,8 +1104,8 @@ const syncLoginTask = (task: LoginTask | null, persist = true) => {
 }
 
 const hydrateTaskCache = () => {
-  registerLogClearOffset.value = readClearOffset(REGISTER_CLEAR_KEY)
-  loginLogClearOffset.value = readClearOffset(LOGIN_CLEAR_KEY)
+  registerLogClearMarker.value = readClearMarker(REGISTER_CLEAR_KEY)
+  loginLogClearMarker.value = readClearMarker(LOGIN_CLEAR_KEY)
   const cachedRegister = readCachedTask<RegisterTask>(REGISTER_TASK_CACHE_KEY)
   if (cachedRegister) {
     if (cachedRegister.status !== 'cancelled') {
@@ -1304,12 +1324,26 @@ const closeTaskModal = () => {
 }
 
 const clearTaskLogs = () => {
-  // 仅“清空显示日志”：通过 offset 让新日志继续实时显示
-  registerLogClearOffset.value = registerTask.value?.logs?.length || 0
-  loginLogClearOffset.value = loginTask.value?.logs?.length || 0
-  writeClearOffset(REGISTER_CLEAR_KEY, registerLogClearOffset.value)
-  writeClearOffset(LOGIN_CLEAR_KEY, loginLogClearOffset.value)
+  // 仅“清空显示日志”：使用“最后一条日志标记”来过滤展示，避免后端截断 logs 时 offset 失效
+  const regLogs = (registerTask.value?.logs || []) as TaskLogLine[]
+  const loginLogsRaw = (loginTask.value?.logs || []) as TaskLogLine[]
+  registerLogClearMarker.value = regLogs.length ? regLogs[regLogs.length - 1] : null
+  loginLogClearMarker.value = loginLogsRaw.length ? loginLogsRaw[loginLogsRaw.length - 1] : null
+  writeClearMarker(REGISTER_CLEAR_KEY, registerLogClearMarker.value)
+  writeClearMarker(LOGIN_CLEAR_KEY, loginLogClearMarker.value)
   automationError.value = ''
+}
+
+const filterLogsAfterMarker = (logs: TaskLogLine[], marker: TaskLogLine | null) => {
+  if (!marker) return logs
+  for (let i = logs.length - 1; i >= 0; i -= 1) {
+    const item = logs[i]
+    if (item.time === marker.time && item.level === marker.level && item.message === marker.message) {
+      return logs.slice(i + 1)
+    }
+  }
+  // Marker not found (e.g., backend truncates to last N logs) — show current logs so new logs keep appearing.
+  return logs
 }
 
 const cancelRegister = async (taskId: string) => {
@@ -1359,13 +1393,11 @@ onMounted(async () => {
 
 const registerLogs = computed(() => {
   const logs = registerTask.value?.logs || []
-  if (!registerLogClearOffset.value) return logs
-  return logs.slice(registerLogClearOffset.value)
+  return filterLogsAfterMarker(logs as TaskLogLine[], registerLogClearMarker.value)
 })
 const loginLogs = computed(() => {
   const logs = loginTask.value?.logs || []
-  if (!loginLogClearOffset.value) return logs
-  return logs.slice(loginLogClearOffset.value)
+  return filterLogsAfterMarker(logs as TaskLogLine[], loginLogClearMarker.value)
 })
 const hasTaskData = computed(() =>
   Boolean(automationError.value) ||

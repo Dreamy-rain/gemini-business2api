@@ -422,6 +422,7 @@ multi_account_mgr = load_multi_account_config(
 # ---------- 自动注册/刷新服务 ----------
 register_service = None
 login_service = None
+pool_service = None
 
 def _set_multi_account_mgr(new_mgr):
     global multi_account_mgr
@@ -430,6 +431,8 @@ def _set_multi_account_mgr(new_mgr):
         register_service.multi_account_mgr = new_mgr
     if login_service:
         login_service.multi_account_mgr = new_mgr
+    if pool_service:
+        pool_service.multi_account_mgr = new_mgr
 
 def _get_global_stats():
     return global_stats
@@ -437,6 +440,7 @@ def _get_global_stats():
 try:
     from core.register_service import RegisterService
     from core.login_service import LoginService
+    from core.pool_service import PoolService
     register_service = RegisterService(
         multi_account_mgr,
         http_client_auth,
@@ -457,10 +461,22 @@ try:
         _get_global_stats,
         _set_multi_account_mgr,
     )
+    pool_service = PoolService(
+        multi_account_mgr,
+        http_client,
+        USER_AGENT,
+        ACCOUNT_FAILURE_THRESHOLD,
+        RATE_LIMIT_COOLDOWN_SECONDS,
+        SESSION_CACHE_TTL_SECONDS,
+        _get_global_stats,
+        _set_multi_account_mgr,
+        register_service=register_service,
+    )
 except Exception as e:
     logger.warning("[SYSTEM] 自动注册/刷新服务不可用: %s", e)
     register_service = None
     login_service = None
+    pool_service = None
 
 # 验证必需的环境变量
 if not ADMIN_KEY:
@@ -729,6 +745,19 @@ async def startup_event():
             logger.error(f"[SYSTEM] 启动登录服务失败: {e}")
     else:
         logger.info("[SYSTEM] 自动登录刷新未启用或依赖不可用")
+
+    # 启动账号池维护轮询（自动删除废弃账号并补号）
+    if pool_service:
+        try:
+            asyncio.create_task(pool_service.start_polling())
+            logger.info(
+                "[SYSTEM] 账号池维护轮询已启动（target=%s）",
+                config.basic.pool_target_accounts,
+            )
+        except Exception as e:
+            logger.error(f"[SYSTEM] 启动账号池维护失败: {e}")
+    else:
+        logger.info("[SYSTEM] 账号池维护未启用或依赖不可用")
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:
@@ -1261,6 +1290,22 @@ async def admin_get_auto_refresh_status(request: Request):
     is_paused = login_service.is_auto_refresh_paused()
     return {"paused": is_paused, "status": "paused" if is_paused else "active"}
 
+@app.post("/admin/pool/maintain")
+@require_login()
+async def admin_pool_maintain(request: Request):
+    """运行一次账号池维护：删除废弃账号并按目标数量触发补号"""
+    if not pool_service:
+        raise HTTPException(503, "pool service unavailable")
+    return await pool_service.maintain_once()
+
+@app.get("/admin/pool/status")
+@require_login()
+async def admin_pool_status(request: Request):
+    """查看账号池维护状态"""
+    if not pool_service:
+        raise HTTPException(503, "pool service unavailable")
+    return pool_service.get_status()
+
 @app.delete("/admin/accounts/{account_id}")
 @require_login()
 async def admin_delete_account(request: Request, account_id: str):
@@ -1365,6 +1410,8 @@ async def admin_get_settings(request: Request):
             "refresh_window_hours": config.basic.refresh_window_hours,
             "register_default_count": config.basic.register_default_count,
             "register_domain": config.basic.register_domain,
+            "pool_target_accounts": config.basic.pool_target_accounts,
+            "pool_prune_disabled": config.basic.pool_prune_disabled,
         },
         "image_generation": {
             "enabled": config.image_generation.enabled,
@@ -1412,9 +1459,15 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)
         basic.setdefault("register_default_count", config.basic.register_default_count)
         basic.setdefault("register_domain", config.basic.register_domain)
+        basic.setdefault("pool_target_accounts", config.basic.pool_target_accounts)
+        basic.setdefault("pool_prune_disabled", config.basic.pool_prune_disabled)
         if not isinstance(basic.get("register_domain"), str):
             basic["register_domain"] = ""
         basic.pop("duckmail_proxy", None)
+        # 兼容旧配置：丢弃已移除的账号池字段（旧 WebUI/YAML 可能仍上传这些字段）。
+        basic.pop("pool_check_interval_seconds", None)
+        basic.pop("pool_register_batch_size", None)
+        basic.pop("pool_expired_grace_minutes", None)
         new_settings["basic"] = basic
 
         image_generation = dict(new_settings.get("image_generation") or {})

@@ -71,6 +71,19 @@ class GeminiAutomationUC:
         self.user_data_dir = tempfile.mkdtemp(prefix='uc-profile-')
         options.add_argument(f"--user-data-dir={self.user_data_dir}")
 
+        # 避免 Linux/WSL 下弹出系统 Keyring 解锁对话框（会阻塞自动化）。
+        options.add_argument("--password-store=basic")
+        options.add_argument("--use-mock-keychain")
+        options.add_experimental_option(
+            "prefs",
+            {
+                # 禁用密码保存相关服务，减少系统 keyring 访问
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "intl.accept_languages": "zh-CN,zh",
+            },
+        )
+
         # 基础参数
         options.add_argument("--incognito")
         options.add_argument("--no-sandbox")
@@ -79,9 +92,7 @@ class GeminiAutomationUC:
 
         # 语言设置（确保使用中文界面）
         options.add_argument("--lang=zh-CN")
-        options.add_experimental_option("prefs", {
-            "intl.accept_languages": "zh-CN,zh"
-        })
+        # intl.accept_languages 已在 prefs 中设置
 
         # 代理设置
         if self.proxy:
@@ -93,7 +104,7 @@ class GeminiAutomationUC:
             options.add_argument("--disable-gpu")
             options.add_argument("--disable-dev-shm-usage")
 
-        # User-Agent
+        # User-Agent 设置
         if self.user_agent:
             options.add_argument(f"--user-agent={self.user_agent}")
 
@@ -323,13 +334,46 @@ class GeminiAutomationUC:
         return None
 
     def _handle_agreement_page(self) -> None:
-        """处理协议页面"""
+        """处理首次启用/协议页面（Gemini Enterprise Business 30 天试用）
+
+        典型 URL: https://business.gemini.google/admin/create?csesidx=...
+        页面需要填写 full name，并点击“同意并开始使用”，之后才会跳转到带 /cid/ 的业务页。
+
+        Returns:
+            None
+        """
         if "/admin/create" in self.driver.current_url:
             try:
+                # Step 1: 填写姓名（必填项）
+                # 说明：输入框选择器可能会变动，这里做了多选择器兜底。
+                try:
+                    name_input = WebDriverWait(self.driver, 10).until(
+                        EC.visibility_of_element_located(
+                            (By.CSS_SELECTOR, "input[formcontrolname='fullName'], input[placeholder='全名'], input#mat-input-0")
+                        )
+                    )
+                    suffix = "".join(random.choices(string.ascii_letters + string.digits, k=4))
+                    full_name = f"Test{suffix}"
+                    name_input.click()
+                    time.sleep(0.2)
+                    name_input.clear()
+                    for ch in full_name:
+                        name_input.send_keys(ch)
+                        time.sleep(0.02)
+                except Exception:
+                    pass
+
+                # Step 2: 点击「同意并开始使用」
                 agree_btn = WebDriverWait(self.driver, 5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "button.agree-button"))
                 )
-                agree_btn.click()
+                try:
+                    agree_btn.click()
+                except Exception:
+                    # 遮挡等场景下尝试 JS 点击
+                    self.driver.execute_script("arguments[0].click();", agree_btn)
+
+                # Step 3: 等待跳转
                 time.sleep(2)
             except TimeoutException:
                 pass
@@ -343,9 +387,20 @@ class GeminiAutomationUC:
         return False
 
     def _wait_for_business_params(self, timeout: int = 30) -> bool:
-        """等待业务页面参数生成（csesidx 和 cid）"""
+        """等待业务页面参数生成（csesidx 和 cid）
+
+        Args:
+            timeout: 最大等待秒数
+
+        Returns:
+            bool: 参数就绪返回 True，否则返回 False
+        """
         for _ in range(timeout):
             url = self.driver.current_url
+            if "/admin/create" in url:
+                self._handle_agreement_page()
+                time.sleep(1)
+                url = self.driver.current_url
             if "csesidx=" in url and "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True

@@ -80,6 +80,8 @@ export interface Settings {
     refresh_window_hours?: number
     register_default_count?: number
     register_domain?: string
+    pool_target_accounts?: number
+    pool_prune_disabled?: boolean
   }
   retry: {
     max_new_session_tries: number

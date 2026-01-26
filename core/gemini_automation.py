@@ -97,6 +97,12 @@ class GeminiAutomation:
             options.set_browser_path(chromium_path)
             self._log("info", f"using browser: {chromium_path}")
 
+        # 避免 Linux/WSL 下弹出系统 Keyring 解锁对话框（会阻塞自动化）。
+        options.set_argument("--password-store=basic")
+        options.set_argument("--use-mock-keychain")
+        options.set_pref("credentials_enable_service", False)
+        options.set_pref("profile.password_manager_enabled", False)
+
         options.set_argument("--incognito")
         options.set_argument("--no-sandbox")
         options.set_argument("--disable-dev-shm-usage")
@@ -299,8 +305,11 @@ class GeminiAutomation:
             current_url = page.url
             self._log("info", f"URL after navigation: {current_url}")
 
-        # Step 11: 检查是否需要设置用户名
-        if "cid" not in page.url:
+        # Step 11: 处理首次启用页面（admin/create）或用户名设置页面
+        if "/admin/create" in page.url:
+            if self._handle_agreement_page(page):
+                time.sleep(5)
+        elif "cid" not in page.url:
             if self._handle_username_setup(page):
                 time.sleep(5)  # 增加等待时间
 
@@ -446,13 +455,82 @@ class GeminiAutomation:
 
         return False
 
-    def _handle_agreement_page(self, page) -> None:
-        """处理协议页面"""
-        if "/admin/create" in page.url:
-            agree_btn = page.ele("css:button.agree-button", timeout=5)
-            if agree_btn:
-                agree_btn.click()
-                time.sleep(2)
+    def _handle_agreement_page(self, page) -> bool:
+        """处理首次启用/协议页面（Gemini Enterprise Business 30 天试用）
+
+        典型 URL: https://business.gemini.google/admin/create?csesidx=...
+        页面需要填写 full name，并点击“同意并开始使用”，之后才会跳转到带 /cid/ 的业务页。
+
+        Args:
+            page: DrissionPage 页面对象
+
+        Returns:
+            bool: 处理成功返回 True，否则返回 False
+        """
+        if "/admin/create" not in page.url:
+            return False
+
+        self._log("info", "on onboarding page (/admin/create), filling name and accepting terms")
+
+        # Step 1: 查找并填写全名（必填）
+        # 说明：该页面的输入框选择器可能会变动，这里做了多选择器兜底。
+        name_input = (
+            page.ele("css:input[formcontrolname='fullName']", timeout=6)
+            or page.ele("css:input[placeholder*='全名']", timeout=2)
+            or page.ele("css:input#mat-input-0", timeout=2)
+        )
+        if not name_input:
+            self._log("warning", "full name input not found on /admin/create")
+            self._save_screenshot(page, "admin_create_name_input_missing")
+            return False
+
+        # 避免全名冲突，增加随机后缀
+        suffix = "".join(random.choices(string.ascii_letters + string.digits, k=4))
+        full_name = f"Test{suffix}"
+        try:
+            name_input.click()
+            time.sleep(0.2)
+            try:
+                name_input.clear()
+            except Exception:
+                pass
+            name_input.input(full_name, clear=True)
+            time.sleep(0.3)
+        except Exception as e:
+            self._log("warning", f"failed to input full name: {e}")
+            self._save_screenshot(page, "admin_create_name_input_failed")
+            return False
+
+        # Step 2: 点击「同意并开始使用」
+        agree_btn = (
+            page.ele("css:button.agree-button", timeout=6)
+            or page.ele("xpath://button[contains(., '同意') and contains(., '开始')]", timeout=3)
+            or page.ele("xpath://button[contains(., 'Agree') and contains(., 'start')]", timeout=3)
+        )
+        if not agree_btn:
+            self._log("warning", "agree/start button not found on /admin/create")
+            self._save_screenshot(page, "admin_create_agree_button_missing")
+            return False
+
+        try:
+            agree_btn.click()
+        except Exception:
+            try:
+                # 遮挡等场景下尝试 JS 点击
+                agree_btn.run_js("this.click()")
+            except Exception as e:
+                self._log("warning", f"failed to click agree/start button: {e}")
+                self._save_screenshot(page, "admin_create_agree_click_failed")
+                return False
+
+        # Step 3: 等待离开 /admin/create（提交后通常会自动跳转）
+        for _ in range(30):
+            if "/admin/create" not in page.url:
+                break
+            time.sleep(1)
+
+        self._log("info", f"onboarding submit done, current url: {page.url}")
+        return True
 
     def _wait_for_cid(self, page, timeout: int = 10) -> bool:
         """等待URL包含cid"""
@@ -463,9 +541,22 @@ class GeminiAutomation:
         return False
 
     def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
-        """等待业务页面参数生成（csesidx 和 cid）"""
+        """等待业务页面参数生成（csesidx 和 cid）
+
+        Args:
+            page: DrissionPage 页面对象
+            timeout: 最大等待秒数
+
+        Returns:
+            bool: 参数就绪返回 True，否则返回 False
+        """
         for _ in range(timeout):
             url = page.url
+            # 有时会先跳到 onboarding 页面（/admin/create），需先处理协议页再继续拿到 /cid/ 参数。
+            if "/admin/create" in url:
+                self._handle_agreement_page(page)
+                time.sleep(2)
+                url = page.url
             if "csesidx=" in url and "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
@@ -573,15 +664,52 @@ class GeminiAutomation:
             return {"success": False, "error": str(e)}
 
     def _save_screenshot(self, page, name: str) -> None:
-        """保存截图"""
+        """保存调试信息（截图 + HTML + 元信息）
+
+        注意：不要静默吞掉异常，否则排查页面结构变化会非常困难。
+
+        Args:
+            page: DrissionPage 页面对象
+            name: 文件名前缀（用于区分场景）
+        """
+        import os
+
+        ts = int(time.time())
+        debug_dir = os.path.abspath(os.path.join("data", "automation"))
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # 1) 元信息
         try:
-            import os
-            screenshot_dir = os.path.join("data", "automation")
-            os.makedirs(screenshot_dir, exist_ok=True)
-            path = os.path.join(screenshot_dir, f"{name}_{int(time.time())}.png")
-            page.get_screenshot(path=path)
-        except Exception:
-            pass
+            meta_path = os.path.join(debug_dir, f"{name}_{ts}.meta.txt")
+            title = getattr(page, "title", "")
+            if callable(title):
+                title = title()
+            with open(meta_path, "w", encoding="utf-8") as f:
+                f.write(f"url: {getattr(page, 'url', '')}\n")
+                f.write(f"title: {title}\n")
+            self._log("info", f"saved debug meta: {meta_path}")
+        except Exception as e:
+            self._log("warning", f"failed to save debug meta: {e}")
+
+        # 2) 截图
+        try:
+            png_path = os.path.join(debug_dir, f"{name}_{ts}.png")
+            page.get_screenshot(path=png_path)
+            self._log("info", f"saved screenshot: {png_path}")
+        except Exception as e:
+            self._log("warning", f"failed to save screenshot: {e}")
+
+        # 3) HTML
+        try:
+            html_val = getattr(page, "html", "")
+            if callable(html_val):
+                html_val = html_val()
+            html_path = os.path.join(debug_dir, f"{name}_{ts}.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(html_val or "")
+            self._log("info", f"saved html: {html_path}")
+        except Exception as e:
+            self._log("warning", f"failed to save html: {e}")
 
     def _log(self, level: str, message: str) -> None:
         """记录日志"""

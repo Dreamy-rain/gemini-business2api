@@ -60,20 +60,36 @@ class LoginService(BaseTaskService[LoginTask]):
         self._is_polling = False
         self._auto_refresh_paused = True  # 运行时开关：默认暂停（不自动刷新）
 
+    def _get_active_account_ids(self) -> set:
+        """获取当前正在处理中（PENDING 或 RUNNING）的所有账号 ID"""
+        active_ids = set()
+        for task in self._tasks.values():
+            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                for acc_id in task.account_ids:
+                    active_ids.add(acc_id)
+        return active_ids
+
     async def start_login(self, account_ids: List[str]) -> LoginTask:
         """启动登录任务（支持排队）。"""
         async with self._lock:
-            # 去重：同一批账号的 pending/running 任务直接复用
-            normalized = list(account_ids or [])
-            for existing in self._tasks.values():
-                if (
-                    isinstance(existing, LoginTask)
-                    and existing.account_ids == normalized
-                    and existing.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
-                ):
-                    return existing
+            # 获取当前已经在活跃任务中的账号
+            active_ids = self._get_active_account_ids()
+            
+            # 过滤掉已经在队列或运行中的账号
+            new_account_ids = [aid for aid in account_ids if aid not in active_ids]
+            
+            if not new_account_ids:
+                # 寻找包含这些账号的现有活跃任务并返回，如果没有则返回 None
+                for existing in self._tasks.values():
+                    if (
+                        isinstance(existing, LoginTask)
+                        and any(aid in existing.account_ids for aid in account_ids)
+                        and existing.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
+                    ):
+                        return existing
+                return None
 
-            task = LoginTask(id=str(uuid.uuid4()), account_ids=normalized)
+            task = LoginTask(id=str(uuid.uuid4()), account_ids=new_account_ids)
             self._tasks[task.id] = task
             self._append_log(task, "info", f"📝 创建刷新任务 (账号数量: {len(task.account_ids)})")
             await self._enqueue_task(task)
@@ -284,9 +300,13 @@ class LoginService(BaseTaskService[LoginTask]):
         expiring = []
         beijing_tz = timezone(timedelta(hours=8))
         now = datetime.now(beijing_tz)
+        
+        # 获取当前活跃账号，在扫描阶段就排除它们
+        active_ids = self._get_active_account_ids()
 
         for account in accounts:
-            if account.get("disabled"):
+            account_id = account.get("id")
+            if not account_id or account.get("disabled") or account_id in active_ids:
                 continue
             mail_provider = (account.get("mail_provider") or "").lower()
             if not mail_provider:

@@ -1,5 +1,23 @@
-﻿<template>
+<template>
   <div class="space-y-8">
+    <!-- 定制版本标识 -->
+    <section class="rounded-2xl border-2 border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 p-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
+            <span class="text-lg">🚀</span>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-foreground">GPTMail 定制版</p>
+            <p class="text-xs text-muted-foreground">支持 GPTMail (400+ 域名池) + Freemail + Moemail + DuckMail</p>
+          </div>
+        </div>
+        <div class="rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">
+          v2.0-gptmail
+        </div>
+      </div>
+    </section>
+
     <section class="grid grid-cols-2 gap-4 md:grid-cols-2 xl:grid-cols-4">
       <div
         v-for="stat in stats"

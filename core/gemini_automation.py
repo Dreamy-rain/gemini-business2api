@@ -172,23 +172,47 @@ class GeminiAutomation:
         send_time = datetime.now()
 
         # Step 1: 导航到 Gemini Business 首页（会自动跳转到登录页面）
-        self._log("info", f"🌐 正在打开 Gemini Business 首页: {email}")
+        self._log(
+            "info", f"🌐 正在访问 https://business.gemini.google/ (邮箱: {email})"
+        )
 
         # 访问首页，让 Google 自动重定向到登录页面（避免被检测为自动化）
         page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(5)  # 等待自动重定向完成
+        time.sleep(8)  # 增加等待时间，确保页面完全加载和重定向
+
+        # 输出当前 URL，用于调试
+        current_url = page.url
+        self._log("info", f"📍 当前 URL: {current_url}")
 
         # Step 1.5: 查找并填写邮箱输入框
         self._log("info", "📧 正在查找邮箱输入框...")
+
+        # 先输出页面上所有 input 元素，用于调试
+        try:
+            all_inputs = page.eles("tag:input")
+            self._log("info", f"📋 页面上共有 {len(all_inputs)} 个 input 元素")
+            for i, inp in enumerate(all_inputs[:5]):  # 只输出前5个
+                inp_type = inp.attr("type") or "unknown"
+                inp_name = inp.attr("name") or "unknown"
+                inp_placeholder = inp.attr("placeholder") or ""
+                self._log(
+                    "info",
+                    f"  Input {i + 1}: type={inp_type}, name={inp_name}, placeholder={inp_placeholder}",
+                )
+        except Exception as e:
+            self._log("warning", f"⚠️ 无法列出 input 元素: {e}")
+
         email_input = None
 
         # 尝试多种选择器
         selectors = [
             "css:input[type='email']",
             "css:input[name='email']",
+            "css:input[name='identifier']",
             "css:input[placeholder*='邮箱']",
             "css:input[placeholder*='email']",
             "css:input[placeholder*='Email']",
+            "css:input[autocomplete='email']",
         ]
 
         for selector in selectors:
@@ -202,6 +226,7 @@ class GeminiAutomation:
 
         if not email_input:
             self._log("error", "❌ 未找到邮箱输入框")
+            self._log("error", f"❌ 当前 URL: {current_url}")
             self._save_screenshot(page, "email_input_not_found")
             return {"success": False, "error": "email input not found"}
 

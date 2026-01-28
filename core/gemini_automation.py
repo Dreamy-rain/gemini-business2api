@@ -171,13 +171,12 @@ class GeminiAutomation:
 
         send_time = datetime.now()
 
-        # Step 1: 导航到登录页面（模拟真实用户）
-        self._log("info", f"🌐 正在打开登录页面: {email}")
+        # Step 1: 导航到 Gemini Business 首页（会自动跳转到登录页面）
+        self._log("info", f"🌐 正在打开 Gemini Business 首页: {email}")
 
-        # 直接访问登录页面，不带 loginHint（避免被检测为自动化）
-        login_url = "https://auth.business.gemini.google/login?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F"
-        page.get(login_url, timeout=self.timeout)
-        time.sleep(3)
+        # 访问首页，让 Google 自动重定向到登录页面（避免被检测为自动化）
+        page.get("https://business.gemini.google/", timeout=self.timeout)
+        time.sleep(5)  # 等待自动重定向完成
 
         # Step 1.5: 查找并填写邮箱输入框
         self._log("info", "📧 正在查找邮箱输入框...")

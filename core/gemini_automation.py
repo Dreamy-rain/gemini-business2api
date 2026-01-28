@@ -1,6 +1,7 @@
 """
 Gemini自动化登录模块（用于新账号注册）
 """
+
 import os
 import random
 import string
@@ -68,7 +69,7 @@ class GeminiAutomation:
         user_data_dir = None
         try:
             page = self._create_page()
-            user_data_dir = getattr(page, 'user_data_dir', None)
+            user_data_dir = getattr(page, "user_data_dir", None)
             self._page = page
             self._user_data_dir = user_data_dir
             return self._run_flow(page, email, mail_client)
@@ -120,7 +121,9 @@ class GeminiAutomation:
             options.set_argument("--disable-extensions")
             # 反检测参数
             options.set_argument("--disable-infobars")
-            options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
+            options.set_argument(
+                "--enable-features=NetworkService,NetworkServiceInProcess"
+            )
 
         options.auto_port()
         page = ChromiumPage(options)
@@ -129,7 +132,9 @@ class GeminiAutomation:
         # 反检测：注入脚本隐藏自动化特征
         if self.headless:
             try:
-                page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source="""
+                page.run_cdp(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    source="""
                     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
                     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
                     Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
@@ -151,7 +156,8 @@ class GeminiAutomation:
                             Promise.resolve({state: Notification.permission}) :
                             originalQuery(parameters)
                     );
-                """)
+                """,
+                )
             except Exception:
                 pass
 
@@ -162,6 +168,7 @@ class GeminiAutomation:
 
         # 记录开始时间，用于邮件时间过滤
         from datetime import datetime
+
         send_time = datetime.now()
 
         # Step 1: 导航到首页并设置 Cookie
@@ -173,21 +180,25 @@ class GeminiAutomation:
         # 设置两个关键 Cookie
         try:
             self._log("info", "🍪 正在设置认证 Cookies...")
-            page.set.cookies({
-                "name": "__Host-AP_SignInXsrf",
-                "value": DEFAULT_XSRF_TOKEN,
-                "url": AUTH_HOME_URL,
-                "path": "/",
-                "secure": True,
-            })
+            page.set.cookies(
+                {
+                    "name": "__Host-AP_SignInXsrf",
+                    "value": DEFAULT_XSRF_TOKEN,
+                    "url": AUTH_HOME_URL,
+                    "path": "/",
+                    "secure": True,
+                }
+            )
             # 添加 reCAPTCHA Cookie
-            page.set.cookies({
-                "name": "_GRECAPTCHA",
-                "value": "09ABCL...",
-                "url": "https://google.com",
-                "path": "/",
-                "secure": True,
-            })
+            page.set.cookies(
+                {
+                    "name": "_GRECAPTCHA",
+                    "value": "09ABCL...",
+                    "url": "https://google.com",
+                    "path": "/",
+                    "secure": True,
+                }
+            )
             self._log("info", "✅ Cookies 设置成功")
         except Exception as e:
             self._log("warning", f"⚠️ 设置 Cookies 失败: {e}")
@@ -201,7 +212,11 @@ class GeminiAutomation:
         # Step 2: 检查当前页面状态
         current_url = page.url
         self._log("info", f"📍 当前 URL: {current_url}")
-        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
+        has_business_params = (
+            "business.gemini.google" in current_url
+            and "csesidx=" in current_url
+            and "/cid/" in current_url
+        )
 
         if has_business_params:
             self._log("info", "✅ 检测到已登录，直接提取配置")
@@ -234,11 +249,16 @@ class GeminiAutomation:
             if self._click_resend_code_button(page):
                 self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
                 # 再次轮询验证码
-                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+                code = mail_client.poll_for_code(
+                    timeout=40, interval=4, since_time=send_time
+                )
                 if not code:
                     self._log("error", "❌ 重新发送后仍未收到验证码")
                     self._save_screenshot(page, "code_timeout_after_resend")
-                    return {"success": False, "error": "verification code timeout after resend"}
+                    return {
+                        "success": False,
+                        "error": "verification code timeout after resend",
+                    }
             else:
                 self._log("error", "❌ 验证码超时且未找到重新发送按钮")
                 self._save_screenshot(page, "code_timeout")
@@ -247,8 +267,9 @@ class GeminiAutomation:
         self._log("info", f"✅ 收到验证码: {code}")
 
         # Step 6: 输入验证码并提交
-        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=3) or \
-                     page.ele("css:input[type='tel']", timeout=2)
+        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=3) or page.ele(
+            "css:input[type='tel']", timeout=2
+        )
 
         if not code_input:
             self._log("error", "❌ 验证码输入框已失效")
@@ -267,7 +288,9 @@ class GeminiAutomation:
 
         # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
         self._log("info", "⏳ 等待验证后自动跳转...")
-        time.sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
+        time.sleep(
+            12
+        )  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
 
         # 记录当前 URL 状态
         current_url = page.url
@@ -284,7 +307,11 @@ class GeminiAutomation:
 
         # Step 9: 检查是否已经在正确的页面
         current_url = page.url
-        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
+        has_business_params = (
+            "business.gemini.google" in current_url
+            and "csesidx=" in current_url
+            and "/cid/" in current_url
+        )
 
         if has_business_params:
             # 已经在正确的页面，不需要再次导航
@@ -330,14 +357,24 @@ class GeminiAutomation:
         if direct_btn:
             try:
                 direct_btn.click()
-                self._log("info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)")
+                self._log(
+                    "info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)"
+                )
                 time.sleep(3)  # 等待发送请求
                 return True
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
 
         # 方法2: 通过关键词查找
-        keywords = ["通过电子邮件发送验证码", "通过电子邮件发送", "email", "Email", "Send code", "Send verification", "Verification code"]
+        keywords = [
+            "通过电子邮件发送验证码",
+            "通过电子邮件发送",
+            "email",
+            "Email",
+            "Send code",
+            "Send verification",
+            "Verification code",
+        ]
         try:
             self._log("info", f"🔍 通过关键词搜索按钮: {keywords}")
             buttons = page.eles("tag:button")
@@ -355,13 +392,9 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
 
-        # 检查是否已经在验证码输入页面
-        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=2) or page.ele("css:input[name='pinInput']", timeout=1)
-        if code_input:
-            self._log("info", "✅ 已在验证码输入页面，无需点击按钮")
-            return True
-
+        # 如果所有方法都失败，记录错误
         self._log("error", "❌ 未找到发送验证码按钮")
+        self._save_screenshot(page, "send_button_not_found")
         return False
 
     def _wait_for_code_input(self, page, timeout: int = 30):
@@ -418,7 +451,13 @@ class GeminiAutomation:
             buttons = page.eles("tag:button")
             for btn in buttons:
                 text = (btn.text or "").strip().lower()
-                if text and "重新" not in text and "发送" not in text and "resend" not in text and "send" not in text:
+                if (
+                    text
+                    and "重新" not in text
+                    and "发送" not in text
+                    and "resend" not in text
+                    and "send" not in text
+                ):
                     return btn
         except Exception:
             pass
@@ -510,7 +549,10 @@ class GeminiAutomation:
 
             # 尝试模拟人类输入，失败则降级到直接注入
             if not self._simulate_human_input(username_input, username):
-                self._log("warning", "simulated username input failed, fallback to direct input")
+                self._log(
+                    "warning",
+                    "simulated username input failed, fallback to direct input",
+                )
                 username_input.input(username)
                 time.sleep(0.3)
 
@@ -518,7 +560,21 @@ class GeminiAutomation:
             submit_btn = None
             for btn in buttons:
                 text = (btn.text or "").strip().lower()
-                if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
+                if any(
+                    kw in text
+                    for kw in [
+                        "确认",
+                        "提交",
+                        "继续",
+                        "submit",
+                        "continue",
+                        "confirm",
+                        "save",
+                        "保存",
+                        "下一步",
+                        "next",
+                    ]
+                ):
                     submit_btn = btn
                     break
 
@@ -544,21 +600,33 @@ class GeminiAutomation:
                 return {"success": False, "error": "cid not found"}
 
             config_id = url.split("cid/")[1].split("?")[0].split("/")[0]
-            csesidx = url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
+            csesidx = (
+                url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
+            )
 
             cookies = page.cookies()
-            ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
-            host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
+            ses = next(
+                (c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None
+            )
+            host = next(
+                (c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None
+            )
 
             ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
             # 使用北京时区，确保时间计算正确（Cookie expiry 是 UTC 时间戳）
             beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
                 # 将 UTC 时间戳转为北京时间，再减去12小时作为刷新窗口
-                cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
-                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+                cookie_expire_beijing = datetime.fromtimestamp(
+                    ses_obj["expiry"], tz=beijing_tz
+                )
+                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
             else:
-                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
 
             config = {
                 "id": email,
@@ -576,6 +644,7 @@ class GeminiAutomation:
         """保存截图"""
         try:
             import os
+
             screenshot_dir = os.path.join("data", "automation")
             os.makedirs(screenshot_dir, exist_ok=True)
             path = os.path.join(screenshot_dir, f"{name}_{int(time.time())}.png")
@@ -599,6 +668,7 @@ class GeminiAutomation:
             return
         try:
             import shutil
+
             if os.path.exists(user_data_dir):
                 shutil.rmtree(user_data_dir, ignore_errors=True)
         except Exception:

@@ -256,11 +256,11 @@ class GeminiAutomation:
             self._save_screenshot(page, "continue_button_not_found")
             return {"success": False, "error": "continue button not found"}
 
-        # 点击按钮
+        # 点击按钮（Google 会自动发送验证码并跳转）
         try:
             continue_btn.click()
-            self._log("info", "✅ 已点击继续按钮")
-            time.sleep(5)  # 等待页面跳转
+            self._log("info", "✅ 已点击继续按钮，Google 会自动发送验证码")
+            time.sleep(8)  # 等待页面跳转和验证码发送
         except Exception as e:
             self._log("error", f"❌ 点击继续按钮失败: {e}")
             self._save_screenshot(page, "continue_button_click_failed")
@@ -268,7 +268,9 @@ class GeminiAutomation:
 
         # Step 2: 检查当前页面状态
         current_url = page.url
-        self._log("info", f"📍 当前 URL: {current_url}")
+        self._log("info", f"📍 点击继续后的 URL: {current_url}")
+
+        # 检查是否已经登录成功
         has_business_params = (
             "business.gemini.google" in current_url
             and "csesidx=" in current_url
@@ -279,14 +281,7 @@ class GeminiAutomation:
             self._log("info", "✅ 检测到已登录，直接提取配置")
             return self._extract_config(page, email)
 
-        # Step 3: 点击发送验证码按钮
-        self._log("info", "🔘 正在查找并点击发送验证码按钮...")
-        if not self._click_send_code_button(page):
-            self._log("error", "❌ 未找到发送验证码按钮")
-            self._save_screenshot(page, "send_code_button_missing")
-            return {"success": False, "error": "send code button not found"}
-
-        # Step 4: 等待验证码输入框出现
+        # Step 3: 等待验证码输入框出现（Google 已自动发送验证码）
         self._log("info", "⏳ 等待验证码输入框出现...")
         code_input = self._wait_for_code_input(page)
         if not code_input:

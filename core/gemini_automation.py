@@ -350,7 +350,7 @@ class GeminiAutomation:
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(2)
+        time.sleep(3)  # 增加等待时间，确保页面完全加载
 
         # 方法1: 直接通过ID查找
         direct_btn = page.ele("#sign-in-with-email", timeout=5)
@@ -365,22 +365,38 @@ class GeminiAutomation:
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
 
-        # 方法2: 通过关键词查找
+        # 方法2: 通过关键词查找（扩展关键词列表）
         keywords = [
             "通过电子邮件发送验证码",
             "通过电子邮件发送",
+            "发送验证码",
+            "发送",
             "email",
             "Email",
+            "EMAIL",
             "Send code",
             "Send verification",
             "Verification code",
+            "Get code",
+            "Continue",
+            "Next",
+            "Verify",
         ]
         try:
-            self._log("info", f"🔍 通过关键词搜索按钮: {keywords}")
+            self._log("info", f"🔍 通过关键词搜索按钮...")
+
+            # 先输出所有按钮的文本，用于调试
             buttons = page.eles("tag:button")
+            self._log("info", f"📋 页面上共有 {len(buttons)} 个按钮")
+            for i, btn in enumerate(buttons[:10]):  # 只输出前10个
+                text = (btn.text or "").strip()
+                if text:
+                    self._log("info", f"  按钮 {i + 1}: '{text}'")
+
+            # 查找匹配的按钮
             for btn in buttons:
                 text = (btn.text or "").strip()
-                if text and any(kw in text for kw in keywords):
+                if text and any(kw.lower() in text.lower() for kw in keywords):
                     try:
                         self._log("info", f"✅ 找到匹配按钮: '{text}'")
                         btn.click()
@@ -391,6 +407,27 @@ class GeminiAutomation:
                         self._log("warning", f"⚠️ 点击按钮失败: {e}")
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
+
+        # 方法3: 尝试查找 div 或 span 元素（可能是自定义按钮）
+        try:
+            self._log("info", "🔍 尝试查找非 button 标签的可点击元素...")
+            clickables = page.eles("css:[role='button']") + page.eles("css:.button")
+            self._log("info", f"📋 找到 {len(clickables)} 个可点击元素")
+            for elem in clickables[:10]:
+                text = (elem.text or "").strip()
+                if text:
+                    self._log("info", f"  元素: '{text}'")
+                if text and any(kw.lower() in text.lower() for kw in keywords):
+                    try:
+                        self._log("info", f"✅ 找到匹配元素: '{text}'")
+                        elem.click()
+                        self._log("info", "✅ 成功点击发送验证码元素")
+                        time.sleep(3)
+                        return True
+                    except Exception as e:
+                        self._log("warning", f"⚠️ 点击元素失败: {e}")
+        except Exception as e:
+            self._log("warning", f"⚠️ 搜索可点击元素异常: {e}")
 
         # 如果所有方法都失败，记录错误
         self._log("error", "❌ 未找到发送验证码按钮")

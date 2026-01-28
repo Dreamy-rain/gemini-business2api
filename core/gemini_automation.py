@@ -1,7 +1,6 @@
 """
 Gemini自动化登录模块（用于新账号注册）
 """
-
 import os
 import random
 import string
@@ -69,7 +68,7 @@ class GeminiAutomation:
         user_data_dir = None
         try:
             page = self._create_page()
-            user_data_dir = getattr(page, "user_data_dir", None)
+            user_data_dir = getattr(page, 'user_data_dir', None)
             self._page = page
             self._user_data_dir = user_data_dir
             return self._run_flow(page, email, mail_client)
@@ -121,9 +120,7 @@ class GeminiAutomation:
             options.set_argument("--disable-extensions")
             # 反检测参数
             options.set_argument("--disable-infobars")
-            options.set_argument(
-                "--enable-features=NetworkService,NetworkServiceInProcess"
-            )
+            options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
 
         options.auto_port()
         page = ChromiumPage(options)
@@ -132,9 +129,7 @@ class GeminiAutomation:
         # 反检测：注入脚本隐藏自动化特征
         if self.headless:
             try:
-                page.run_cdp(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    source="""
+                page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source="""
                     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
                     Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
                     Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
@@ -156,8 +151,7 @@ class GeminiAutomation:
                             Promise.resolve({state: Notification.permission}) :
                             originalQuery(parameters)
                     );
-                """,
-                )
+                """)
             except Exception:
                 pass
 
@@ -168,120 +162,59 @@ class GeminiAutomation:
 
         # 记录开始时间，用于邮件时间过滤
         from datetime import datetime
-
         send_time = datetime.now()
 
-        # Step 1: 导航到 Gemini Business 首页（会自动跳转到登录页面）
-        self._log(
-            "info", f"🌐 正在访问 https://business.gemini.google/ (邮箱: {email})"
-        )
+        # Step 1: 导航到首页并设置 Cookie
+        self._log("info", f"🌐 正在打开登录页面: {email}")
 
-        # 访问首页，让 Google 自动重定向到登录页面（避免被检测为自动化）
-        page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(8)  # 增加等待时间，确保页面完全加载和重定向
+        page.get(AUTH_HOME_URL, timeout=self.timeout)
+        time.sleep(2)
 
-        # 输出当前 URL，用于调试
-        current_url = page.url
-        self._log("info", f"📍 当前 URL: {current_url}")
-
-        # Step 1.5: 查找并填写邮箱输入框
-        self._log("info", "📧 正在查找邮箱输入框...")
-
-        # 先输出页面上所有 input 元素，用于调试
+        # 设置两个关键 Cookie
         try:
-            all_inputs = page.eles("tag:input")
-            self._log("info", f"📋 页面上共有 {len(all_inputs)} 个 input 元素")
-            for i, inp in enumerate(all_inputs[:5]):  # 只输出前5个
-                inp_type = inp.attr("type") or "unknown"
-                inp_name = inp.attr("name") or "unknown"
-                inp_placeholder = inp.attr("placeholder") or ""
-                self._log(
-                    "info",
-                    f"  Input {i + 1}: type={inp_type}, name={inp_name}, placeholder={inp_placeholder}",
-                )
+            self._log("info", "🍪 正在设置认证 Cookies...")
+            page.set.cookies({
+                "name": "__Host-AP_SignInXsrf",
+                "value": DEFAULT_XSRF_TOKEN,
+                "url": AUTH_HOME_URL,
+                "path": "/",
+                "secure": True,
+            })
+            # 添加 reCAPTCHA Cookie
+            page.set.cookies({
+                "name": "_GRECAPTCHA",
+                "value": "09ABCL...",
+                "url": "https://google.com",
+                "path": "/",
+                "secure": True,
+            })
+            self._log("info", "✅ Cookies 设置成功")
         except Exception as e:
-            self._log("warning", f"⚠️ 无法列出 input 元素: {e}")
+            self._log("warning", f"⚠️ 设置 Cookies 失败: {e}")
 
-        email_input = None
-
-        # 尝试多种选择器
-        selectors = [
-            "css:input[type='email']",
-            "css:input[name='email']",
-            "css:input[name='identifier']",
-            "css:input[placeholder*='邮箱']",
-            "css:input[placeholder*='email']",
-            "css:input[placeholder*='Email']",
-            "css:input[autocomplete='email']",
-        ]
-
-        for selector in selectors:
-            try:
-                email_input = page.ele(selector, timeout=2)
-                if email_input:
-                    self._log("info", f"✅ 找到邮箱输入框: {selector}")
-                    break
-            except Exception:
-                continue
-
-        if not email_input:
-            self._log("error", "❌ 未找到邮箱输入框")
-            self._log("error", f"❌ 当前 URL: {current_url}")
-            self._save_screenshot(page, "email_input_not_found")
-            return {"success": False, "error": "email input not found"}
-
-        # 输入邮箱地址（模拟人类输入）
-        self._log("info", f"⌨️ 正在输入邮箱: {email}")
-        if not self._simulate_human_input(email_input, email):
-            self._log("warning", "⚠️ 模拟输入失败，使用直接输入")
-            email_input.input(email, clear=True)
-        time.sleep(1)
-
-        # Step 1.6: 点击"使用邮箱继续"按钮
-        self._log("info", "🔘 正在查找并点击继续按钮...")
-        continue_btn = None
-
-        # 查找按钮
-        continue_keywords = ["使用邮箱继续", "继续", "Continue", "Next", "下一步"]
-        buttons = page.eles("tag:button")
-        for btn in buttons:
-            text = (btn.text or "").strip()
-            if text and any(kw in text for kw in continue_keywords):
-                continue_btn = btn
-                self._log("info", f"✅ 找到继续按钮: '{text}'")
-                break
-
-        if not continue_btn:
-            self._log("error", "❌ 未找到继续按钮")
-            self._save_screenshot(page, "continue_button_not_found")
-            return {"success": False, "error": "continue button not found"}
-
-        # 点击按钮（Google 会自动发送验证码并跳转）
-        try:
-            continue_btn.click()
-            self._log("info", "✅ 已点击继续按钮，Google 会自动发送验证码")
-            time.sleep(8)  # 等待页面跳转和验证码发送
-        except Exception as e:
-            self._log("error", f"❌ 点击继续按钮失败: {e}")
-            self._save_screenshot(page, "continue_button_click_failed")
-            return {"success": False, "error": f"continue button click failed: {e}"}
+        login_hint = quote(email, safe="")
+        login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"
+        self._log("info", "🔗 正在访问登录链接...")
+        page.get(login_url, timeout=self.timeout)
+        time.sleep(5)
 
         # Step 2: 检查当前页面状态
         current_url = page.url
-        self._log("info", f"📍 点击继续后的 URL: {current_url}")
-
-        # 检查是否已经登录成功
-        has_business_params = (
-            "business.gemini.google" in current_url
-            and "csesidx=" in current_url
-            and "/cid/" in current_url
-        )
+        self._log("info", f"📍 当前 URL: {current_url}")
+        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
 
         if has_business_params:
             self._log("info", "✅ 检测到已登录，直接提取配置")
             return self._extract_config(page, email)
 
-        # Step 3: 等待验证码输入框出现（Google 已自动发送验证码）
+        # Step 3: 点击发送验证码按钮
+        self._log("info", "🔘 正在查找并点击发送验证码按钮...")
+        if not self._click_send_code_button(page):
+            self._log("error", "❌ 未找到发送验证码按钮")
+            self._save_screenshot(page, "send_code_button_missing")
+            return {"success": False, "error": "send code button not found"}
+
+        # Step 4: 等待验证码输入框出现
         self._log("info", "⏳ 等待验证码输入框出现...")
         code_input = self._wait_for_code_input(page)
         if not code_input:
@@ -301,16 +234,11 @@ class GeminiAutomation:
             if self._click_resend_code_button(page):
                 self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
                 # 再次轮询验证码
-                code = mail_client.poll_for_code(
-                    timeout=40, interval=4, since_time=send_time
-                )
+                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
                 if not code:
                     self._log("error", "❌ 重新发送后仍未收到验证码")
                     self._save_screenshot(page, "code_timeout_after_resend")
-                    return {
-                        "success": False,
-                        "error": "verification code timeout after resend",
-                    }
+                    return {"success": False, "error": "verification code timeout after resend"}
             else:
                 self._log("error", "❌ 验证码超时且未找到重新发送按钮")
                 self._save_screenshot(page, "code_timeout")
@@ -319,9 +247,8 @@ class GeminiAutomation:
         self._log("info", f"✅ 收到验证码: {code}")
 
         # Step 6: 输入验证码并提交
-        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=3) or page.ele(
-            "css:input[type='tel']", timeout=2
-        )
+        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=3) or \
+                     page.ele("css:input[type='tel']", timeout=2)
 
         if not code_input:
             self._log("error", "❌ 验证码输入框已失效")
@@ -340,9 +267,7 @@ class GeminiAutomation:
 
         # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
         self._log("info", "⏳ 等待验证后自动跳转...")
-        time.sleep(
-            12
-        )  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
+        time.sleep(12)  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
 
         # 记录当前 URL 状态
         current_url = page.url
@@ -359,11 +284,7 @@ class GeminiAutomation:
 
         # Step 9: 检查是否已经在正确的页面
         current_url = page.url
-        has_business_params = (
-            "business.gemini.google" in current_url
-            and "csesidx=" in current_url
-            and "/cid/" in current_url
-        )
+        has_business_params = "business.gemini.google" in current_url and "csesidx=" in current_url and "/cid/" in current_url
 
         if has_business_params:
             # 已经在正确的页面，不需要再次导航
@@ -402,53 +323,27 @@ class GeminiAutomation:
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(3)  # 增加等待时间，确保页面完全加载
+        time.sleep(2)
 
         # 方法1: 直接通过ID查找
         direct_btn = page.ele("#sign-in-with-email", timeout=5)
         if direct_btn:
             try:
                 direct_btn.click()
-                self._log(
-                    "info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)"
-                )
+                self._log("info", "✅ 找到并点击了发送验证码按钮 (ID: #sign-in-with-email)")
                 time.sleep(3)  # 等待发送请求
                 return True
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
 
-        # 方法2: 通过关键词查找（扩展关键词列表）
-        keywords = [
-            "通过电子邮件发送验证码",
-            "通过电子邮件发送",
-            "发送验证码",
-            "发送",
-            "email",
-            "Email",
-            "EMAIL",
-            "Send code",
-            "Send verification",
-            "Verification code",
-            "Get code",
-            "Continue",
-            "Next",
-            "Verify",
-        ]
+        # 方法2: 通过关键词查找
+        keywords = ["通过电子邮件发送验证码", "通过电子邮件发送", "email", "Email", "Send code", "Send verification", "Verification code"]
         try:
-            self._log("info", f"🔍 通过关键词搜索按钮...")
-
-            # 先输出所有按钮的文本，用于调试
+            self._log("info", f"🔍 通过关键词搜索按钮: {keywords}")
             buttons = page.eles("tag:button")
-            self._log("info", f"📋 页面上共有 {len(buttons)} 个按钮")
-            for i, btn in enumerate(buttons[:10]):  # 只输出前10个
-                text = (btn.text or "").strip()
-                if text:
-                    self._log("info", f"  按钮 {i + 1}: '{text}'")
-
-            # 查找匹配的按钮
             for btn in buttons:
                 text = (btn.text or "").strip()
-                if text and any(kw.lower() in text.lower() for kw in keywords):
+                if text and any(kw in text for kw in keywords):
                     try:
                         self._log("info", f"✅ 找到匹配按钮: '{text}'")
                         btn.click()
@@ -460,30 +355,13 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
 
-        # 方法3: 尝试查找 div 或 span 元素（可能是自定义按钮）
-        try:
-            self._log("info", "🔍 尝试查找非 button 标签的可点击元素...")
-            clickables = page.eles("css:[role='button']") + page.eles("css:.button")
-            self._log("info", f"📋 找到 {len(clickables)} 个可点击元素")
-            for elem in clickables[:10]:
-                text = (elem.text or "").strip()
-                if text:
-                    self._log("info", f"  元素: '{text}'")
-                if text and any(kw.lower() in text.lower() for kw in keywords):
-                    try:
-                        self._log("info", f"✅ 找到匹配元素: '{text}'")
-                        elem.click()
-                        self._log("info", "✅ 成功点击发送验证码元素")
-                        time.sleep(3)
-                        return True
-                    except Exception as e:
-                        self._log("warning", f"⚠️ 点击元素失败: {e}")
-        except Exception as e:
-            self._log("warning", f"⚠️ 搜索可点击元素异常: {e}")
+        # 检查是否已经在验证码输入页面
+        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=2) or page.ele("css:input[name='pinInput']", timeout=1)
+        if code_input:
+            self._log("info", "✅ 已在验证码输入页面，无需点击按钮")
+            return True
 
-        # 如果所有方法都失败，记录错误
         self._log("error", "❌ 未找到发送验证码按钮")
-        self._save_screenshot(page, "send_button_not_found")
         return False
 
     def _wait_for_code_input(self, page, timeout: int = 30):
@@ -540,13 +418,7 @@ class GeminiAutomation:
             buttons = page.eles("tag:button")
             for btn in buttons:
                 text = (btn.text or "").strip().lower()
-                if (
-                    text
-                    and "重新" not in text
-                    and "发送" not in text
-                    and "resend" not in text
-                    and "send" not in text
-                ):
+                if text and "重新" not in text and "发送" not in text and "resend" not in text and "send" not in text:
                     return btn
         except Exception:
             pass
@@ -638,10 +510,7 @@ class GeminiAutomation:
 
             # 尝试模拟人类输入，失败则降级到直接注入
             if not self._simulate_human_input(username_input, username):
-                self._log(
-                    "warning",
-                    "simulated username input failed, fallback to direct input",
-                )
+                self._log("warning", "simulated username input failed, fallback to direct input")
                 username_input.input(username)
                 time.sleep(0.3)
 
@@ -649,21 +518,7 @@ class GeminiAutomation:
             submit_btn = None
             for btn in buttons:
                 text = (btn.text or "").strip().lower()
-                if any(
-                    kw in text
-                    for kw in [
-                        "确认",
-                        "提交",
-                        "继续",
-                        "submit",
-                        "continue",
-                        "confirm",
-                        "save",
-                        "保存",
-                        "下一步",
-                        "next",
-                    ]
-                ):
+                if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
                     submit_btn = btn
                     break
 
@@ -689,33 +544,21 @@ class GeminiAutomation:
                 return {"success": False, "error": "cid not found"}
 
             config_id = url.split("cid/")[1].split("?")[0].split("/")[0]
-            csesidx = (
-                url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
-            )
+            csesidx = url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
 
             cookies = page.cookies()
-            ses = next(
-                (c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None
-            )
-            host = next(
-                (c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None
-            )
+            ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
+            host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
 
             ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
             # 使用北京时区，确保时间计算正确（Cookie expiry 是 UTC 时间戳）
             beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
                 # 将 UTC 时间戳转为北京时间，再减去12小时作为刷新窗口
-                cookie_expire_beijing = datetime.fromtimestamp(
-                    ses_obj["expiry"], tz=beijing_tz
-                )
-                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
+                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
             else:
-                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
 
             config = {
                 "id": email,
@@ -733,7 +576,6 @@ class GeminiAutomation:
         """保存截图"""
         try:
             import os
-
             screenshot_dir = os.path.join("data", "automation")
             os.makedirs(screenshot_dir, exist_ok=True)
             path = os.path.join(screenshot_dir, f"{name}_{int(time.time())}.png")
@@ -757,7 +599,6 @@ class GeminiAutomation:
             return
         try:
             import shutil
-
             if os.path.exists(user_data_dir):
                 shutil.rmtree(user_data_dir, ignore_errors=True)
         except Exception:

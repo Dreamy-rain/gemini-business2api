@@ -206,9 +206,13 @@ class GeminiAutomation:
 
         # 尝试多种选择器
         selectors = [
+            "css:input[name='loginHint']",  # Google 使用的实际字段名
+            "css:input[id='email-input']",  # Google 的 ID
             "css:input[type='email']",
             "css:input[name='email']",
             "css:input[name='identifier']",
+            "css:input[aria-label='邮箱']",
+            "css:input[aria-label*='email']",
             "css:input[placeholder*='邮箱']",
             "css:input[placeholder*='email']",
             "css:input[placeholder*='Email']",

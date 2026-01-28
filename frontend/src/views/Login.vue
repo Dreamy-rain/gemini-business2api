@@ -168,7 +168,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores'
+import { useAuthStore } from '@/stores/auth'
 import Checkbox from '@/components/ui/Checkbox.vue'
 
 const router = useRouter()

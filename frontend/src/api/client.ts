@@ -1,4 +1,6 @@
 import axios, { type AxiosInstance, type AxiosError } from 'axios'
+import { useAuthStore } from '@/stores/auth'
+import router from '@/router'
 
 // 创建 axios 实例
 export const apiClient: AxiosInstance = axios.create({
@@ -26,12 +28,9 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     // 统一错误处理
     if (error.response?.status === 401) {
-      const { useAuthStore } = await import('@/stores/auth')
       const authStore = useAuthStore()
       authStore.isLoggedIn = false
-
-      const router = await import('@/router')
-      router.default.push('/login')
+      router.push('/login')
     }
 
     const errorMessage = error.response?.data

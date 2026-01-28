@@ -268,6 +268,7 @@ class GeminiAutomation:
         if not self._simulate_human_input(code_input, code):
             self._log("warning", "⚠️ 模拟输入失败，降级为直接输入")
             code_input.input(code, clear=True)
+<<<<<<< HEAD
         
         time.sleep(1)  # 重要：等待 Google 脚本识别输入内容
         
@@ -285,6 +286,13 @@ class GeminiAutomation:
                     self._log("info", "✅ 已点击物理验证按钮")
                 except Exception:
                     pass
+=======
+            time.sleep(0.5)
+
+        # 直接使用回车提交，不再查找按钮
+        self._log("info", "⏎ 按下回车键提交验证码")
+        code_input.input("\n")
+>>>>>>> upstream/main
 
         # Step 7: 等待页面自动重定向
         self._log("info", "⏳ 等待验证后自动跳转...")

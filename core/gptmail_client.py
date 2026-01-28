@@ -4,33 +4,26 @@ import string
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
-
-import requests
-
-from core.mail_utils import extract_verification_code
-from core.outbound_proxy import no_proxy_matches
+from core.proxy_utils import request_with_proxy_fallback
 
 
 class GPTMailClient:
-    """GPTMail 客户端（临时邮箱）"""
+    """GPTMail 临时邮箱客户端"""
 
     def __init__(
         self,
         base_url: str = "https://mail.chatgpt.org.uk",
         proxy: str = "",
-        no_proxy: str = "",
-        direct_fallback: bool = False,
         verify_ssl: bool = True,
         api_key: str = "",
+        domain: str = "",
         log_callback=None,
     ) -> None:
         self.base_url = (base_url or "").rstrip("/")
         self.verify_ssl = verify_ssl
         self.proxy_url = (proxy or "").strip()
-        self.no_proxy = no_proxy or ""
-        self.direct_fallback = bool(direct_fallback)
         self.api_key = (api_key or "").strip()
+        self.domain = (domain or "").strip()
         self.log_callback = log_callback
 
         self.email: Optional[str] = None
@@ -57,54 +50,25 @@ class GPTMailClient:
         if "json" in kwargs and kwargs["json"] is not None:
             self._log("info", f"📦 请求体: {kwargs['json']}")
 
-        proxies = None
-        if self.proxy_url:
-            host = (urlparse(url).hostname or "").lower()
-            if not (host and no_proxy_matches(host, self.no_proxy)):
-                proxies = {"http": self.proxy_url, "https": self.proxy_url}
+        proxies = {"http": self.proxy_url, "https": self.proxy_url} if self.proxy_url else None
 
-        try:
-            res = requests.request(
-                method,
-                url,
-                proxies=proxies,
-                verify=self.verify_ssl,
-                timeout=kwargs.pop("timeout", 15),
-                **kwargs,
-            )
-            if res.status_code == 407 and proxies and self.direct_fallback:
-                self._log("warning", "⚠️ 代理认证失败(407)，尝试直连重试一次")
-                res = requests.request(
-                    method,
-                    url,
-                    proxies=None,
-                    verify=self.verify_ssl,
-                    timeout=15,
-                    **kwargs,
-                )
-            self._log("info", f"📥 收到响应: HTTP {res.status_code}")
-            log_body = os.getenv("GPTMAIL_LOG_BODY", "").strip().lower() in ("1", "true", "yes", "y", "on")
-            if res.content and (log_body or res.status_code >= 400):
-                try:
-                    self._log("info", f"📄 响应内容: {res.text[:500]}")
-                except Exception:
-                    pass
-            return res
-        except Exception as exc:
-            if proxies and self.direct_fallback:
-                self._log("warning", f"⚠️ 代理请求失败，尝试直连重试一次: {type(exc).__name__}")
-                res = requests.request(
-                    method,
-                    url,
-                    proxies=None,
-                    verify=self.verify_ssl,
-                    timeout=kwargs.pop("timeout", 15),
-                    **kwargs,
-                )
-                self._log("info", f"📥 收到响应(直连): HTTP {res.status_code}")
-                return res
-            self._log("error", f"❌ 网络请求失败: {exc}")
-            raise
+        res = request_with_proxy_fallback(
+            requests.request,
+            method,
+            url,
+            proxies=proxies,
+            verify=self.verify_ssl,
+            timeout=kwargs.pop("timeout", 15),
+            **kwargs,
+        )
+        self._log("info", f"📥 收到响应: HTTP {res.status_code}")
+        log_body = os.getenv("GPTMAIL_LOG_BODY", "").strip().lower() in ("1", "true", "yes", "y", "on")
+        if res.content and (log_body or res.status_code >= 400):
+            try:
+                self._log("info", f"📄 响应内容: {res.text[:500]}")
+            except Exception:
+                pass
+        return res
 
     def generate_email(self, domain: Optional[str] = None) -> Optional[str]:
         """生成一个新的邮箱地址。"""
@@ -117,8 +81,10 @@ class GPTMailClient:
         prefix = f"t{timestamp}{rand}"
 
         payload: Dict[str, Any] = {"prefix": prefix}
-        if domain:
-            payload["domain"] = domain
+        # 优先使用传入的 domain，其次使用配置的 domain
+        effective_domain = domain or self.domain
+        if effective_domain:
+            payload["domain"] = effective_domain
 
         url = f"{self.base_url}/api/generate-email"
         try:
@@ -141,6 +107,9 @@ class GPTMailClient:
             self._log("error", f"❌ 生成邮箱异常: {exc}")
             return None
 
+    def register_account(self, domain: Optional[str] = None) -> bool:
+        """生成一个新的邮箱地址并视为注册成功。"""
+        return bool(self.generate_email(domain=domain))
     def _list_emails(self, email: str) -> List[Dict[str, Any]]:
         url = f"{self.base_url}/api/emails"
         res = self._request("GET", url, params={"email": email})
@@ -180,7 +149,7 @@ class GPTMailClient:
             emails = sorted(emails, key=lambda item: int(item.get("timestamp") or 0), reverse=True)
             self._log("info", f"📨 收到 {len(emails)} 封邮件，开始检查验证码...")
 
-            for idx, msg in enumerate(emails, 1):
+            for msg in emails:
                 msg_id = str(msg.get("id") or "").strip()
                 if not msg_id:
                     continue

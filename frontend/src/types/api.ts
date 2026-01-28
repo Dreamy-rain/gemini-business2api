@@ -1,5 +1,21 @@
 // API 类型定义
 
+export interface QuotaStatus {
+  available: boolean
+  remaining_seconds?: number
+}
+
+export interface AccountQuotaStatus {
+  quotas: {
+    text: QuotaStatus
+    images: QuotaStatus
+    videos: QuotaStatus
+  }
+  limited_count: number
+  total_count: number
+  is_expired: boolean
+}
+
 export interface AdminAccount {
   id: string
   status: string
@@ -12,6 +28,7 @@ export interface AdminAccount {
   cooldown_seconds: number
   cooldown_reason: string | null
   conversation_count: number
+  quota_status: AccountQuotaStatus
 }
 
 export interface AccountsListResponse {
@@ -49,26 +66,26 @@ export interface Stats {
   requests_per_hour: number
 }
 
+export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail'
+
 export interface Settings {
   basic: {
     api_key?: string
     base_url?: string
-    proxy?: string
     proxy_for_auth?: string
     proxy_for_chat?: string
-    outbound_proxy?: {
-      enabled: boolean
-      protocol: 'http' | 'https' | 'socks5' | 'socks5h' | string
-      host: string
-      port: number
-      username?: string
-      password?: string
-      no_proxy?: string
-      direct_fallback?: boolean
-    }
     duckmail_base_url?: string
     duckmail_api_key?: string
     duckmail_verify_ssl?: boolean
+    temp_mail_provider?: TempMailProvider
+    moemail_base_url?: string
+    moemail_api_key?: string
+    moemail_domain?: string
+    freemail_base_url?: string
+    freemail_jwt_token?: string
+    freemail_verify_ssl?: boolean
+    freemail_domain?: string
+    mail_proxy_enabled?: boolean
     gptmail_base_url?: string
     gptmail_api_key?: string
     gptmail_verify_ssl?: boolean

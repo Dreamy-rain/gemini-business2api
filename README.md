@@ -9,7 +9,7 @@
 </p>
 <p align="center"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" /> <img src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white" /> <img src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js&logoColor=white" /> <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" /> <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" /></p>
 
-<p align="center">将 Gemini Business 转换为 OpenAI 兼容接口，支持多账号负载均衡、图像生成、多模态能力与内置管理面板。</p>
+<p align="center">将 Gemini Business 转换为 OpenAI 兼容接口，支持多账号负载均衡、图像生成、视频生成、多模态能力与内置管理面板。</p>
 
 ---
 
@@ -42,6 +42,7 @@
 - ✅ 流式输出 - 实时响应
 - ✅ 多模态输入 - 100+ 文件类型（图片、PDF、Office 文档、音频、视频、代码等）
 - ✅ 图片生成 & 图生图 - 模型可配置，Base64 或 URL 返回
+- ✅ 视频生成 - 专用模型，支持 HTML/URL/Markdown 输出格式
 - ✅ 智能文件处理 - 自动识别文件类型，支持 URL 与 Base64
 - ✅ 日志与监控 - 实时状态与统计信息
 - ✅ 代理支持 - 通过设置面板配置
@@ -50,13 +51,19 @@
 
 ## 🤖 模型功能
 
-| 模型ID                   | 识图 | 原生联网 | 文件多模态 | 香蕉绘图 |
-| ------------------------ | ---- | -------- | ---------- | -------- |
-| `gemini-auto`            | ✅    | ✅        | ✅          | 可选     |
-| `gemini-2.5-flash`       | ✅    | ✅        | ✅          | 可选     |
-| `gemini-2.5-pro`         | ✅    | ✅        | ✅          | 可选     |
-| `gemini-3-flash-preview` | ✅    | ✅        | ✅          | 可选     |
-| `gemini-3-pro-preview`   | ✅    | ✅        | ✅          | 可选     |
+| 模型ID                   | 识图 | 原生联网 | 文件多模态 | 图片生成 | 视频生成 |
+| ------------------------ | ---- | -------- | ---------- | -------- | -------- |
+| `gemini-auto`            | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-2.5-flash`       | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-2.5-pro`         | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-3-flash-preview` | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-3-pro-preview`   | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-imagen`          | ✅    | ✅        | ✅          | ✅        | -        |
+| `gemini-veo`             | ✅    | ✅        | ✅          | -        | ✅        |
+
+**虚拟模型说明**：
+- `gemini-imagen`：专用图片生成模型，强制启用图片生成功能
+- `gemini-veo`：专用视频生成模型，强制启用视频生成功能
 
 ## 🚀 快速开始
 

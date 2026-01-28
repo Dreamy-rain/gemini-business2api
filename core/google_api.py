@@ -303,9 +303,17 @@ async def download_image_with_jwt(
     raise HTTPException(500, "Image download failed unexpectedly")
 
 
-def save_image_to_hf(image_data: bytes, chat_id: str, file_id: str, mime_type: str, base_url: str, image_dir: str) -> str:
+def save_image_to_hf(image_data: bytes, chat_id: str, file_id: str, mime_type: str, base_url: str, image_dir: str, url_path: str = "images") -> str:
     """保存图片到持久化存储,返回完整的公开URL"""
-    ext_map = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
+    ext_map = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "video/quicktime": ".mov"
+    }
     ext = ext_map.get(mime_type, ".png")
 
     filename = f"{chat_id}_{file_id}{ext}"
@@ -315,4 +323,4 @@ def save_image_to_hf(image_data: bytes, chat_id: str, file_id: str, mime_type: s
     with open(save_path, "wb") as f:
         f.write(image_data)
 
-    return f"{base_url}/images/{filename}"
+    return f"{base_url}/{url_path}/{filename}"

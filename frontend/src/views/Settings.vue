@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="space-y-8">
     <section v-if="isLoading" class="rounded-3xl border border-border bg-card p-6 text-sm text-muted-foreground">
       正在加载设置...
@@ -49,7 +49,7 @@
                   v-model="localSettings.basic.proxy_for_auth"
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="http://127.0.0.1:7890"
+                  placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>聊天操作代理</span>
@@ -59,85 +59,29 @@
                   v-model="localSettings.basic.proxy_for_chat"
                   type="text"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="http://127.0.0.1:7890"
+                  placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
                 />
-                <label class="block text-xs text-muted-foreground">（旧）全局代理地址</label>
-                <input
-                  v-model="localSettings.basic.proxy"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="旧版本兼容"
-                />
-              </div>
-            </div>
-
-            <div class="rounded-2xl border border-border bg-card p-4">
-              <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">出站代理（全局）</p>
-              <div class="mt-4 space-y-3">
-                <Checkbox v-model="localSettings.basic.outbound_proxy.enabled">
-                  启用出站代理
-                </Checkbox>
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="space-y-2">
-                    <label class="block text-xs text-muted-foreground">协议</label>
-                    <SelectMenu
-                      v-model="localSettings.basic.outbound_proxy.protocol"
-                      :options="outboundProxyProtocolOptions"
-                      class="w-full"
-                    />
-                  </div>
-                  <div class="space-y-2">
-                    <label class="block text-xs text-muted-foreground">端口</label>
-                    <input
-                      v-model.number="localSettings.basic.outbound_proxy.port"
-                      type="number"
-                      min="0"
-                      max="65535"
-                      class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                      placeholder="7890"
-                    />
+                <div class="rounded-2xl border border-border/60 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+                  <p class="mb-2 font-medium">格式示例：</p>
+                  <div class="space-y-1.5">
+                    <div>
+                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">基础格式：</p>
+                      <p class="font-mono text-[11px] leading-relaxed">http://127.0.0.1:7890</p>
+                    </div>
+                    <div>
+                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">带认证：</p>
+                      <p class="font-mono text-[11px] leading-relaxed">http://user:pass@127.0.0.1:7890</p>
+                    </div>
+                    <div>
+                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">SOCKS5 + NO_PROXY：</p>
+                      <p class="font-mono text-[11px] leading-relaxed break-all">socks5h://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1,.local</p>
+                    </div>
+                    <div>
+                      <p class="text-[10px] text-muted-foreground/70 mb-0.5">完整示例：</p>
+                      <p class="font-mono text-[11px] leading-relaxed break-all">socks5h://user:pass@127.0.0.1:7890 | no_proxy=localhost,127.0.0.1,.local</p>
+                    </div>
                   </div>
                 </div>
-                <label class="block text-xs text-muted-foreground">主机</label>
-                <input
-                  v-model="localSettings.basic.outbound_proxy.host"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="127.0.0.1"
-                />
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="space-y-2">
-                    <label class="block text-xs text-muted-foreground">用户名（可选）</label>
-                    <input
-                      v-model="localSettings.basic.outbound_proxy.username"
-                      type="text"
-                      class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                      placeholder="user"
-                    />
-                  </div>
-                  <div class="space-y-2">
-                    <label class="block text-xs text-muted-foreground">密码（可选）</label>
-                    <input
-                      v-model="localSettings.basic.outbound_proxy.password"
-                      type="text"
-                      class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                      placeholder="pass"
-                    />
-                  </div>
-                </div>
-                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>NO_PROXY（直连白名单）</span>
-                  <HelpTip text="逗号分隔：localhost,127.0.0.1,.example.com,10.0.0.0/8" />
-                </div>
-                <input
-                  v-model="localSettings.basic.outbound_proxy.no_proxy"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="localhost,127.0.0.1"
-                />
-                <Checkbox v-model="localSettings.basic.outbound_proxy.direct_fallback">
-                  代理失败自动直连重试一次
-                </Checkbox>
               </div>
             </div>
 
@@ -145,15 +89,7 @@
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">自动注册/刷新</p>
               <div class="mt-4 space-y-3">
                 <div class="grid grid-cols-2 items-center gap-x-6 gap-y-2">
-                  <div class="space-y-2">
-                    <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
-                      DuckMail SSL 校验
-                    </Checkbox>
-                    <Checkbox v-model="localSettings.basic.gptmail_verify_ssl">
-                      GPTMail SSL 校验
-                    </Checkbox>
-                  </div>
-                  <div class="flex items-center justify-end gap-2">
+                  <div class="flex items-center justify-start gap-2">
                     <Checkbox v-model="localSettings.basic.browser_headless">
                       无头浏览器
                     </Checkbox>
@@ -169,20 +105,135 @@
                   :options="browserEngineOptions"
                   class="w-full"
                 />
-                <label class="block text-xs text-muted-foreground">DuckMail API</label>
-                <input
-                  v-model="localSettings.basic.duckmail_base_url"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://api.duckmail.sbs"
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>临时邮箱服务</span>
+                  <HelpTip text="选择用于自动注册账号的临时邮箱服务提供商。" />
+                </div>
+                <SelectMenu
+                  v-model="localSettings.basic.temp_mail_provider"
+                  :options="tempMailProviderOptions"
+                  class="w-full"
                 />
-                <label class="block text-xs text-muted-foreground">GPTMail API</label>
-                <input
-                  v-model="localSettings.basic.gptmail_base_url"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="https://mail.chatgpt.org.uk"
-                />
+                <div class="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+                  <span class="font-medium">⚠️ 提示：</span>除 DuckMail 外，其它邮箱服务未经充分测试（直接合并 PR），如遇问题请提交 Issues
+                </div>
+                <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>临时邮箱代理</span>
+                  <HelpTip text="启用后临时邮箱请求将使用账户操作代理地址。" />
+                </div>
+                <Checkbox v-model="localSettings.basic.mail_proxy_enabled">
+                  启用邮箱代理（使用账户操作代理）
+                </Checkbox>
+
+                <!-- DuckMail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'duckmail'">
+                  <Checkbox v-model="localSettings.basic.duckmail_verify_ssl">
+                    DuckMail SSL 校验
+                  </Checkbox>
+                  <label class="block text-xs text-muted-foreground">DuckMail API</label>
+                  <input
+                    v-model="localSettings.basic.duckmail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://api.duckmail.sbs"
+                  />
+                  <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
+                  <input
+                    v-model="localSettings.basic.duckmail_api_key"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="dk_xxx"
+                  />
+                  <label class="block text-xs text-muted-foreground">默认注册域名（推荐）</label>
+                  <input
+                    v-model="localSettings.basic.register_domain"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="留空则自动选择"
+                  />
+                </template>
+
+                <!-- Moemail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'moemail'">
+                  <label class="block text-xs text-muted-foreground">Moemail API</label>
+                  <input
+                    v-model="localSettings.basic.moemail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://moemail.app"
+                  />
+                  <label class="block text-xs text-muted-foreground">Moemail API 密钥</label>
+                  <input
+                    v-model="localSettings.basic.moemail_api_key"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="X-API-Key"
+                  />
+                  <label class="block text-xs text-muted-foreground">Moemail 域名（可选，留空随机）</label>
+                  <input
+                    v-model="localSettings.basic.moemail_domain"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="moemail.app"
+                  />
+                </template>
+
+                <!-- Freemail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'freemail'">
+                  <Checkbox v-model="localSettings.basic.freemail_verify_ssl">
+                    Freemail SSL 校验
+                  </Checkbox>
+                  <label class="block text-xs text-muted-foreground">Freemail API</label>
+                  <input
+                    v-model="localSettings.basic.freemail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="http://your-freemail-server.com"
+                  />
+                  <label class="block text-xs text-muted-foreground">Freemail JWT Token</label>
+                  <input
+                    v-model="localSettings.basic.freemail_jwt_token"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="eyJ..."
+                  />
+                  <label class="block text-xs text-muted-foreground">Freemail 域名（可选，留空随机）</label>
+                  <input
+                    v-model="localSettings.basic.freemail_domain"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="freemail.local"
+                  />
+                </template>
+
+                <!-- GPTMail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'gptmail'">
+                  <Checkbox v-model="localSettings.basic.gptmail_verify_ssl">
+                    GPTMail SSL 校验
+                  </Checkbox>
+                  <label class="block text-xs text-muted-foreground">GPTMail API</label>
+                  <input
+                    v-model="localSettings.basic.gptmail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://mail.chatgpt.org.uk"
+                  />
+                  <label class="block text-xs text-muted-foreground">GPTMail API Key</label>
+                  <input
+                    v-model="localSettings.basic.gptmail_api_key"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="X-API-Key"
+                  />
+                  <label class="block text-xs text-muted-foreground">GPTMail 邮箱域名（可选）</label>
+                  <input
+                    v-model="localSettings.basic.gptmail_domain"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="留空则随机选择"
+                  />
+                </template>
+
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>过期刷新窗口（小时）</span>
                   <HelpTip text="当账号距离过期小于等于该值时，会触发自动登录刷新（更新 cookie/session）。" />
@@ -198,29 +249,7 @@
                   v-model.number="localSettings.basic.register_default_count"
                   type="number"
                   min="1"
-                  max="30"
                   class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                />
-                <label class="block text-xs text-muted-foreground">默认注册域名（推荐）</label>
-                <input
-                  v-model="localSettings.basic.register_domain"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="留空则自动选择"
-                />
-                <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
-                <input
-                  v-model="localSettings.basic.duckmail_api_key"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="dk_xxx"
-                />
-                <label class="block text-xs text-muted-foreground">GPTMail API 密钥</label>
-                <input
-                  v-model="localSettings.basic.gptmail_api_key"
-                  type="text"
-                  class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
-                  placeholder="gpt-test"
                 />
               </div>
             </div>
@@ -285,6 +314,19 @@
             </div>
 
             <div class="rounded-2xl border border-border bg-card p-4">
+              <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">视频生成</p>
+              <div class="mt-4 space-y-3">
+                <label class="block text-xs text-muted-foreground">输出格式（使用 gemini-veo 模型时生效）</label>
+                <SelectMenu
+                  v-model="localSettings.video_generation.output_format"
+                  :options="videoOutputOptions"
+                  placement="up"
+                  class="w-full"
+                />
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-border bg-card p-4">
               <p class="text-xs uppercase tracking-[0.3em] text-muted-foreground">公开展示</p>
               <div class="mt-4 space-y-3">
                 <label class="block text-xs text-muted-foreground">Logo 地址</label>
@@ -330,8 +372,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useSettingsStore } from '@/stores'
+import { useSettingsStore } from '@/stores/settings'
 import { useToast } from '@/composables/useToast'
+import { defaultMailProvider, mailProviderOptions } from '@/constants/mailProviders'
 import SelectMenu from '@/components/ui/SelectMenu.vue'
 import Checkbox from '@/components/ui/Checkbox.vue'
 import HelpTip from '@/components/ui/HelpTip.vue'
@@ -364,15 +407,15 @@ const browserEngineOptions = [
   { label: 'UC - 支持无头/有头', value: 'uc' },
   { label: 'DP - 支持无头/有头（推荐）', value: 'dp' },
 ]
+const tempMailProviderOptions = mailProviderOptions
 const imageOutputOptions = [
   { label: 'Base64 编码', value: 'base64' },
   { label: 'URL 链接', value: 'url' },
 ]
-const outboundProxyProtocolOptions = [
-  { label: 'HTTP', value: 'http' },
-  { label: 'HTTPS', value: 'https' },
-  { label: 'SOCKS5', value: 'socks5' },
-  { label: 'SOCKS5H（DNS 走代理）', value: 'socks5h' },
+const videoOutputOptions = [
+  { label: 'HTML 视频标签', value: 'html' },
+  { label: 'URL 链接', value: 'url' },
+  { label: 'Markdown 格式', value: 'markdown' },
 ]
 const imageModelOptions = computed(() => {
   const baseOptions = [
@@ -398,11 +441,11 @@ watch(settings, (value) => {
   const next = JSON.parse(JSON.stringify(value))
   next.image_generation = next.image_generation || { enabled: false, supported_models: [], output_format: 'base64' }
   next.image_generation.output_format ||= 'base64'
+  next.video_generation = next.video_generation || { output_format: 'html' }
+  next.video_generation.output_format ||= 'html'
   next.basic = next.basic || {}
   next.basic.duckmail_base_url ||= 'https://api.duckmail.sbs'
   next.basic.duckmail_verify_ssl = next.basic.duckmail_verify_ssl ?? true
-  next.basic.gptmail_base_url ||= 'https://mail.chatgpt.org.uk'
-  next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
   next.basic.browser_engine = next.basic.browser_engine || 'dp'
   next.basic.browser_headless = next.basic.browser_headless ?? false
   next.basic.refresh_window_hours = Number.isFinite(next.basic.refresh_window_hours)
@@ -417,37 +460,31 @@ watch(settings, (value) => {
   next.basic.duckmail_api_key = typeof next.basic.duckmail_api_key === 'string'
     ? next.basic.duckmail_api_key
     : ''
+  next.basic.temp_mail_provider = next.basic.temp_mail_provider || defaultMailProvider
+  next.basic.moemail_base_url = next.basic.moemail_base_url || 'https://moemail.app'
+  next.basic.moemail_api_key = typeof next.basic.moemail_api_key === 'string'
+    ? next.basic.moemail_api_key
+    : ''
+  next.basic.moemail_domain = typeof next.basic.moemail_domain === 'string'
+    ? next.basic.moemail_domain
+    : ''
+  next.basic.freemail_base_url = next.basic.freemail_base_url || 'http://your-freemail-server.com'
+  next.basic.freemail_jwt_token = typeof next.basic.freemail_jwt_token === 'string'
+    ? next.basic.freemail_jwt_token
+    : ''
+  next.basic.freemail_verify_ssl = next.basic.freemail_verify_ssl ?? true
+  next.basic.freemail_domain = typeof next.basic.freemail_domain === 'string'
+    ? next.basic.freemail_domain
+    : ''
+  next.basic.mail_proxy_enabled = next.basic.mail_proxy_enabled ?? false
+  next.basic.gptmail_base_url = next.basic.gptmail_base_url || 'https://mail.chatgpt.org.uk'
   next.basic.gptmail_api_key = typeof next.basic.gptmail_api_key === 'string'
     ? next.basic.gptmail_api_key
     : ''
-  next.basic.outbound_proxy = next.basic.outbound_proxy || {
-    enabled: false,
-    protocol: 'http',
-    host: '',
-    port: 0,
-    username: '',
-    password: '',
-    no_proxy: '',
-    direct_fallback: true,
-  }
-  next.basic.outbound_proxy.enabled = next.basic.outbound_proxy.enabled ?? false
-  next.basic.outbound_proxy.protocol = next.basic.outbound_proxy.protocol || 'http'
-  next.basic.outbound_proxy.host = typeof next.basic.outbound_proxy.host === 'string'
-    ? next.basic.outbound_proxy.host
+  next.basic.gptmail_verify_ssl = next.basic.gptmail_verify_ssl ?? true
+  next.basic.gptmail_domain = typeof next.basic.gptmail_domain === 'string'
+    ? next.basic.gptmail_domain
     : ''
-  next.basic.outbound_proxy.port = Number.isFinite(next.basic.outbound_proxy.port)
-    ? next.basic.outbound_proxy.port
-    : 0
-  next.basic.outbound_proxy.username = typeof next.basic.outbound_proxy.username === 'string'
-    ? next.basic.outbound_proxy.username
-    : ''
-  next.basic.outbound_proxy.password = typeof next.basic.outbound_proxy.password === 'string'
-    ? next.basic.outbound_proxy.password
-    : ''
-  next.basic.outbound_proxy.no_proxy = typeof next.basic.outbound_proxy.no_proxy === 'string'
-    ? next.basic.outbound_proxy.no_proxy
-    : ''
-  next.basic.outbound_proxy.direct_fallback = next.basic.outbound_proxy.direct_fallback ?? true
   next.retry = next.retry || {}
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)
     ? next.retry.auto_refresh_accounts_seconds

@@ -62,8 +62,8 @@ export const useAccountsStore = defineStore('accounts', () => {
   }
 
   async function bulkDelete(accountIds: string[]) {
-    accounts.value = accounts.value.filter(acc => !accountIds.includes(acc.id))
-    await Promise.all(accountIds.map(accountId => accountsApi.delete(accountId)))
+    await accountsApi.bulkDelete(accountIds)
+    await loadAccounts()
   }
 
   async function updateConfig(newAccounts: AccountConfigItem[]) {

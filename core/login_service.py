@@ -10,8 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
-from core.duckmail_client import DuckMailClient
-from core.gptmail_client import GPTMailClient
+from core.mail_providers import create_temp_mail_client
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
@@ -199,32 +198,42 @@ class LoginService(BaseTaskService[LoginTask]):
                 log_callback=log_cb,
             )
             client.set_credentials(mail_address)
-        elif mail_provider == "gptmail":
+        elif mail_provider in ("duckmail", "moemail", "freemail", "gptmail"):
+            if mail_provider not in ("freemail", "gptmail") and not mail_password:
+                error_message = "邮箱密码缺失" if mail_provider == "duckmail" else "mail password (email_id) missing"
+                return {"success": False, "email": account_id, "error": error_message}
+            if mail_provider == "freemail" and not account.get("mail_jwt_token") and not config.basic.freemail_jwt_token:
+                return {"success": False, "email": account_id, "error": "Freemail JWT Token 未配置"}
+
+            # 创建邮件客户端，优先使用账户级别配置
             mail_address = account.get("mail_address") or account_id
-            client = GPTMailClient(
-                base_url=config.basic.gptmail_base_url,
-                proxy=proxy_url,
-                no_proxy=no_proxy,
-                direct_fallback=direct_fallback,
-                verify_ssl=config.basic.gptmail_verify_ssl,
-                api_key=config.basic.gptmail_api_key,
-                log_callback=log_cb,
+
+            # 构建账户级别的配置参数
+            account_config = {
+                "proxy": proxy_url,
+                "no_proxy": no_proxy,
+                "direct_fallback": direct_fallback,
+            }
+            if account.get("mail_base_url"):
+                account_config["base_url"] = account["mail_base_url"]
+            if account.get("mail_api_key"):
+                account_config["api_key"] = account["mail_api_key"]
+            if account.get("mail_jwt_token"):
+                account_config["jwt_token"] = account["mail_jwt_token"]
+            if account.get("mail_verify_ssl") is not None:
+                account_config["verify_ssl"] = account["mail_verify_ssl"]
+            if account.get("mail_domain"):
+                account_config["domain"] = account["mail_domain"]
+
+            # 创建客户端（工厂会优先使用传入的参数，其次使用全局配置）
+            client = create_temp_mail_client(
+                mail_provider,
+                log_cb=log_cb,
+                **account_config
             )
-            client.set_credentials(mail_address)
-        elif mail_provider == "duckmail":
-            if not mail_password:
-                return {"success": False, "email": account_id, "error": "邮箱密码缺失"}
-            # DuckMail: account_id 就是邮箱地址
-            client = DuckMailClient(
-                base_url=config.basic.duckmail_base_url,
-                proxy=proxy_url,
-                no_proxy=no_proxy,
-                direct_fallback=direct_fallback,
-                verify_ssl=config.basic.duckmail_verify_ssl,
-                api_key=config.basic.duckmail_api_key,
-                log_callback=log_cb,
-            )
-            client.set_credentials(account_id, mail_password)
+            client.set_credentials(mail_address, mail_password)
+            if mail_provider == "moemail":
+                client.email_id = mail_password  # 设置 email_id 用于获取邮件
         else:
             return {"success": False, "email": account_id, "error": f"不支持的邮件提供商: {mail_provider}"}
 
@@ -271,6 +280,10 @@ class LoginService(BaseTaskService[LoginTask]):
         # 更新账户配置
         config_data = result["config"]
         config_data["mail_provider"] = mail_provider
+        if mail_provider in ("freemail", "gptmail"):
+            config_data["mail_password"] = ""
+        else:
+            config_data["mail_password"] = mail_password
         if mail_provider == "microsoft":
             config_data["mail_address"] = account.get("mail_address") or account_id
             config_data["mail_client_id"] = mail_client_id
@@ -319,9 +332,17 @@ class LoginService(BaseTaskService[LoginTask]):
             if mail_provider == "microsoft":
                 if not account.get("mail_client_id") or not account.get("mail_refresh_token"):
                     continue
-            elif mail_provider == "duckmail":
+            elif mail_provider in ("duckmail", "moemail"):
                 if not mail_password:
                     continue
+            elif mail_provider == "freemail":
+                if not config.basic.freemail_jwt_token:
+                    continue
+            elif mail_provider == "gptmail":
+                # GPTMail 不需要密码，允许直接刷新
+                pass
+            else:
+                continue
             expires_at = account.get("expires_at")
             if not expires_at:
                 continue

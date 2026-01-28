@@ -33,9 +33,11 @@ ACCOUNTS_FILE = os.path.join(DATA_DIR, "accounts.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.yaml")
 STATS_FILE = os.path.join(DATA_DIR, "stats.json")
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
+VIDEO_DIR = os.path.join(DATA_DIR, "videos")
 
-# 确保图片目录存在
+# 确保图片和视频目录存在
 os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(VIDEO_DIR, exist_ok=True)
 
 # 导入认证模块
 from core.auth import verify_api_key
@@ -65,8 +67,10 @@ from core.account import (
     update_accounts_config as _update_accounts_config,
     delete_account as _delete_account,
     update_account_disabled_status as _update_account_disabled_status,
-    bulk_update_account_disabled_status as _bulk_update_account_disabled_status
+    bulk_update_account_disabled_status as _bulk_update_account_disabled_status,
+    bulk_delete_accounts as _bulk_delete_accounts
 )
+from core.proxy_utils import parse_proxy_setting
 
 # 导入 Uptime 追踪器
 from core import uptime as uptime_tracker
@@ -81,6 +85,12 @@ from core.outbound_proxy import (
     ProxyAwareAsyncClient,
     normalize_proxy_url,
 )
+
+# 模型到配额类型的映射
+MODEL_TO_QUOTA_TYPE = {
+    "gemini-imagen": "images",
+    "gemini-veo": "videos"
+}
 
 # ---------- 日志配置 ----------
 
@@ -285,8 +295,13 @@ logger.addHandler(memory_handler)
 TIMEOUT_SECONDS = 600
 API_KEY = config.basic.api_key
 ADMIN_KEY = config.security.admin_key
-PROXY_FOR_AUTH = config.basic.proxy_for_auth
-PROXY_FOR_CHAT = config.basic.proxy_for_chat
+_proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
+_proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
+PROXY_FOR_AUTH = _proxy_auth
+PROXY_FOR_CHAT = _proxy_chat
+_NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
+if _NO_PROXY:
+    os.environ["NO_PROXY"] = _NO_PROXY
 BASE_URL = config.basic.base_url
 SESSION_SECRET_KEY = config.security.session_secret_key
 SESSION_EXPIRE_HOURS = config.session.expire_hours
@@ -298,6 +313,30 @@ CHAT_URL = config.public_display.chat_url
 # ---------- 图片生成配置 ----------
 IMAGE_GENERATION_ENABLED = config.image_generation.enabled
 IMAGE_GENERATION_MODELS = config.image_generation.supported_models
+
+# ---------- 虚拟模型映射 ----------
+VIRTUAL_MODELS = {
+    "gemini-imagen": {"imageGenerationSpec": {}},
+    "gemini-veo": {"videoGenerationSpec": {}},
+}
+
+def get_tools_spec(model_name: str) -> dict:
+    """根据模型名称返回工具配置"""
+    # 虚拟模型
+    if model_name in VIRTUAL_MODELS:
+        return VIRTUAL_MODELS[model_name]
+    
+    # 普通模型
+    tools_spec = {
+        "webGroundingSpec": {},
+        "toolRegistry": "default_tool_registry",
+    }
+    
+    if IMAGE_GENERATION_ENABLED and model_name in IMAGE_GENERATION_MODELS:
+        tools_spec["imageGenerationSpec"] = {}
+    
+    return tools_spec
+
 
 # ---------- 重试配置 ----------
 MAX_NEW_SESSION_TRIES = config.retry.max_new_session_tries
@@ -464,6 +503,42 @@ logger.info("[SYSTEM] 系统初始化完成")
 # ---------- 消息处理逻辑 ----------
 # (消息处理函数已移至 core/message.py)
 
+# ---------- 媒体处理函数 ----------
+def process_image(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
+    """处理图片：根据配置返回 base64 或 URL"""
+    output_format = config_manager.image_output_format
+
+    if output_format == "base64":
+        b64 = base64.b64encode(data).decode()
+        logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已编码为base64")
+        return f"\n\n![生成的图片](data:{mime};base64,{b64})\n\n"
+    else:
+        url = save_image_to_hf(data, chat_id, file_id, mime, base_url, IMAGE_DIR)
+        logger.info(f"[IMAGE] [{account_id}] [req_{request_id}] 图片{idx}已保存: {url}")
+        return f"\n\n![生成的图片]({url})\n\n"
+
+def process_video(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
+    """处理视频：根据配置返回不同格式"""
+    url = save_image_to_hf(data, chat_id, file_id, mime, base_url, VIDEO_DIR, "videos")
+    logger.info(f"[VIDEO] [{account_id}] [req_{request_id}] 视频{idx}已保存: {url}")
+
+    output_format = config_manager.video_output_format
+
+    if output_format == "html":
+        return f'\n\n<video controls width="100%" style="max-width: 640px;"><source src="{url}" type="{mime}">您的浏览器不支持视频播放</video>\n\n'
+    elif output_format == "markdown":
+        return f"\n\n![生成的视频]({url})\n\n"
+    else:  # url
+        return f"\n\n{url}\n\n"
+
+def process_media(data: bytes, mime: str, chat_id: str, file_id: str, base_url: str, idx: int, request_id: str, account_id: str) -> str:
+    """统一媒体处理入口：根据 MIME 类型分发到对应处理器"""
+    logger.info(f"[MEDIA] [{account_id}] [req_{request_id}] 处理媒体{idx}: MIME={mime}")
+    if mime.startswith("video/"):
+        return process_video(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
+    else:
+        return process_image(data, mime, chat_id, file_id, base_url, idx, request_id, account_id)
+
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway")
 
@@ -548,13 +623,17 @@ async def track_uptime_middleware(request: Request, call_next):
         raise
 
 
-# ---------- 图片静态服务初始化 ----------
+# ---------- 图片和视频静态服务初始化 ----------
 os.makedirs(IMAGE_DIR, exist_ok=True)
+os.makedirs(VIDEO_DIR, exist_ok=True)
 app.mount("/images", StaticFiles(directory=IMAGE_DIR), name="images")
+app.mount("/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
 if IMAGE_DIR == "/data/images":
     logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (HF Pro持久化)")
+    logger.info(f"[SYSTEM] 视频静态服务已启用: /videos/ -> {VIDEO_DIR} (HF Pro持久化)")
 else:
     logger.info(f"[SYSTEM] 图片静态服务已启用: /images/ -> {IMAGE_DIR} (本地持久化)")
+    logger.info(f"[SYSTEM] 视频静态服务已启用: /videos/ -> {VIDEO_DIR} (本地持久化)")
 
 # ---------- 后台任务启动 ----------
 
@@ -1031,6 +1110,7 @@ async def admin_get_accounts(request: Request):
         remaining_hours = config.get_remaining_hours()
         status, status_color, remaining_display = format_account_expiration(remaining_hours)
         cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
+        quota_status = account_manager.get_quota_status()
 
         accounts_info.append({
             "id": config.account_id,
@@ -1044,7 +1124,8 @@ async def admin_get_accounts(request: Request):
             "cooldown_seconds": cooldown_seconds,
             "cooldown_reason": cooldown_reason,
             "conversation_count": account_manager.conversation_count,
-            "session_usage_count": account_manager.session_usage_count
+            "session_usage_count": account_manager.session_usage_count,
+            "quota_status": quota_status  # 新增配额状态
         })
 
     return {"total": len(accounts_info), "accounts": accounts_info}
@@ -1220,6 +1301,34 @@ async def admin_delete_account(request: Request, account_id: str):
         logger.error(f"[CONFIG] 删除账户失败: {str(e)}")
         raise HTTPException(500, f"删除失败: {str(e)}")
 
+@app.put("/admin/accounts/bulk-delete")
+@require_login()
+async def admin_bulk_delete_accounts(request: Request, account_ids: list[str]):
+    """批量删除账户，单次最多50个"""
+    global multi_account_mgr
+
+    # 数量限制验证
+    if len(account_ids) > 50:
+        raise HTTPException(400, f"单次最多删除50个账户，当前请求 {len(account_ids)} 个")
+    if not account_ids:
+        raise HTTPException(400, "账户ID列表不能为空")
+
+    try:
+        multi_account_mgr, success_count, errors = _bulk_delete_accounts(
+            account_ids,
+            multi_account_mgr,
+            http_client,
+            USER_AGENT,
+            ACCOUNT_FAILURE_THRESHOLD,
+            RATE_LIMIT_COOLDOWN_SECONDS,
+            SESSION_CACHE_TTL_SECONDS,
+            global_stats
+        )
+        return {"status": "success", "success_count": success_count, "errors": errors}
+    except Exception as e:
+        logger.error(f"[CONFIG] 批量删除账户失败: {str(e)}")
+        raise HTTPException(500, f"删除失败: {str(e)}")
+
 @app.put("/admin/accounts/{account_id}/disable")
 @require_login()
 async def admin_disable_account(request: Request, account_id: str):
@@ -1304,6 +1413,15 @@ async def admin_get_settings(request: Request):
             "duckmail_base_url": config.basic.duckmail_base_url,
             "duckmail_api_key": config.basic.duckmail_api_key,
             "duckmail_verify_ssl": config.basic.duckmail_verify_ssl,
+            "temp_mail_provider": config.basic.temp_mail_provider,
+            "moemail_base_url": config.basic.moemail_base_url,
+            "moemail_api_key": config.basic.moemail_api_key,
+            "moemail_domain": config.basic.moemail_domain,
+            "freemail_base_url": config.basic.freemail_base_url,
+            "freemail_jwt_token": config.basic.freemail_jwt_token,
+            "freemail_verify_ssl": config.basic.freemail_verify_ssl,
+            "freemail_domain": config.basic.freemail_domain,
+            "mail_proxy_enabled": config.basic.mail_proxy_enabled,
             "gptmail_base_url": config.basic.gptmail_base_url,
             "gptmail_api_key": config.basic.gptmail_api_key,
             "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
@@ -1317,6 +1435,9 @@ async def admin_get_settings(request: Request):
             "enabled": config.image_generation.enabled,
             "supported_models": config.image_generation.supported_models,
             "output_format": config.image_generation.output_format
+        },
+        "video_generation": {
+            "output_format": config.video_generation.output_format
         },
         "retry": {
             "max_new_session_tries": config.retry.max_new_session_tries,
@@ -1353,6 +1474,15 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
         basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
         basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
+        basic.setdefault("temp_mail_provider", config.basic.temp_mail_provider)
+        basic.setdefault("moemail_base_url", config.basic.moemail_base_url)
+        basic.setdefault("moemail_api_key", config.basic.moemail_api_key)
+        basic.setdefault("moemail_domain", config.basic.moemail_domain)
+        basic.setdefault("freemail_base_url", config.basic.freemail_base_url)
+        basic.setdefault("freemail_jwt_token", config.basic.freemail_jwt_token)
+        basic.setdefault("freemail_verify_ssl", config.basic.freemail_verify_ssl)
+        basic.setdefault("freemail_domain", config.basic.freemail_domain)
+        basic.setdefault("mail_proxy_enabled", config.basic.mail_proxy_enabled)
         basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
         basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
         basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
@@ -1389,6 +1519,13 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         image_generation["output_format"] = output_format
         new_settings["image_generation"] = image_generation
 
+        video_generation = dict(new_settings.get("video_generation") or {})
+        video_output_format = str(video_generation.get("output_format") or config_manager.video_output_format).lower()
+        if video_output_format not in ("html", "url", "markdown"):
+            video_output_format = "html"
+        video_generation["output_format"] = video_output_format
+        new_settings["video_generation"] = video_generation
+
         retry = dict(new_settings.get("retry") or {})
         retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
         new_settings["retry"] = retry
@@ -1412,8 +1549,13 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
         # 更新全局变量（实时生效）
         API_KEY = config.basic.api_key
-        PROXY_FOR_AUTH = config.basic.proxy_for_auth
-        PROXY_FOR_CHAT = config.basic.proxy_for_chat
+        _proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
+        _proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
+        PROXY_FOR_AUTH = _proxy_auth
+        PROXY_FOR_CHAT = _proxy_chat
+        _NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
+        if _NO_PROXY:
+            os.environ["NO_PROXY"] = _NO_PROXY
         BASE_URL = config.basic.base_url
         LOGO_URL = config.public_display.logo_url
         CHAT_URL = config.public_display.chat_url
@@ -1551,6 +1693,8 @@ async def list_models(authorization: str = Header(None)):
     now = int(time.time())
     for m in MODEL_MAPPING.keys():
         data.append({"id": m, "object": "model", "created": now, "owned_by": "google", "permission": []})
+    data.append({"id": "gemini-imagen", "object": "model", "created": now, "owned_by": "google", "permission": []})
+    data.append({"id": "gemini-veo", "object": "model", "created": now, "owned_by": "google", "permission": []})
     return {"object": "list", "data": data}
 
 @app.get("/v1/models/{model_id}")
@@ -1652,12 +1796,14 @@ async def chat_impl(
         await save_stats(global_stats)
 
     # 2. 模型校验
-    if req.model not in MODEL_MAPPING:
+
+    if req.model not in MODEL_MAPPING and req.model not in VIRTUAL_MODELS:
         logger.error(f"[CHAT] [req_{request_id}] 不支持的模型: {req.model}")
+        all_models = list(MODEL_MAPPING.keys()) + list(VIRTUAL_MODELS.keys())
         await finalize_result("error", 404, f"HTTP 404: Model '{req.model}' not found")
         raise HTTPException(
             status_code=404,
-            detail=f"Model '{req.model}' not found. Available models: {list(MODEL_MAPPING.keys())}"
+            detail=f"Model '{req.model}' not found. Available models: {all_models}"
         )
 
     # 保存模型信息到 request.state（用于 Uptime 追踪）
@@ -1857,38 +2003,17 @@ async def chat_impl(
                 # 记录账号池状态（请求失败）
                 uptime_tracker.record_request("account_pool", False, status_code=status_code)
 
-                # 根据错误类型决定是否计入error_count
-                # 429限流：临时禁用，冷却后自动恢复
-                if is_http_exception and status_code == 429:
-                    account_manager.last_429_time = time.time()
-                    account_manager.is_available = False  # 临时禁用，冷却期后自动恢复
-                    logger.warning(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429限流，账户将休息{RATE_LIMIT_COOLDOWN_SECONDS}秒后自动恢复")
-                # 400参数错误：不计入error_count，客户端问题不应封禁账户
-                elif is_http_exception and status_code == 400:
-                    logger.warning(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 参数错误(400)，不计入失败次数: {e.detail}")
-                # 其他错误：计入error_count
+                # 判断请求类型以传递quota_type（使用字典映射）
+                quota_type = MODEL_TO_QUOTA_TYPE.get(req.model)
+                # 普通对话模型返回None（text配额是基础配额，所有请求都需要）
+
+                # 使用统一的错误处理入口
+                if is_http_exception:
+                    account_manager.handle_http_error(status_code, str(e.detail) if hasattr(e, 'detail') else "", request_id, quota_type)
                 else:
-                    account_manager.last_error_time = time.time()
-                    account_manager.error_count += 1
-                    if account_manager.error_count >= ACCOUNT_FAILURE_THRESHOLD:
-                        account_manager.is_available = False
-                        logger.error(f"[ACCOUNT] [{account_manager.config.account_id}] [req_{request_id}] 请求连续失败{account_manager.error_count}次，账户已永久禁用")
+                    account_manager.handle_non_http_error("聊天请求", request_id)
 
                 retry_count += 1
-
-                # 详细记录错误信息
-                error_type = type(e).__name__
-
-                # 特殊处理HTTPException，提取状态码和详情
-                if is_http_exception:
-                    if status_code == 429:
-                        logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 遇到429限流错误，账户将休息{RATE_LIMIT_COOLDOWN_SECONDS}秒")
-                    elif status_code == 400:
-                        logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] HTTP 400参数错误（不计入失败次数）: {e.detail}")
-                    else:
-                        logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] HTTP错误 {e.status_code}: {e.detail}")
-                else:
-                    logger.error(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] {error_type}: {str(e)[:200]}")
 
                 # 检查是否还能继续重试
                 if retry_count <= max_retries:
@@ -2016,6 +2141,7 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
     """
     file_ids = []
     session_name = ""
+    seen_file_ids = set()  # 用于去重
 
     for data in data_list:
         sar = data.get("streamAssistResponse")
@@ -2037,9 +2163,17 @@ def parse_images_from_response(data_list: list) -> tuple[list, str]:
             # 检查file字段（图片生成的关键）
             file_info = content.get("file")
             if file_info and file_info.get("fileId"):
+                file_id = file_info["fileId"]
+                # 去重：同一个 fileId 只处理一次
+                if file_id in seen_file_ids:
+                    continue
+                seen_file_ids.add(file_id)
+
+                mime_type = file_info.get("mimeType", "image/png")
+                logger.debug(f"[PARSE] 解析文件: fileId={file_id}, mimeType={mime_type}")
                 file_ids.append({
-                    "fileId": file_info["fileId"],
-                    "mimeType": file_info.get("mimeType", "image/png")
+                    "fileId": file_id,
+                    "mimeType": mime_type
                 })
 
     return file_ids, session_name
@@ -2059,15 +2193,8 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
     jwt = await account_manager.get_jwt(request_id)
     headers = get_common_headers(jwt, USER_AGENT)
 
-    # 构建 toolsSpec（根据配置决定是否启用图片生成）
-    tools_spec = {
-        "webGroundingSpec": {},
-        "toolRegistry": "default_tool_registry",
-    }
-    # 只在启用且模型支持时添加图片生成
-    if IMAGE_GENERATION_ENABLED and model_name in IMAGE_GENERATION_MODELS:
-        tools_spec["imageGenerationSpec"] = {}
-        tools_spec["videoGenerationSpec"] = {}
+
+    tools_spec = get_tools_spec(model_name)
 
     body = {
         "configId": account_manager.config.config_id,
@@ -2165,6 +2292,8 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                 fid = file_info["fileId"]
                 mime = file_info["mimeType"]
                 meta = file_metadata.get(fid, {})
+                # 优先使用 metadata 中的 MIME 类型
+                mime = meta.get("mimeType", mime)
                 correct_session = meta.get("session") or session_name
                 task = download_image_with_jwt(account_manager, correct_session, fid, http_client, USER_AGENT, request_id)
                 download_tasks.append((fid, mime, task))
@@ -2183,26 +2312,13 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                     continue
 
                 try:
-                    # 根据配置选择输出格式
-                    output_format = config_manager.image_output_format
-
-                    if output_format == "base64":
-                        # Base64 模式：直接返回 base64 编码
-                        b64 = base64.b64encode(result).decode()
-                        markdown = f"\n\n![生成的图片](data:{mime};base64,{b64})\n\n"
-                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已编码为base64")
-                    else:
-                        # URL 模式：保存到本地并返回 URL
-                        image_url = save_image_to_hf(result, chat_id, fid, mime, base_url, IMAGE_DIR)
-                        markdown = f"\n\n![生成的图片]({image_url})\n\n"
-                        logger.info(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}已保存: {image_url}")
-
+                    markdown = process_media(result, mime, chat_id, fid, base_url, idx, request_id, account_manager.config.account_id)
                     success_count += 1
                     chunk = create_chunk(chat_id, created_time, model_name, {"content": markdown}, None)
                     yield f"data: {chunk}\n\n"
                 except Exception as save_error:
-                    logger.error(f"[IMAGE] [{account_manager.config.account_id}] [req_{request_id}] 图片{idx}处理失败: {str(save_error)[:100]}")
-                    error_msg = f"\n\n⚠️ 图片 {idx} 处理失败\n\n"
+                    logger.error(f"[MEDIA] [{account_manager.config.account_id}] [req_{request_id}] 媒体{idx}处理失败: {str(save_error)[:100]}")
+                    error_msg = f"\n\n⚠️ 媒体 {idx} 处理失败\n\n"
                     chunk = create_chunk(chat_id, created_time, model_name, {"content": error_msg}, None)
                     yield f"data: {chunk}\n\n"
 

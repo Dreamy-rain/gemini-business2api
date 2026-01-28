@@ -8,7 +8,7 @@
 </p>
 <p align="center"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" /> <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" /> <img src="https://img.shields.io/badge/FastAPI-0.110-009688?logo=fastapi&logoColor=white" /> <img src="https://img.shields.io/badge/Vue-3-4FC08D?logo=vue.js&logoColor=white" /> <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" /> <img src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white" /></p>
 
-<p align="center">Convert Gemini Business to OpenAI-compatible API with multi-account load balancing, image generation, multimodal capabilities, and built-in admin panel.</p>
+<p align="center">Convert Gemini Business to OpenAI-compatible API with multi-account load balancing, image generation, video generation, multimodal capabilities, and built-in admin panel.</p>
 
 ---
 
@@ -41,6 +41,7 @@
 - ✅ Streaming output - Real-time responses
 - ✅ Multimodal input - 100+ file types (images, PDF, Office docs, audio, video, code, etc.)
 - ✅ Image generation & image-to-image - Configurable models, Base64 or URL output
+- ✅ Video generation - Dedicated model with HTML/URL/Markdown output formats
 - ✅ Smart file handling - Auto file type detection, supports URL and Base64
 - ✅ Logging & monitoring - Real-time status and statistics
 - ✅ Proxy support - Configure in the admin settings
@@ -49,13 +50,19 @@
 
 ## 🤖 Model Capabilities
 
-| Model ID                 | Vision | Native Web | File Multimodal | Image Gen |
-| ------------------------ | ------ | ---------- | --------------- | --------- |
-| `gemini-auto`            | ✅      | ✅          | ✅               | Optional  |
-| `gemini-2.5-flash`       | ✅      | ✅          | ✅               | Optional  |
-| `gemini-2.5-pro`         | ✅      | ✅          | ✅               | Optional  |
-| `gemini-3-flash-preview` | ✅      | ✅          | ✅               | Optional  |
-| `gemini-3-pro-preview`   | ✅      | ✅          | ✅               | Optional  |
+| Model ID                 | Vision | Native Web | File Multimodal | Image Gen | Video Gen |
+| ------------------------ | ------ | ---------- | --------------- | --------- | --------- |
+| `gemini-auto`            | ✅      | ✅          | ✅               | Optional  | -         |
+| `gemini-2.5-flash`       | ✅      | ✅          | ✅               | Optional  | -         |
+| `gemini-2.5-pro`         | ✅      | ✅          | ✅               | Optional  | -         |
+| `gemini-3-flash-preview` | ✅      | ✅          | ✅               | Optional  | -         |
+| `gemini-3-pro-preview`   | ✅      | ✅          | ✅               | Optional  | -         |
+| `gemini-imagen`          | ✅      | ✅          | ✅               | ✅         | -         |
+| `gemini-veo`             | ✅      | ✅          | ✅               | -         | ✅         |
+
+**Virtual Models**:
+- `gemini-imagen`: Dedicated image generation model with forced image generation capability
+- `gemini-veo`: Dedicated video generation model with forced video generation capability
 
 ## 🚀 Quick Start
 

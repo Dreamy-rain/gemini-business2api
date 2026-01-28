@@ -9,7 +9,7 @@ import requests
 from requests import Response
 
 from core.mail_utils import extract_verification_code
-from core.outbound_proxy import no_proxy_matches
+from core.proxy_utils import request_with_proxy_fallback
 
 
 class DuckMailClient:
@@ -72,10 +72,15 @@ class DuckMailClient:
 
         proxies = self._build_proxies(url)
         try:
-            res = self._request_once(method, url, proxies, **kwargs)
-            if res.status_code == 407 and proxies and self.direct_fallback:
-                self._log("warning", "⚠️ 代理认证失败(407)，尝试直连重试一次")
-                res = self._request_once(method, url, None, **kwargs)
+            res = request_with_proxy_fallback(
+                requests.request,
+                method,
+                url,
+                proxies=proxies,
+                verify=self.verify_ssl,
+                timeout=kwargs.pop("timeout", 15),
+                **kwargs,
+            )
             self._log("info", f"📥 收到响应: HTTP {res.status_code}")
             log_body = os.getenv("DUCKMAIL_LOG_BODY", "").strip().lower() in ("1", "true", "yes", "y", "on")
             if res.content and (log_body or res.status_code >= 400):
@@ -303,7 +308,3 @@ class DuckMailClient:
                 self.log_callback(level, message)
             except Exception:
                 pass
-
-    @staticmethod
-    def _extract_code(text: str) -> Optional[str]:
-        return extract_verification_code(text)

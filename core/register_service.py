@@ -9,8 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
-from core.duckmail_client import DuckMailClient
-from core.gptmail_client import GPTMailClient
+from core.mail_providers import create_temp_mail_client
 from core.gemini_automation import GeminiAutomation
 from core.gemini_automation_uc import GeminiAutomationUC
 from core.outbound_proxy import OutboundProxyConfig
@@ -81,14 +80,15 @@ class RegisterService(BaseTaskService[RegisterTask]):
                 domain_value = (config.basic.register_domain or "").strip() or None
 
             mail_provider_value = (mail_provider or "").strip().lower() or "duckmail"
-            if mail_provider_value not in ("duckmail", "gptmail"):
-                mail_provider_value = "duckmail"
-
+            mail_provider_value = (mail_provider or "").strip().lower() or "duckmail"
+            
+            # 使用上游的参数校验逻辑，但保留我们的任务结构
             register_count = count or config.basic.register_default_count
             register_count = max(1, min(30, int(register_count)))
+            
             task = RegisterTask(
-                id=str(uuid.uuid4()),
-                count=register_count,
+                id=str(uuid.uuid4()), 
+                count=register_count, 
                 mail_provider=mail_provider_value,
                 domain=domain_value
             )
@@ -153,45 +153,29 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "🆕 开始注册新账户")
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        outbound: OutboundProxyConfig = config.basic.outbound_proxy
-        use_outbound_proxy = outbound.is_configured()
-        proxy_url = outbound.to_proxy_url(config.security.admin_key) if use_outbound_proxy else (config.basic.proxy or "")
-        no_proxy = outbound.no_proxy if use_outbound_proxy else ""
-        direct_fallback = outbound.direct_fallback if use_outbound_proxy else False
+        # 根据配置选择邮件提供商
+        temp_mail_provider = (config.basic.temp_mail_provider or "duckmail").lower()
+        # 如果任务指定了 provider 且有效，优先使用任务指定的
+        if mail_provider in ("duckmail", "gptmail", "freemail", "moemail"):
+             temp_mail_provider = mail_provider
 
-        if mail_provider == "gptmail":
-            client = GPTMailClient(
-                base_url=config.basic.gptmail_base_url,
-                proxy=proxy_url,
-                no_proxy=no_proxy,
-                direct_fallback=direct_fallback,
-                verify_ssl=config.basic.gptmail_verify_ssl,
-                api_key=config.basic.gptmail_api_key,
-                log_callback=log_cb,
-            )
-            log_cb("info", "📧 步骤 1/3: 生成 GPTMail 邮箱...")
-            email = client.generate_email(domain=domain)
-            if not email:
-                log_cb("error", "❌ GPTMail 邮箱生成失败")
-                return {"success": False, "error": "GPTMail 生成邮箱失败"}
-            log_cb("info", f"✅ GPTMail 邮箱生成成功: {client.email}")
-        else:
-            client = DuckMailClient(
-                base_url=config.basic.duckmail_base_url,
-                proxy=proxy_url,
-                no_proxy=no_proxy,
-                direct_fallback=direct_fallback,
-                verify_ssl=config.basic.duckmail_verify_ssl,
-                api_key=config.basic.duckmail_api_key,
-                log_callback=log_cb,
-            )
+        log_cb("info", f"📧 步骤 1/3: 注册临时邮箱 (提供商={temp_mail_provider})...")
 
-            log_cb("info", "📧 步骤 1/3: 注册 DuckMail 邮箱...")
-            if not client.register_account(domain=domain):
-                log_cb("error", "❌ DuckMail 邮箱注册失败")
-                return {"success": False, "error": "DuckMail 注册失败"}
+        if temp_mail_provider == "freemail" and not config.basic.freemail_jwt_token:
+            log_cb("error", "❌ Freemail JWT Token 未配置")
+            return {"success": False, "error": "Freemail JWT Token 未配置"}
 
-            log_cb("info", f"✅ DuckMail 邮箱注册成功: {client.email}")
+        client = create_temp_mail_client(
+            temp_mail_provider,
+            domain=domain,
+            log_cb=log_cb,
+        )
+
+        if not client.register_account(domain=domain):
+            log_cb("error", f"❌ {temp_mail_provider} 邮箱注册失败")
+            return {"success": False, "error": f"{temp_mail_provider} 注册失败"}
+
+        log_cb("info", f"✅ 邮箱注册成功: {client.email}")
 
         # 根据配置选择浏览器引擎
         browser_engine = (config.basic.browser_engine or "dp").lower()
@@ -203,18 +187,18 @@ class RegisterService(BaseTaskService[RegisterTask]):
             # DrissionPage 引擎：支持有头和无头模式
             automation = GeminiAutomation(
                 user_agent=self.user_agent,
-                proxy=proxy_url,
+                proxy=client.proxy_url if hasattr(client, 'proxy_url') else "", # Use client proxy if available
                 headless=headless,
                 log_callback=log_cb,
             )
         else:
-            # undetected-chromedriver 引擎：无头模式反检测能力弱，强制使用有头模式
-            if headless:
+            # undetected-chromedriver 引擎
+             if headless:
                 log_cb("warning", "⚠️ UC 引擎无头模式反检测能力弱，强制使用有头模式")
                 headless = False
-            automation = GeminiAutomationUC(
+             automation = GeminiAutomationUC(
                 user_agent=self.user_agent,
-                proxy=proxy_url,
+                proxy=client.proxy_url if hasattr(client, 'proxy_url') else "",
                 headless=headless,
                 log_callback=log_cb,
             )
@@ -236,12 +220,33 @@ class RegisterService(BaseTaskService[RegisterTask]):
         log_cb("info", "✅ Gemini 登录成功，正在保存配置...")
 
         config_data = result["config"]
-        config_data["mail_provider"] = mail_provider
+        config_data["mail_provider"] = temp_mail_provider
         config_data["mail_address"] = client.email
-        if mail_provider == "duckmail":
-            config_data["mail_password"] = getattr(client, "password", "") or ""
-        else:
+
+        # 保存邮箱自定义配置
+        if temp_mail_provider == "freemail":
             config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.freemail_base_url
+            config_data["mail_jwt_token"] = config.basic.freemail_jwt_token
+            config_data["mail_verify_ssl"] = config.basic.freemail_verify_ssl
+            config_data["mail_domain"] = config.basic.freemail_domain
+        elif temp_mail_provider == "gptmail":
+            config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.gptmail_base_url
+            config_data["mail_api_key"] = config.basic.gptmail_api_key
+            config_data["mail_verify_ssl"] = config.basic.gptmail_verify_ssl
+            config_data["mail_domain"] = config.basic.gptmail_domain
+        elif temp_mail_provider == "moemail":
+            config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
+            config_data["mail_base_url"] = config.basic.moemail_base_url
+            config_data["mail_api_key"] = config.basic.moemail_api_key
+            config_data["mail_domain"] = config.basic.moemail_domain
+        elif temp_mail_provider == "duckmail":
+            config_data["mail_password"] = getattr(client, "password", "")
+            config_data["mail_base_url"] = config.basic.duckmail_base_url
+            config_data["mail_api_key"] = config.basic.duckmail_api_key
+        else:
+            config_data["mail_password"] = getattr(client, "password", "")
 
         accounts_data = load_accounts_from_source()
         updated = False

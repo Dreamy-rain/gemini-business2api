@@ -171,43 +171,76 @@ class GeminiAutomation:
 
         send_time = datetime.now()
 
-        # Step 1: 导航到首页并设置 Cookie
+        # Step 1: 导航到登录页面（模拟真实用户）
         self._log("info", f"🌐 正在打开登录页面: {email}")
 
-        page.get(AUTH_HOME_URL, timeout=self.timeout)
-        time.sleep(2)
-
-        # 设置两个关键 Cookie
-        try:
-            self._log("info", "🍪 正在设置认证 Cookies...")
-            page.set.cookies(
-                {
-                    "name": "__Host-AP_SignInXsrf",
-                    "value": DEFAULT_XSRF_TOKEN,
-                    "url": AUTH_HOME_URL,
-                    "path": "/",
-                    "secure": True,
-                }
-            )
-            # 添加 reCAPTCHA Cookie
-            page.set.cookies(
-                {
-                    "name": "_GRECAPTCHA",
-                    "value": "09ABCL...",
-                    "url": "https://google.com",
-                    "path": "/",
-                    "secure": True,
-                }
-            )
-            self._log("info", "✅ Cookies 设置成功")
-        except Exception as e:
-            self._log("warning", f"⚠️ 设置 Cookies 失败: {e}")
-
-        login_hint = quote(email, safe="")
-        login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"
-        self._log("info", "🔗 正在访问登录链接...")
+        # 直接访问登录页面，不带 loginHint（避免被检测为自动化）
+        login_url = "https://auth.business.gemini.google/login?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F"
         page.get(login_url, timeout=self.timeout)
-        time.sleep(5)
+        time.sleep(3)
+
+        # Step 1.5: 查找并填写邮箱输入框
+        self._log("info", "📧 正在查找邮箱输入框...")
+        email_input = None
+
+        # 尝试多种选择器
+        selectors = [
+            "css:input[type='email']",
+            "css:input[name='email']",
+            "css:input[placeholder*='邮箱']",
+            "css:input[placeholder*='email']",
+            "css:input[placeholder*='Email']",
+        ]
+
+        for selector in selectors:
+            try:
+                email_input = page.ele(selector, timeout=2)
+                if email_input:
+                    self._log("info", f"✅ 找到邮箱输入框: {selector}")
+                    break
+            except Exception:
+                continue
+
+        if not email_input:
+            self._log("error", "❌ 未找到邮箱输入框")
+            self._save_screenshot(page, "email_input_not_found")
+            return {"success": False, "error": "email input not found"}
+
+        # 输入邮箱地址（模拟人类输入）
+        self._log("info", f"⌨️ 正在输入邮箱: {email}")
+        if not self._simulate_human_input(email_input, email):
+            self._log("warning", "⚠️ 模拟输入失败，使用直接输入")
+            email_input.input(email, clear=True)
+        time.sleep(1)
+
+        # Step 1.6: 点击"使用邮箱继续"按钮
+        self._log("info", "🔘 正在查找并点击继续按钮...")
+        continue_btn = None
+
+        # 查找按钮
+        continue_keywords = ["使用邮箱继续", "继续", "Continue", "Next", "下一步"]
+        buttons = page.eles("tag:button")
+        for btn in buttons:
+            text = (btn.text or "").strip()
+            if text and any(kw in text for kw in continue_keywords):
+                continue_btn = btn
+                self._log("info", f"✅ 找到继续按钮: '{text}'")
+                break
+
+        if not continue_btn:
+            self._log("error", "❌ 未找到继续按钮")
+            self._save_screenshot(page, "continue_button_not_found")
+            return {"success": False, "error": "continue button not found"}
+
+        # 点击按钮
+        try:
+            continue_btn.click()
+            self._log("info", "✅ 已点击继续按钮")
+            time.sleep(5)  # 等待页面跳转
+        except Exception as e:
+            self._log("error", f"❌ 点击继续按钮失败: {e}")
+            self._save_screenshot(page, "continue_button_click_failed")
+            return {"success": False, "error": f"continue button click failed: {e}"}
 
         # Step 2: 检查当前页面状态
         current_url = page.url

@@ -430,22 +430,47 @@ class GeminiAutomation:
         return False
 
     def _wait_for_code_input(self, page, timeout: int = 30):
-        """等待验证码输入框出现"""
+        """等待验证码输入框出现（包括隐藏元素）"""
         selectors = [
             "css:input[jsname='ovqh0b']",
-            "css:input[type='tel']",
             "css:input[name='pinInput']",
+            "css:input.J6L5wc",  # Google 的验证码输入框 class
+            "css:input[type='tel']",
             "css:input[autocomplete='one-time-code']",
         ]
-        for _ in range(timeout // 2):
+
+        for attempt in range(timeout // 2):
+            # 输出调试信息（仅第一次）
+            if attempt == 0:
+                try:
+                    all_inputs = page.eles("tag:input")
+                    self._log("info", f"🔍 页面上共有 {len(all_inputs)} 个 input 元素")
+                    for i, inp in enumerate(all_inputs[:5]):
+                        inp_type = inp.attr("type") or "unknown"
+                        inp_name = inp.attr("name") or "unknown"
+                        inp_jsname = inp.attr("jsname") or "unknown"
+                        inp_class = inp.attr("class") or "unknown"
+                        self._log(
+                            "info",
+                            f"  Input {i + 1}: type={inp_type}, name={inp_name}, jsname={inp_jsname}, class={inp_class}",
+                        )
+                except Exception as e:
+                    self._log("warning", f"⚠️ 无法列出 input 元素: {e}")
+
             for selector in selectors:
                 try:
-                    el = page.ele(selector, timeout=1)
-                    if el:
+                    # 尝试查找所有匹配的元素（包括隐藏的）
+                    elements = page.eles(selector, timeout=1)
+                    if elements:
+                        el = elements[0]  # 取第一个
+                        self._log("info", f"✅ 找到验证码输入框: {selector}")
                         return el
                 except Exception:
                     continue
+
             time.sleep(2)
+
+        self._log("error", "❌ 超时：未找到验证码输入框")
         return None
 
     def _simulate_human_input(self, element, text: str) -> bool:

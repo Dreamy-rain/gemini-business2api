@@ -1853,31 +1853,33 @@ async def chat_impl(
     # 获取会话绑定管理器
     binding_mgr = get_session_binding_manager()
     
+    
     # 检查是否已有绑定账号
     bound_account_id = await binding_mgr.get_binding(chat_id_for_binding)
     
-    # 生成 conv_key 用于 session 锁（仍需防止并发冲突）
-    conv_key = get_conversation_key([m.model_dump() for m in req.messages], client_ip)
-    session_lock = await multi_account_mgr.acquire_session_lock(conv_key)
+    # 使用 chat_id_for_binding 作为 Session 缓存 key（保证同一对话复用同一 Session）
+    # 注意：不再使用基于消息内容的 conv_key，避免每次消息变化导致 Session 重建
+    session_cache_key = chat_id_for_binding
+    session_lock = await multi_account_mgr.acquire_session_lock(session_cache_key)
 
     # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）
     async with session_lock:
-        cached_session = multi_account_mgr.global_session_cache.get(conv_key)
+        cached_session = multi_account_mgr.global_session_cache.get(session_cache_key)
 
         if cached_session:
-            # 使用已绑定的账户
+            # 使用已绑定的账户和缓存的 Session
             account_id = cached_session["account_id"]
             account_manager = await multi_account_mgr.get_account(account_id, request_id)
             google_session = cached_session["session_id"]
             is_new_conversation = False
-            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 继续会话: {google_session[-12:]}")
+            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 复用Session: {google_session[-12:]}")
         elif bound_account_id:
             # 有持久化绑定但无缓存Session：使用绑定账号创建新Session
             try:
                 account_manager = await multi_account_mgr.get_account(bound_account_id, request_id)
                 google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                 await multi_account_mgr.set_session_cache(
-                    conv_key,
+                    session_cache_key,
                     account_manager.config.account_id,
                     google_session
                 )
@@ -1901,7 +1903,7 @@ async def chat_impl(
                     google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                     # 线程安全地绑定账户到此对话
                     await multi_account_mgr.set_session_cache(
-                        conv_key,
+                        session_cache_key,
                         account_manager.config.account_id,
                         google_session
                     )
@@ -2000,7 +2002,7 @@ async def chat_impl(
         text_to_send = last_text
         is_retry_mode = False
         # 线程安全地更新时间戳
-        await multi_account_mgr.update_session_time(conv_key)
+        await multi_account_mgr.update_session_time(session_cache_key)
 
     chat_id = f"chatcmpl-{uuid.uuid4()}"
     created_time = int(time.time())
@@ -2025,12 +2027,12 @@ async def chat_impl(
         while retry_count <= max_retries:
             try:
                 # 安全：使用.get()防止缓存被清理导致KeyError
-                cached = multi_account_mgr.global_session_cache.get(conv_key)
+                cached = multi_account_mgr.global_session_cache.get(session_cache_key)
                 if not cached:
                     logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 缓存已清理，重建Session")
                     new_sess = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
                     await multi_account_mgr.set_session_cache(
-                        conv_key,
+                        session_cache_key,
                         account_manager.config.account_id,
                         new_sess
                     )

@@ -124,6 +124,11 @@ class GeminiAutomation:
             options.set_argument(
                 "--enable-features=NetworkService,NetworkServiceInProcess"
             )
+            # 增强反检测
+            options.set_argument("--disable-blink-features=AutomationControlled")
+            options.set_argument("--exclude-switches=enable-automation")
+            options.set_argument("--disable-web-security")
+            options.set_argument("--allow-running-insecure-content")
 
         options.auto_port()
         page = ChromiumPage(options)
@@ -254,6 +259,19 @@ class GeminiAutomation:
             # 输出当前 URL，用于调试
             current_url = page.url
             self._log("info", f"📍 点击后 URL: {current_url}")
+
+            # 检查是否跳转到错误页面
+            if "signin-error" in current_url:
+                self._log("error", "❌ Google 拒绝登录：跳转到 signin-error 页面")
+                self._log(
+                    "error",
+                    "可能原因：1) 邮箱域名被识别 2) 检测到自动化 3) 请求频率过高",
+                )
+                self._save_screenshot(page, "signin_error")
+                return {
+                    "success": False,
+                    "error": "Google signin-error: email rejected or bot detected",
+                }
         except Exception as e:
             self._log("error", f"❌ 点击继续按钮失败: {e}")
             self._save_screenshot(page, "continue_button_click_failed")

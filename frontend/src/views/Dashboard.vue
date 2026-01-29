@@ -14,10 +14,10 @@
         </div>
         <div class="flex flex-col items-end gap-1">
           <div class="rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">
-            v2.1-gptmail
+            v2.2-gptmail
           </div>
           <div class="text-xs text-muted-foreground">
-            2026-01-29 17:55
+            2026-01-29 18:30
           </div>
         </div>
       </div>

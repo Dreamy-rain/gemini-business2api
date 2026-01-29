@@ -434,7 +434,7 @@ class GeminiAutomation:
         return False
 
     def _wait_for_code_input(self, page, timeout: int = 30):
-        """等待验证码输入框出现（包括隐藏元素）"""
+        """等待验证码输入框出现（通过页面特征判断）"""
         selectors = [
             "css:input[jsname='ovqh0b']",
             "css:input[name='pinInput']",
@@ -458,6 +458,46 @@ class GeminiAutomation:
                     continue
             except Exception as e:
                 self._log("warning", f"⚠️ 无法获取页面 URL: {e}")
+
+            # 检查页面特征，确认是验证码页面
+            if attempt == 0:
+                try:
+                    # 检查页面文字特征
+                    page_text = page.html[:5000]  # 获取前 5000 字符
+                    has_verification_text = any(
+                        keyword in page_text
+                        for keyword in [
+                            "验证码",
+                            "verification",
+                            "verify-oob-code",
+                            "pinInput",
+                        ]
+                    )
+
+                    if has_verification_text:
+                        self._log("info", "✅ 检测到验证码页面特征")
+                    else:
+                        self._log(
+                            "warning", "⚠️ 未检测到验证码页面特征，可能在错误的页面"
+                        )
+
+                    # 检查按钮特征
+                    buttons = page.eles("tag:button")
+                    button_texts = [btn.text for btn in buttons if btn.text]
+                    self._log("info", f"🔘 页面按钮: {button_texts}")
+
+                    has_verify_button = any(
+                        keyword in " ".join(button_texts)
+                        for keyword in ["验证", "Verify", "重新发送", "Resend"]
+                    )
+
+                    if has_verify_button:
+                        self._log("info", "✅ 检测到验证/重新发送按钮")
+                    else:
+                        self._log("warning", "⚠️ 未检测到验证按钮")
+
+                except Exception as e:
+                    self._log("warning", f"⚠️ 无法检查页面特征: {e}")
 
             # 输出调试信息（仅第一次）
             if attempt == 0:

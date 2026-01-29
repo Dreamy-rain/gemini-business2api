@@ -250,6 +250,10 @@ class GeminiAutomation:
             continue_btn.click()
             self._log("info", "✅ 已点击继续按钮，Google 将自动发送验证码")
             time.sleep(8)  # 等待页面跳转和验证码发送
+
+            # 输出当前 URL，用于调试
+            current_url = page.url
+            self._log("info", f"📍 点击后 URL: {current_url}")
         except Exception as e:
             self._log("error", f"❌ 点击继续按钮失败: {e}")
             self._save_screenshot(page, "continue_button_click_failed")

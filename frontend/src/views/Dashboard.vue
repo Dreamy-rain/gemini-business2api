@@ -14,10 +14,10 @@
         </div>
         <div class="flex flex-col items-end gap-1">
           <div class="rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">
-            v2.3-gptmail
+            v2.4-gptmail
           </div>
           <div class="text-xs text-muted-foreground">
-            2026-01-29 19:50 | Browser Automation Tools Installed
+            2026-01-29 20:15 | Debug Logging Enhanced
           </div>
         </div>
       </div>

@@ -171,104 +171,43 @@ class GeminiAutomation:
 
         send_time = datetime.now()
 
-        # Step 1: 导航到 Gemini Business 首页（会自动跳转到登录页面）
-        self._log(
-            "info", f"🌐 正在访问 https://business.gemini.google/ (邮箱: {email})"
-        )
+        # Step 1: 导航到首页并设置 Cookie
+        self._log("info", f"🌐 正在打开登录页面: {email}")
 
-        # 访问首页，让 Google 自动重定向到登录页面（避免被检测为自动化）
-        page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(8)  # 增加等待时间，确保页面完全加载和重定向
+        page.get(AUTH_HOME_URL, timeout=self.timeout)
+        time.sleep(2)
 
-        # 输出当前 URL，用于调试
-        current_url = page.url
-        self._log("info", f"📍 当前 URL: {current_url}")
-
-        # Step 1.5: 查找并填写邮箱输入框
-        self._log("info", "📧 正在查找邮箱输入框...")
-
-        # 先输出页面上所有 input 元素，用于调试
+        # 设置两个关键 Cookie
         try:
-            all_inputs = page.eles("tag:input")
-            self._log("info", f"📋 页面上共有 {len(all_inputs)} 个 input 元素")
-            for i, inp in enumerate(all_inputs[:5]):  # 只输出前5个
-                inp_type = inp.attr("type") or "unknown"
-                inp_name = inp.attr("name") or "unknown"
-                inp_placeholder = inp.attr("placeholder") or ""
-                self._log(
-                    "info",
-                    f"  Input {i + 1}: type={inp_type}, name={inp_name}, placeholder={inp_placeholder}",
-                )
+            self._log("info", "🍪 正在设置认证 Cookies...")
+            page.set.cookies(
+                {
+                    "name": "__Host-AP_SignInXsrf",
+                    "value": DEFAULT_XSRF_TOKEN,
+                    "url": AUTH_HOME_URL,
+                    "path": "/",
+                    "secure": True,
+                }
+            )
+            # 添加 reCAPTCHA Cookie
+            page.set.cookies(
+                {
+                    "name": "_GRECAPTCHA",
+                    "value": "09ABCL...",
+                    "url": "https://google.com",
+                    "path": "/",
+                    "secure": True,
+                }
+            )
+            self._log("info", "✅ Cookies 设置成功")
         except Exception as e:
-            self._log("warning", f"⚠️ 无法列出 input 元素: {e}")
+            self._log("warning", f"⚠️ 设置 Cookies 失败: {e}")
 
-        email_input = None
-
-        # 尝试多种选择器
-        selectors = [
-            "css:input[name='loginHint']",  # Google 使用的实际字段名
-            "css:input[id='email-input']",  # Google 的 ID
-            "css:input[type='email']",
-            "css:input[name='email']",
-            "css:input[name='identifier']",
-            "css:input[aria-label='邮箱']",
-            "css:input[aria-label*='email']",
-            "css:input[placeholder*='邮箱']",
-            "css:input[placeholder*='email']",
-            "css:input[placeholder*='Email']",
-            "css:input[autocomplete='email']",
-        ]
-
-        for selector in selectors:
-            try:
-                email_input = page.ele(selector, timeout=2)
-                if email_input:
-                    self._log("info", f"✅ 找到邮箱输入框: {selector}")
-                    break
-            except Exception:
-                continue
-
-        if not email_input:
-            self._log("error", "❌ 未找到邮箱输入框")
-            self._log("error", f"❌ 当前 URL: {current_url}")
-            self._save_screenshot(page, "email_input_not_found")
-            return {"success": False, "error": "email input not found"}
-
-        # 输入邮箱地址（模拟人类输入）
-        self._log("info", f"⌨️ 正在输入邮箱: {email}")
-        if not self._simulate_human_input(email_input, email):
-            self._log("warning", "⚠️ 模拟输入失败，使用直接输入")
-            email_input.input(email, clear=True)
-        time.sleep(1)
-
-        # Step 1.6: 点击"使用邮箱继续"按钮
-        self._log("info", "🔘 正在查找并点击继续按钮...")
-        continue_btn = None
-
-        # 查找按钮
-        continue_keywords = ["使用邮箱继续", "继续", "Continue", "Next", "下一步"]
-        buttons = page.eles("tag:button")
-        for btn in buttons:
-            text = (btn.text or "").strip()
-            if text and any(kw in text for kw in continue_keywords):
-                continue_btn = btn
-                self._log("info", f"✅ 找到继续按钮: '{text}'")
-                break
-
-        if not continue_btn:
-            self._log("error", "❌ 未找到继续按钮")
-            self._save_screenshot(page, "continue_button_not_found")
-            return {"success": False, "error": "continue button not found"}
-
-        # 点击按钮
-        try:
-            continue_btn.click()
-            self._log("info", "✅ 已点击继续按钮")
-            time.sleep(5)  # 等待页面跳转
-        except Exception as e:
-            self._log("error", f"❌ 点击继续按钮失败: {e}")
-            self._save_screenshot(page, "continue_button_click_failed")
-            return {"success": False, "error": f"continue button click failed: {e}"}
+        login_hint = quote(email, safe="")
+        login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"
+        self._log("info", "🔗 正在访问登录链接...")
+        page.get(login_url, timeout=self.timeout)
+        time.sleep(5)
 
         # Step 2: 检查当前页面状态
         current_url = page.url
@@ -283,15 +222,44 @@ class GeminiAutomation:
             self._log("info", "✅ 检测到已登录，直接提取配置")
             return self._extract_config(page, email)
 
-        # Step 3: 等待验证码输入框出现（Google 点击继续按钮后会自动发送验证码）
-        self._log("info", "⏳ 等待验证码输入框出现（Google 已自动发送验证码）...")
+        # Step 2.5: 查找邮箱输入框并填写（Google 现在需要手动输入邮箱）
+        self._log("info", "📧 正在查找邮箱输入框...")
+        email_input = (
+            page.ele("css:input[name='loginHint']", timeout=3)
+            or page.ele("css:input[id='email-input']", timeout=2)
+            or page.ele("css:input[type='text']", timeout=2)
+        )
+
+        if email_input:
+            self._log("info", "⌨️ 正在输入邮箱...")
+            if not self._simulate_human_input(email_input, email):
+                self._log("warning", "⚠️ 模拟输入失败，使用直接输入")
+                email_input.input(email, clear=True)
+            time.sleep(1)
+
+            # 查找并点击"使用邮箱继续"按钮
+            self._log("info", "🔘 正在查找并点击继续按钮...")
+            continue_keywords = ["使用邮箱继续", "继续", "Continue", "Next"]
+            buttons = page.eles("tag:button")
+            for btn in buttons:
+                text = (btn.text or "").strip()
+                if text and any(kw in text for kw in continue_keywords):
+                    self._log("info", f"✅ 找到继续按钮: '{text}'")
+                    btn.click()
+                    time.sleep(5)  # 等待页面跳转和 Google 自动发送验证码
+                    break
+        else:
+            self._log("warning", "⚠️ 未找到邮箱输入框，可能已自动填充")
+
+        # Step 3: 等待验证码输入框出现（Google 点击继续后会自动发送验证码）
+        self._log("info", "⏳ 等待验证码输入框出现...")
         code_input = self._wait_for_code_input(page)
         if not code_input:
             self._log("error", "❌ 验证码输入框未出现")
             self._save_screenshot(page, "code_input_missing")
             return {"success": False, "error": "code input not found"}
 
-        # Step 4: 轮询邮件获取验证码（传入发送时间)
+        # Step 5: 轮询邮件获取验证码（传入发送时间)
         self._log("info", "📬 开始轮询邮箱获取验证码...")
         code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
@@ -404,7 +372,7 @@ class GeminiAutomation:
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(3)  # 增加等待时间，确保页面完全加载
+        time.sleep(2)
 
         # 方法1: 直接通过ID查找
         direct_btn = page.ele("#sign-in-with-email", timeout=5)
@@ -419,38 +387,22 @@ class GeminiAutomation:
             except Exception as e:
                 self._log("warning", f"⚠️ 点击按钮失败: {e}")
 
-        # 方法2: 通过关键词查找（扩展关键词列表）
+        # 方法2: 通过关键词查找
         keywords = [
             "通过电子邮件发送验证码",
             "通过电子邮件发送",
-            "发送验证码",
-            "发送",
             "email",
             "Email",
-            "EMAIL",
             "Send code",
             "Send verification",
             "Verification code",
-            "Get code",
-            "Continue",
-            "Next",
-            "Verify",
         ]
         try:
-            self._log("info", f"🔍 通过关键词搜索按钮...")
-
-            # 先输出所有按钮的文本，用于调试
+            self._log("info", f"🔍 通过关键词搜索按钮: {keywords}")
             buttons = page.eles("tag:button")
-            self._log("info", f"📋 页面上共有 {len(buttons)} 个按钮")
-            for i, btn in enumerate(buttons[:10]):  # 只输出前10个
-                text = (btn.text or "").strip()
-                if text:
-                    self._log("info", f"  按钮 {i + 1}: '{text}'")
-
-            # 查找匹配的按钮
             for btn in buttons:
                 text = (btn.text or "").strip()
-                if text and any(kw.lower() in text.lower() for kw in keywords):
+                if text and any(kw in text for kw in keywords):
                     try:
                         self._log("info", f"✅ 找到匹配按钮: '{text}'")
                         btn.click()
@@ -462,30 +414,15 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
 
-        # 方法3: 尝试查找 div 或 span 元素（可能是自定义按钮）
-        try:
-            self._log("info", "🔍 尝试查找非 button 标签的可点击元素...")
-            clickables = page.eles("css:[role='button']") + page.eles("css:.button")
-            self._log("info", f"📋 找到 {len(clickables)} 个可点击元素")
-            for elem in clickables[:10]:
-                text = (elem.text or "").strip()
-                if text:
-                    self._log("info", f"  元素: '{text}'")
-                if text and any(kw.lower() in text.lower() for kw in keywords):
-                    try:
-                        self._log("info", f"✅ 找到匹配元素: '{text}'")
-                        elem.click()
-                        self._log("info", "✅ 成功点击发送验证码元素")
-                        time.sleep(3)
-                        return True
-                    except Exception as e:
-                        self._log("warning", f"⚠️ 点击元素失败: {e}")
-        except Exception as e:
-            self._log("warning", f"⚠️ 搜索可点击元素异常: {e}")
+        # 检查是否已经在验证码输入页面
+        code_input = page.ele("css:input[jsname='ovqh0b']", timeout=2) or page.ele(
+            "css:input[name='pinInput']", timeout=1
+        )
+        if code_input:
+            self._log("info", "✅ 已在验证码输入页面，无需点击按钮")
+            return True
 
-        # 如果所有方法都失败，记录错误
         self._log("error", "❌ 未找到发送验证码按钮")
-        self._save_screenshot(page, "send_button_not_found")
         return False
 
     def _wait_for_code_input(self, page, timeout: int = 30):

@@ -444,6 +444,21 @@ class GeminiAutomation:
         ]
 
         for attempt in range(timeout // 2):
+            # 先检查页面 URL，确保已经跳转到验证码页面
+            try:
+                current_url = page.url
+                if attempt == 0:
+                    self._log("info", f"🔍 当前页面 URL: {current_url}")
+
+                # 如果还在登录页面，继续等待
+                if "login" in current_url and "verify" not in current_url:
+                    if attempt == 0:
+                        self._log("info", "⏳ 页面还在登录页面，等待跳转...")
+                    time.sleep(2)
+                    continue
+            except Exception as e:
+                self._log("warning", f"⚠️ 无法获取页面 URL: {e}")
+
             # 输出调试信息（仅第一次）
             if attempt == 0:
                 try:

@@ -22,6 +22,7 @@ _db_pool_lock = None
 _db_loop = None
 _db_thread = None
 _db_loop_lock = threading.Lock()
+_db_lock = None  # 用于同步数据库操作的异步锁
 
 
 def _get_database_url() -> str:
@@ -61,11 +62,13 @@ def _run_in_db_loop(coro):
 
 async def _get_pool():
     """Get (or create) the asyncpg connection pool."""
-    global _db_pool, _db_pool_lock
+    global _db_pool, _db_pool_lock, _db_lock
     if _db_pool is not None:
         return _db_pool
     if _db_pool_lock is None:
         _db_pool_lock = asyncio.Lock()
+    if _db_lock is None:
+        _db_lock = asyncio.Lock()
     async with _db_pool_lock:
         if _db_pool is not None:
             return _db_pool
@@ -108,34 +111,50 @@ async def _init_tables(pool) -> None:
 
 async def db_get(key: str) -> Optional[dict]:
     """Fetch a value from the database."""
+    global _db_pool
     pool = await _get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT value FROM kv_store WHERE key = $1", key
-        )
-        if not row:
-            return None
-        value = row["value"]
-        if isinstance(value, str):
-            return json.loads(value)
-        return value
+    async with _db_lock:  # 使用全局锁防止并发操作冲突
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT value FROM kv_store WHERE key = $1", key
+                )
+                if not row:
+                    return None
+                value = row["value"]
+                if isinstance(value, str):
+                    return json.loads(value)
+                return value
+        except Exception as e:
+            if "connection was closed" in str(e) or "is in progress" in str(e):
+                logger.warning(f"[STORAGE] Database connection issue during GET, resetting pool: {e}")
+                _db_pool = None # 触发下次重连
+            raise
 
 
 async def db_set(key: str, value: dict) -> None:
     """Persist a value to the database."""
+    global _db_pool
     pool = await _get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO kv_store (key, value, updated_at)
-            VALUES ($1, $2, CURRENT_TIMESTAMP)
-            ON CONFLICT (key) DO UPDATE SET
-                value = EXCLUDED.value,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            key,
-            json.dumps(value, ensure_ascii=False),
-        )
+    async with _db_lock:  # 使用全局锁防止并发操作冲突
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO kv_store (key, value, updated_at)
+                    VALUES ($1, $2, CURRENT_TIMESTAMP)
+                    ON CONFLICT (key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    key,
+                    json.dumps(value, ensure_ascii=False),
+                )
+        except Exception as e:
+            if "connection was closed" in str(e) or "is in progress" in str(e):
+                logger.warning(f"[STORAGE] Database connection issue during SET, resetting pool: {e}")
+                _db_pool = None # 触发下次重连
+            raise
 
 
 # ==================== Accounts storage ====================

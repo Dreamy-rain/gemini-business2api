@@ -2169,7 +2169,7 @@ async def chat_impl(
 
                         # 更新缓存绑定到新账户
                         await multi_account_mgr.set_session_cache(
-                            conv_key,
+                            session_cache_key,
                             new_account.config.account_id,
                             new_sess
                         )

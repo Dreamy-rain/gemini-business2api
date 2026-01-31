@@ -109,6 +109,22 @@ export interface Settings {
     auto_refresh_accounts_seconds: number
     scheduled_refresh_enabled?: boolean
     scheduled_refresh_interval_minutes?: number
+    /**
+     * 是否启用“高级自动刷新调度”（默认关闭）。
+     *
+     * 功能说明：
+     * - 仅影响“后台自动定时触发”的刷新：防堆叠、公平调度、失败退避；
+     * - 不影响管理面板的手动刷新语义（手动仍会立即执行）。
+     */
+    scheduled_refresh_advanced_enabled?: boolean
+    /**
+     * 高级调度：单轮最多入队的账号数量。
+     *
+     * 说明：
+     * - 后端内部会确保每轮至少有固定的最小批次（例如 5 个）以保证进展；
+     * - 该值过小会被后端最小批次覆盖。
+     */
+    scheduled_refresh_max_batch_size?: number
   }
   public_display: {
     logo_url?: string

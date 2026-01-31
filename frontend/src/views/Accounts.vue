@@ -818,11 +818,49 @@
                       </p>
                     </div>
 
+                    <div class="space-y-3">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <p class="text-sm font-medium text-foreground">高级自动刷新调度（防堆叠/公平/退避）</p>
+                          <p class="mt-1 text-xs text-muted-foreground">
+                            启用后会避免定时任务堆叠，并对失败账号进行退避，降低风控概率（默认关闭）
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          class="relative inline-flex h-5 w-10 items-center rounded-full transition-colors"
+                          :class="scheduledRefreshAdvancedEnabled ? 'bg-primary' : 'bg-muted'"
+                          @click="scheduledRefreshAdvancedEnabled = !scheduledRefreshAdvancedEnabled"
+                        >
+                          <span
+                            class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"
+                            :class="scheduledRefreshAdvancedEnabled ? 'translate-x-5' : 'translate-x-1'"
+                          ></span>
+                        </button>
+                      </div>
+
+                      <div v-if="scheduledRefreshAdvancedEnabled" class="space-y-2">
+                        <label class="block text-xs text-muted-foreground">单轮最大入队账号数</label>
+                        <input
+                          v-model.number="scheduledRefreshMaxBatchSize"
+                          type="number"
+                          min="1"
+                          max="200"
+                          class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                          建议 10-30。后端每轮至少会保证最小批次（例如 5 个）以确保有进展；失败账号会指数退避一段时间。
+                        </p>
+                      </div>
+                    </div>
+
                     <div class="rounded-2xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
                       <p class="mb-2 font-medium text-foreground">说明</p>
                       <ul class="list-inside list-disc space-y-1">
                         <li>定时任务会在后台自动运行，无需手动触发</li>
                         <li>每次检测会自动刷新即将过期的账号（距离过期 ≤ 过期刷新窗口）</li>
+                        <li>高级调度开启后：若已有刷新任务运行/排队，本次检测会跳过，避免堆叠与无缝连刷</li>
+                        <li>高级调度开启后：失败账号会被暂时退避，不会在短时间内被反复自动尝试</li>
                         <li>修改配置后立即生效，无需重启服务</li>
                         <li>禁用后，定时任务将停止运行</li>
                       </ul>
@@ -1195,6 +1233,10 @@ const lastRegisterTaskId = ref<string | null>(null)
 const lastLoginTaskId = ref<string | null>(null)
 const scheduledRefreshEnabled = ref(false)
 const scheduledRefreshInterval = ref(30)
+// 是否启用“高级自动刷新调度”（默认关闭，仅影响后台定时触发）
+const scheduledRefreshAdvancedEnabled = ref(false)
+// 高级调度：单轮最多入队账号数（后端仍会保证最小批次）
+const scheduledRefreshMaxBatchSize = ref(20)
 const refreshWindowHours = ref(24)
 const isLoadingScheduledConfig = ref(false)
 const isSavingScheduledConfig = ref(false)
@@ -2023,6 +2065,8 @@ const loadScheduledConfig = async () => {
     cachedSettings.value = settings  // 缓存配置
     scheduledRefreshEnabled.value = settings.retry.scheduled_refresh_enabled ?? false
     scheduledRefreshInterval.value = settings.retry.scheduled_refresh_interval_minutes ?? 30
+    scheduledRefreshAdvancedEnabled.value = settings.retry.scheduled_refresh_advanced_enabled ?? false
+    scheduledRefreshMaxBatchSize.value = settings.retry.scheduled_refresh_max_batch_size ?? 20
     refreshWindowHours.value = settings.basic.refresh_window_hours ?? 24
   } catch (error: any) {
     toast.error(error?.message || '加载定时任务配置失败')
@@ -2052,12 +2096,26 @@ const saveScheduledConfig = async () => {
     return
   }
 
+  // 验证高级调度：单轮最大入队账号数（仅在开启高级调度时校验）
+  if (scheduledRefreshAdvancedEnabled.value) {
+    if (isNaN(scheduledRefreshMaxBatchSize.value) || !Number.isInteger(scheduledRefreshMaxBatchSize.value)) {
+      toast.error('单轮最大入队账号数必须是有效的整数')
+      return
+    }
+    if (scheduledRefreshMaxBatchSize.value < 1 || scheduledRefreshMaxBatchSize.value > 200) {
+      toast.error('单轮最大入队账号数必须在 1-200 之间')
+      return
+    }
+  }
+
   isSavingScheduledConfig.value = true
   try {
     // 使用缓存的配置，避免重复API调用
     const settings = cachedSettings.value || await settingsApi.get()
     settings.retry.scheduled_refresh_enabled = scheduledRefreshEnabled.value
     settings.retry.scheduled_refresh_interval_minutes = scheduledRefreshInterval.value
+    settings.retry.scheduled_refresh_advanced_enabled = scheduledRefreshAdvancedEnabled.value
+    settings.retry.scheduled_refresh_max_batch_size = scheduledRefreshMaxBatchSize.value
     settings.basic.refresh_window_hours = refreshWindowHours.value
     await settingsApi.update(settings)
     cachedSettings.value = settings  // 更新缓存

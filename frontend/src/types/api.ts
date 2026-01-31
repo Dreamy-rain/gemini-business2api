@@ -140,6 +140,64 @@ export interface Settings {
   }
 }
 
+/**
+ * 单个账号的“高级自动刷新调度状态”展示数据。
+ *
+ * 说明：
+ * - 该结构来自后端 `/admin/scheduled-refresh/states`；
+ * - 不包含任何敏感字段，仅用于管理面板可视化与排查。
+ */
+export interface ScheduledRefreshStateItem {
+  /** 账号 ID */
+  id: string
+  /** 是否已存在调度状态（历史为空时为 false） */
+  has_state: boolean
+  /** 上次尝试刷新时间戳（秒） */
+  last_attempt_at: number
+  /** 上次尝试刷新（北京时间字符串） */
+  last_attempt_at_beijing: string
+  /** 上次成功刷新时间戳（秒） */
+  last_success_at: number
+  /** 上次成功刷新（北京时间字符串） */
+  last_success_at_beijing: string
+  /** 平均刷新耗时（秒，滑动平均；历史为空时可能为 0） */
+  avg_refresh_duration_seconds: number
+  /** 连续失败次数（成功会清零） */
+  consecutive_failures: number
+  /** 退避到期时间戳（秒；0 表示未退避） */
+  next_eligible_at: number
+  /** 退避到期时间（北京时间字符串） */
+  next_eligible_at_beijing: string
+  /** 是否处于退避中 */
+  in_backoff: boolean
+  /** 距离可再次参与自动调度的剩余秒数（不在退避则为 0） */
+  backoff_remaining_seconds: number
+  /** 最近一次错误原因（截断） */
+  last_error: string
+}
+
+/**
+ * 后端“高级自动刷新调度状态”汇总响应。
+ */
+export interface ScheduledRefreshStatesResponse {
+  /** 服务端当前时间戳（秒） */
+  now: number
+  /** 服务端当前时间（北京时间字符串） */
+  now_beijing: string
+  /** 调度相关配置回显（便于面板对照） */
+  config: {
+    scheduled_refresh_enabled: boolean
+    scheduled_refresh_interval_minutes: number
+    scheduled_refresh_advanced_enabled: boolean
+    scheduled_refresh_max_batch_size: number
+    scheduled_refresh_min_batch_size: number
+  }
+  /** 账号条目数量 */
+  total: number
+  /** 每个账号的调度状态 */
+  items: ScheduledRefreshStateItem[]
+}
+
 export interface LogEntry {
   time: string
   level: 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'DEBUG'

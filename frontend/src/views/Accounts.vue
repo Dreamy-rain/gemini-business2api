@@ -865,6 +865,107 @@
                         <li>禁用后，定时任务将停止运行</li>
                       </ul>
                     </div>
+
+                    <div class="rounded-2xl border border-border bg-card px-4 py-3">
+                      <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p class="text-sm font-medium text-foreground">调度状态（可视化）</p>
+                          <p class="mt-1 text-xs text-muted-foreground">
+                            展示每个账号的退避到期时间、连续失败与平均耗时，便于判断是否处于风控/验证码等异常状态
+                          </p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <label class="flex items-center gap-2 text-xs text-muted-foreground">
+                            <input
+                              v-model="onlyShowBackoffAccounts"
+                              type="checkbox"
+                              class="h-4 w-4 accent-primary"
+                            />
+                            仅看退避中
+                          </label>
+                          <button
+                            class="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground transition-colors
+                                   hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                            :disabled="isLoadingScheduledRefreshStates"
+                            @click="loadScheduledRefreshStates"
+                          >
+                            刷新状态
+                          </button>
+                        </div>
+                      </div>
+
+                      <div v-if="scheduledRefreshStatesError" class="mt-3 rounded-2xl bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                        {{ scheduledRefreshStatesError }}
+                      </div>
+
+                      <div v-if="isLoadingScheduledRefreshStates" class="mt-3 text-xs text-muted-foreground">
+                        正在加载调度状态...
+                      </div>
+
+                      <div v-else class="mt-3 overflow-x-auto">
+                        <table class="w-full text-left text-xs">
+                          <thead class="text-muted-foreground">
+                            <tr class="border-b border-border/60">
+                              <th class="py-2 pr-3 font-medium">账号</th>
+                              <th class="py-2 pr-3 font-medium">连续失败</th>
+                              <th class="py-2 pr-3 font-medium">平均耗时(s)</th>
+                              <th class="py-2 pr-3 font-medium">退避到期</th>
+                              <th class="py-2 pr-3 font-medium">上次尝试</th>
+                              <th class="py-2 pr-3 font-medium">上次成功</th>
+                              <th class="py-2 pr-3 font-medium">最近失败原因</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="item in filteredScheduledRefreshStates"
+                              :key="item.id"
+                              class="border-b border-border/40 align-top"
+                            >
+                              <td class="py-2 pr-3 font-mono text-foreground">
+                                {{ item.id }}
+                              </td>
+                              <td class="py-2 pr-3">
+                                <span
+                                  class="inline-flex items-center rounded-full px-2 py-0.5"
+                                  :class="item.consecutive_failures > 0 ? 'bg-amber-500/10 text-amber-700' : 'bg-emerald-500/10 text-emerald-700'"
+                                >
+                                  {{ item.consecutive_failures }}
+                                </span>
+                              </td>
+                              <td class="py-2 pr-3 text-muted-foreground">
+                                {{ item.avg_refresh_duration_seconds ? item.avg_refresh_duration_seconds.toFixed(1) : '-' }}
+                              </td>
+                              <td class="py-2 pr-3">
+                                <div v-if="item.in_backoff" class="space-y-1">
+                                  <div class="text-amber-700">{{ item.next_eligible_at_beijing || '-' }}</div>
+                                  <div class="text-[11px] text-muted-foreground">
+                                    剩余 {{ Math.ceil(item.backoff_remaining_seconds / 60) }} 分钟
+                                  </div>
+                                </div>
+                                <div v-else class="text-muted-foreground">未退避</div>
+                              </td>
+                              <td class="py-2 pr-3 text-muted-foreground">
+                                {{ item.last_attempt_at_beijing || '-' }}
+                              </td>
+                              <td class="py-2 pr-3 text-muted-foreground">
+                                {{ item.last_success_at_beijing || '-' }}
+                              </td>
+                              <td class="py-2 pr-3 text-muted-foreground">
+                                <span v-if="item.last_error" class="break-words">
+                                  {{ item.last_error }}
+                                </span>
+                                <span v-else>-</span>
+                              </td>
+                            </tr>
+                            <tr v-if="filteredScheduledRefreshStates.length === 0">
+                              <td colspan="7" class="py-4 text-center text-xs text-muted-foreground">
+                                暂无可展示的调度状态（可能尚未发生过自动/手动刷新，或被筛选条件隐藏）
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1191,7 +1292,7 @@ import { useToast } from '@/composables/useToast'
 import HelpTip from '@/components/ui/HelpTip.vue'
 import { accountsApi, settingsApi } from '@/api'
 import { mailProviderOptions, defaultMailProvider } from '@/constants/mailProviders'
-import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
+import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask, ScheduledRefreshStateItem } from '@/types/api'
 
 const accountsStore = useAccountsStore()
 const { accounts, isLoading, isOperating, batchProgress } = storeToRefs(accountsStore)
@@ -1240,9 +1341,21 @@ const scheduledRefreshMaxBatchSize = ref(20)
 const refreshWindowHours = ref(24)
 const isLoadingScheduledConfig = ref(false)
 const isSavingScheduledConfig = ref(false)
+// 定时刷新调度状态（用于面板可视化）
+const scheduledRefreshStates = ref<ScheduledRefreshStateItem[]>([])
+const isLoadingScheduledRefreshStates = ref(false)
+const scheduledRefreshStatesError = ref('')
+// 是否仅展示“退避中”的账号（用于快速排查风控/验证码问题）
+const onlyShowBackoffAccounts = ref(false)
 const cachedSettings = ref<any>(null)  // 缓存配置以避免重复API调用
 const taskHistory = ref<any[]>([])  // 任务历史记录
 const isLoadingHistory = ref(false)  // 加载历史记录状态
+
+const filteredScheduledRefreshStates = computed(() => {
+  const items = scheduledRefreshStates.value || []
+  if (!onlyShowBackoffAccounts.value) return items
+  return items.filter(item => item.in_backoff)
+})
 type TaskLogLine = { time: string; level: string; message: string }
 const registerLogClearMarker = ref<TaskLogLine | null>(null)
 const loginLogClearMarker = ref<TaskLogLine | null>(null)
@@ -2058,6 +2171,27 @@ const closeTaskModal = () => {
   cleanupCancelledTasks()
 }
 
+const loadScheduledRefreshStates = async () => {
+  /**
+   * 加载“高级自动刷新调度状态”。
+   *
+   * 功能说明：
+   * - 调用后端 `/admin/scheduled-refresh/states` 获取非敏感的调度状态；
+   * - 用于面板展示 next_eligible_at/连续失败/平均耗时等信息，帮助判断是否处于风控或调度失衡。
+   */
+  isLoadingScheduledRefreshStates.value = true
+  scheduledRefreshStatesError.value = ''
+  try {
+    const data = await accountsApi.getScheduledRefreshStates()
+    scheduledRefreshStates.value = Array.isArray(data.items) ? data.items : []
+  } catch (error: any) {
+    scheduledRefreshStatesError.value = error?.message || '加载调度状态失败'
+    scheduledRefreshStates.value = []
+  } finally {
+    isLoadingScheduledRefreshStates.value = false
+  }
+}
+
 const loadScheduledConfig = async () => {
   isLoadingScheduledConfig.value = true
   try {
@@ -2068,6 +2202,8 @@ const loadScheduledConfig = async () => {
     scheduledRefreshAdvancedEnabled.value = settings.retry.scheduled_refresh_advanced_enabled ?? false
     scheduledRefreshMaxBatchSize.value = settings.retry.scheduled_refresh_max_batch_size ?? 20
     refreshWindowHours.value = settings.basic.refresh_window_hours ?? 24
+    // 同步加载调度状态，便于用户保存配置后立即观察效果
+    await loadScheduledRefreshStates()
   } catch (error: any) {
     toast.error(error?.message || '加载定时任务配置失败')
   } finally {
@@ -2120,6 +2256,8 @@ const saveScheduledConfig = async () => {
     await settingsApi.update(settings)
     cachedSettings.value = settings  // 更新缓存
     toast.success('定时任务配置已保存')
+    // 保存后刷新一次调度状态，便于立刻观察 next_eligible_at / 连续失败等变化
+    await loadScheduledRefreshStates()
   } catch (error: any) {
     toast.error(error?.message || '保存定时任务配置失败')
   } finally {

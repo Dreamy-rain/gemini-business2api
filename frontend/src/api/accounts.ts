@@ -5,6 +5,7 @@ import type {
   AccountConfigItem,
   RegisterTask,
   LoginTask,
+  ScheduledRefreshStatesResponse,
 } from '@/types/api'
 
 export const accountsApi = {
@@ -90,4 +91,8 @@ export const accountsApi = {
   // 获取自动刷新状态
   getAutoRefreshStatus: () =>
     apiClient.get<never, { paused: boolean; status: string }>('/admin/auto-refresh/status'),
+
+  // 获取“高级自动刷新调度”状态（用于面板可视化）
+  getScheduledRefreshStates: () =>
+    apiClient.get<never, ScheduledRefreshStatesResponse>('/admin/scheduled-refresh/states'),
 }

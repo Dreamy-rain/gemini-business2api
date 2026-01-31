@@ -17,13 +17,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-_db_pool = None
-_db_pool_lock = None
-_db_loop = None
-_db_thread = None
-_db_loop_lock = threading.Lock()
-_db_lock = None  # 用于同步数据库操作的异步锁
-
 
 def _get_database_url() -> str:
     return os.environ.get("DATABASE_URL", "").strip()
@@ -33,6 +26,15 @@ def is_database_enabled() -> bool:
     """Return True when DATABASE_URL is configured."""
     return bool(_get_database_url())
 
+
+_pools = {}
+_locks = {}
+_pools_lock = threading.Lock() # Protects access to _pools and _locks dicts
+
+# Legacy threading support for sync wrappers
+_db_loop = None
+_db_thread = None
+_db_loop_lock = threading.Lock()
 
 def _ensure_db_loop() -> asyncio.AbstractEventLoop:
     global _db_loop, _db_thread
@@ -59,39 +61,50 @@ def _run_in_db_loop(coro):
     future = asyncio.run_coroutine_threadsafe(coro, loop)
     return future.result()
 
-
 async def _get_pool():
-    """Get (or create) the asyncpg connection pool."""
-    global _db_pool, _db_pool_lock, _db_lock
-    if _db_pool is not None:
-        return _db_pool
-    if _db_pool_lock is None:
-        _db_pool_lock = asyncio.Lock()
-    if _db_lock is None:
-        _db_lock = asyncio.Lock()
-    async with _db_pool_lock:
-        if _db_pool is not None:
-            return _db_pool
+    """Get (or create) the asyncpg connection pool for the current event loop."""
+    loop = asyncio.get_running_loop()
+    
+    # Fast path check
+    if loop in _pools:
+        return _pools[loop]
+
+    # Get or create async lock for this loop
+    with _pools_lock:
+        if loop not in _locks:
+            _locks[loop] = asyncio.Lock()
+        loop_lock = _locks[loop]
+
+    async with loop_lock:
+        # Double check inside lock
+        if loop in _pools:
+            return _pools[loop]
+        
         db_url = _get_database_url()
         if not db_url:
             raise ValueError("DATABASE_URL is not set")
         try:
             import asyncpg
-            _db_pool = await asyncpg.create_pool(
+            logger.info(f"[STORAGE] Initializing PostgreSQL pool for loop {id(loop)}...")
+            pool = await asyncpg.create_pool(
                 db_url,
                 min_size=1,
                 max_size=10,
                 command_timeout=30,
             )
-            await _init_tables(_db_pool)
-            logger.info("[STORAGE] PostgreSQL pool initialized")
+            await _init_tables(pool)
+            
+            with _pools_lock:
+                _pools[loop] = pool
+                
+            logger.info(f"[STORAGE] PostgreSQL pool initialized for loop {id(loop)}")
+            return pool
         except ImportError:
             logger.error("[STORAGE] asyncpg is required for database storage")
             raise
         except Exception as e:
             logger.error(f"[STORAGE] Database connection failed: {e}")
             raise
-    return _db_pool
 
 
 async def _init_tables(pool) -> None:
@@ -106,55 +119,57 @@ async def _init_tables(pool) -> None:
             )
             """
         )
-        logger.info("[STORAGE] Database tables initialized")
+        logger.info("[STORAGE] Database tables checked/initialized")
 
 
 async def db_get(key: str) -> Optional[dict]:
     """Fetch a value from the database."""
-    global _db_pool
-    pool = await _get_pool()
-    async with _db_lock:  # 使用全局锁防止并发操作冲突
-        try:
-            async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT value FROM kv_store WHERE key = $1", key
-                )
-                if not row:
-                    return None
-                value = row["value"]
-                if isinstance(value, str):
-                    return json.loads(value)
-                return value
-        except Exception as e:
-            if "connection was closed" in str(e) or "is in progress" in str(e):
-                logger.warning(f"[STORAGE] Database connection issue during GET, resetting pool: {e}")
-                _db_pool = None # 触发下次重连
-            raise
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value FROM kv_store WHERE key = $1", key
+            )
+            if not row:
+                return None
+            value = row["value"]
+            if isinstance(value, str):
+                return json.loads(value)
+            return value
+    except Exception as e:
+        if "connection was closed" in str(e) or "is in progress" in str(e):
+            logger.warning(f"[STORAGE] Database connection issue during GET, resetting pool: {e}")
+            loop = asyncio.get_running_loop()
+            with _pools_lock:
+                if loop in _pools:
+                    del _pools[loop] # Trigger reconnect on next call
+        raise
 
 
 async def db_set(key: str, value: dict) -> None:
     """Persist a value to the database."""
-    global _db_pool
-    pool = await _get_pool()
-    async with _db_lock:  # 使用全局锁防止并发操作冲突
-        try:
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO kv_store (key, value, updated_at)
-                    VALUES ($1, $2, CURRENT_TIMESTAMP)
-                    ON CONFLICT (key) DO UPDATE SET
-                        value = EXCLUDED.value,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    key,
-                    json.dumps(value, ensure_ascii=False),
-                )
-        except Exception as e:
-            if "connection was closed" in str(e) or "is in progress" in str(e):
-                logger.warning(f"[STORAGE] Database connection issue during SET, resetting pool: {e}")
-                _db_pool = None # 触发下次重连
-            raise
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO kv_store (key, value, updated_at)
+                VALUES ($1, $2, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                key,
+                json.dumps(value, ensure_ascii=False),
+            )
+    except Exception as e:
+        if "connection was closed" in str(e) or "is in progress" in str(e):
+            logger.warning(f"[STORAGE] Database connection issue during SET, resetting pool: {e}")
+            loop = asyncio.get_running_loop()
+            with _pools_lock:
+                if loop in _pools:
+                    del _pools[loop] # Trigger reconnect on next call
+        raise
 
 
 # ==================== Accounts storage ====================

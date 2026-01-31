@@ -1914,7 +1914,9 @@ async def chat_impl(
     
     
     # 检查是否已有绑定账号
-    bound_account_id = await binding_mgr.get_binding(chat_id_for_binding)
+    binding_info = await binding_mgr.get_binding(chat_id_for_binding)
+    bound_account_id = binding_info.get("account_id") if binding_info else None
+    bound_session_id = binding_info.get("session_id") if binding_info else None
     
     # 使用 chat_id_for_binding 作为 Session 缓存 key（保证同一对话复用同一 Session）
     # 注意：不再使用基于消息内容的 conv_key，避免每次消息变化导致 Session 重建
@@ -1931,25 +1933,40 @@ async def chat_impl(
             account_manager = await multi_account_mgr.get_account(account_id, request_id)
             google_session = cached_session["session_id"]
             is_new_conversation = False
-            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 复用Session: {google_session[-12:]}")
+            logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 复用Session(内存缓存): {google_session[-12:]}")
         elif bound_account_id:
-            # 有持久化绑定但无缓存Session：使用绑定账号创建新Session
+            # 有持久化绑定但无缓存Session
             try:
                 account_manager = await multi_account_mgr.get_account(bound_account_id, request_id)
-                google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
+                
+                # 尝试复用持久化的 Session ID
+                if bound_session_id:
+                    google_session = bound_session_id
+                    is_new_conversation = False  # 复用旧会话，视为延续
+                    logger.info(f"[CHAT] [{bound_account_id}] [req_{request_id}] 复用Session(持久化): {google_session[-12:]}")
+                else:
+                    # 无持久化 Session ID，创建新的
+                    google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
+                    is_new_conversation = True
+                    logger.info(f"[CHAT] [{bound_account_id}] [req_{request_id}] 绑定账号重建Session")
+                
+                # 更新缓存
                 await multi_account_mgr.set_session_cache(
                     session_cache_key,
                     account_manager.config.account_id,
                     google_session
                 )
-                is_new_conversation = True
-                logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 绑定账号重建Session")
+                
+                # 更新绑定（确保 Session ID 被持久化）
+                await binding_mgr.set_binding(chat_id_for_binding, account_manager.config.account_id, google_session)
+                
                 uptime_tracker.record_request("account_pool", True)
             except Exception as e:
                 # 绑定账号不可用，解绑并漂移到新账号
-                logger.warning(f"[CHAT] [req_{request_id}] 绑定账号 {bound_account_id} 不可用，自动漂移: {e}")
+                logger.warning(f"[CHAT] [req_{request_id}] 绑定账号 {bound_account_id} 不可用/Session无效，自动解绑: {e}")
                 await binding_mgr.remove_binding(chat_id_for_binding)
                 bound_account_id = None  # 触发下面的新账号选择逻辑
+                bound_session_id = None
         
         if not cached_session and not bound_account_id:
             # 新对话：轮询选择可用账户，失败时尝试其他账户
@@ -1966,8 +1983,8 @@ async def chat_impl(
                         account_manager.config.account_id,
                         google_session
                     )
-                    # 持久化绑定关系
-                    await binding_mgr.set_binding(chat_id_for_binding, account_manager.config.account_id)
+                    # 持久化绑定关系（含 Session ID）
+                    await binding_mgr.set_binding(chat_id_for_binding, account_manager.config.account_id, google_session)
                     is_new_conversation = True
                     logger.info(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 新会话创建并绑定账户")
                     # 记录账号池状态（账户可用）

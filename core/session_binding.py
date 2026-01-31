@@ -141,12 +141,17 @@ class SessionBindingManager:
         self._max_bindings = 10000  # 最大绑定数量
         self._binding_ttl = 86400 * 7  # 绑定过期时间（7天）
         
-    async def get_binding(self, chat_id: str) -> Optional[str]:
+    async def get_binding(self, chat_id: str) -> Optional[dict]:
         """
-        获取 ChatID 对应的账号ID
+        获取 ChatID 对应的绑定信息
         
         Returns:
-            账号ID，如果未绑定则返回 None
+            {
+                "account_id": str,
+                "session_id": str (optional),
+                "created_at": float
+            }
+            如果未绑定则返回 None
         """
         async with self._lock:
             binding = self._bindings.get(chat_id)
@@ -159,20 +164,31 @@ class SessionBindingManager:
                 self._dirty = True
                 return None
             
-            return binding.get("account_id")
+            return binding
     
-    async def set_binding(self, chat_id: str, account_id: str) -> None:
+    async def set_binding(self, chat_id: str, account_id: str, session_id: str = None) -> None:
         """
         设置绑定关系
         
         Args:
             chat_id: 对话ID
             account_id: 账号ID
+            session_id: Google会话ID (projects/.../locations/global/sessions/...)
         """
         async with self._lock:
+            # 保留旧的创建时间（如果是更新现有绑定）
+            old_binding = self._bindings.get(chat_id, {})
+            created_at = old_binding.get("created_at", time.time())
+            
+            # 如果提供了新的 session_id，则更新，否则尝试保留旧的（如果账号没变）
+            final_session_id = session_id
+            if not final_session_id and old_binding.get("account_id") == account_id:
+                final_session_id = old_binding.get("session_id")
+
             self._bindings[chat_id] = {
                 "account_id": account_id,
-                "created_at": time.time()
+                "session_id": final_session_id,
+                "created_at": created_at
             }
             self._dirty = True
             
@@ -180,7 +196,8 @@ class SessionBindingManager:
             if len(self._bindings) > self._max_bindings:
                 self._cleanup_oldest()
         
-        logger.info(f"[SESSION-BIND] 绑定 ChatID={chat_id[:8]}... → Account={account_id}")
+        sess_tag = f" (Session={session_id[:12]}...)" if session_id else ""
+        logger.info(f"[SESSION-BIND] 绑定 ChatID={chat_id[:8]}... → Account={account_id}{sess_tag}")
     
     async def remove_binding(self, chat_id: str) -> bool:
         """
@@ -191,10 +208,12 @@ class SessionBindingManager:
         """
         async with self._lock:
             if chat_id in self._bindings:
-                old_account = self._bindings[chat_id].get("account_id", "unknown")
+                old_binding = self._bindings[chat_id]
+                old_account = old_binding.get("account_id", "unknown")
+                old_sess = old_binding.get("session_id", "none")
                 del self._bindings[chat_id]
                 self._dirty = True
-                logger.info(f"[SESSION-BIND] 解绑 ChatID={chat_id[:8]}... (原账号: {old_account})")
+                logger.info(f"[SESSION-BIND] 解绑 ChatID={chat_id[:8]}... (原账号: {old_account}, Session: {old_sess})")
                 return True
             return False
     
@@ -223,11 +242,8 @@ class SessionBindingManager:
                 logger.info("[SESSION-BIND] 数据库未启用，使用内存缓存模式")
                 return
             
-            # 使用 storage 模块的同步包装器避免事件循环冲突
-            import asyncio
-            data = await asyncio.to_thread(
-                lambda: storage._run_in_db_loop(storage.db_get("session_bindings"))
-            )
+            # 直接调用异步 DB 方法（利用 per-loop pool 机制）
+            data = await storage.db_get("session_bindings")
             if data and isinstance(data, dict):
                 async with self._lock:
                     self._bindings = data
@@ -251,11 +267,8 @@ class SessionBindingManager:
                 data = dict(self._bindings)
                 self._dirty = False
             
-            # 使用 storage 模块的同步包装器避免事件循环冲突
-            import asyncio
-            await asyncio.to_thread(
-                lambda: storage._run_in_db_loop(storage.db_set("session_bindings", data))
-            )
+            # 直接调用异步 DB 方法
+            await storage.db_set("session_bindings", data)
             logger.info(f"[SESSION-BIND] 持久化 {len(data)} 个绑定到数据库")
             return True
         except Exception as e:

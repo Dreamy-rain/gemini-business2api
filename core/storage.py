@@ -526,6 +526,74 @@ async def _get_account_data(account_id: str) -> Optional[dict]:
         return _parse_account_value(row["data"])
     return None
 
+async def load_account_data(account_id: str) -> Optional[dict]:
+    """
+    读取单个账号的完整 data 字段（JSON）。
+
+    功能说明：
+    - 用于后台任务做“轻量级状态读取/更新”，避免每次都全量加载 accounts 列表。
+    - 返回值为 dict（可直接修改后再写回），调用方需确保写回时仍包含账号必需字段。
+
+    参数：
+    - account_id: 账号 ID
+
+    返回值：
+    - 成功：账号 data 字典
+    - 不存在：None
+    """
+    return await _get_account_data(account_id)
+
+
+def load_account_data_sync(account_id: str) -> Optional[dict]:
+    """
+    load_account_data 的同步封装。
+
+    参数：
+    - account_id: 账号 ID
+
+    返回值：
+    - 成功：账号 data 字典
+    - 不存在：None
+    """
+    return _run_in_db_loop(load_account_data(account_id))
+
+
+async def update_account_scheduled_refresh_state(account_id: str, state: dict) -> bool:
+    """
+    更新账号的“定时刷新调度状态”（scheduled_refresh_state）。
+
+    设计目的：
+    - 为高级自动刷新调度提供可持久化状态（上次尝试/成功时间、平均耗时、连续失败、退避到期时间）。
+    - 单实例场景下即使重启服务，也能继续基于历史状态做公平调度和失败退避，避免“重启=成功率更高”的假象。
+
+    参数：
+    - account_id: 账号 ID
+    - state: 要写入的状态字典（建议包含 last_attempt_at/last_success_at/avg_refresh_duration_seconds/consecutive_failures/next_eligible_at）
+
+    返回值：
+    - True: 写入成功
+    - False: 账号不存在或后端不可用
+    """
+    data = await _get_account_data(account_id)
+    if data is None:
+        return False
+    data["scheduled_refresh_state"] = state or {}
+    return await _update_account_data(account_id, data)
+
+
+def update_account_scheduled_refresh_state_sync(account_id: str, state: dict) -> bool:
+    """
+    update_account_scheduled_refresh_state 的同步封装。
+
+    参数：
+    - account_id: 账号 ID
+    - state: 调度状态字典
+
+    返回值：
+    - True/False: 是否写入成功
+    """
+    return _run_in_db_loop(update_account_scheduled_refresh_state(account_id, state))
+
 async def _update_account_data(account_id: str, data: dict) -> bool:
     backend = _get_backend()
     payload = json.dumps(data, ensure_ascii=False)

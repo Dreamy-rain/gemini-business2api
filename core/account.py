@@ -442,7 +442,9 @@ class MultiAccountManager:
         async with self._cache_lock:
             if conv_key in self.global_session_cache:
                 del self.global_session_cache[conv_key]
-                logger.debug(f"[CACHE] 已清除会话缓存: {conv_key}")
+                logger.info(f"[CACHE] 已清除会话缓存: {conv_key}")
+            else:
+                logger.warning(f"[CACHE] 清除失败: 缓存中未找到 Key={conv_key}")
 
     async def update_session_time(self, conv_key: str):
         """线程安全地更新会话时间戳"""

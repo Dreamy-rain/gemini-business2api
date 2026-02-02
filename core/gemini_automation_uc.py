@@ -188,13 +188,25 @@ class GeminiAutomationUC:
             return {"success": False, "error": "code input not found"}
 
         # 获取验证码（传入发送时间）
-        self._log("info", "polling for verification code")
-        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+        # 获取验证码（传入发送时间）
+        self._log("info", "polling for verification code (fast path)...")
+        # 优化：初次轮询只等待 10 秒
+        code = mail_client.poll_for_code(timeout=10, interval=4, since_time=send_time)
 
         if not code:
-            self._log("error", "verification code timeout")
-            self._save_screenshot("code_timeout")
-            return {"success": False, "error": "verification code timeout"}
+            self._log("warning", "fast polling timeout (10s), trying resend...")
+            send_time = datetime.now()
+            if self._click_resend_code_button():
+                self._log("info", "clicked resend button, polling again...")
+                code = mail_client.poll_for_code(timeout=20, interval=4, since_time=send_time)
+                if not code:
+                    self._log("error", "verification code timeout after resend")
+                    self._save_screenshot("code_timeout_after_resend")
+                    return {"success": False, "error": "verification code timeout after resend"}
+            else:
+                self._log("error", "verification code timeout and resend button not found")
+                self._save_screenshot("code_timeout")
+                return {"success": False, "error": "verification code timeout"}
 
         self._log("info", f"code received: {code}")
 
@@ -319,6 +331,25 @@ class GeminiAutomationUC:
             if code_input:
                 return True
         except NoSuchElementException:
+            pass
+
+        return False
+
+    def _click_resend_code_button(self) -> bool:
+        """点击重新发送验证码按钮"""
+        time.sleep(2)
+
+        # 查找包含重新发送关键词的按钮
+        try:
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+            for btn in buttons:
+                text = btn.text.strip().lower() if btn.text else ""
+                if text and ("重新" in text or "resend" in text):
+                    self._log("info", f"found resend button: {text}")
+                    self.driver.execute_script("arguments[0].click();", btn)
+                    time.sleep(2)
+                    return True
+        except Exception:
             pass
 
         return False
@@ -513,9 +544,9 @@ class GeminiAutomationUC:
                 pass
 
     def _kill_browser_process(self, pid: int = None) -> None:
-        """强制清理当前进程下的所有浏览器子进程"""
+        """强制清理当前进程下的所有浏览器子进程 (以及核弹级清理)"""
         try:
-            # 不再依赖传入的 PID，而是扫描当前 Python 进程的所有子进程
+            # 1. 精确清理：扫描当前 Python 进程的所有子进程
             import psutil
             current_proc = psutil.Process()
             children = current_proc.children(recursive=True)
@@ -534,7 +565,22 @@ class GeminiAutomationUC:
                             pass
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
-                    
+
+            # 2. 核弹级清理：仅在 Linux 下作为兜底，杀掉所有名字带 chrome 的进程
+            import platform
+            if platform.system() == "Linux":
+                try:
+                    import subprocess
+                    # pkill -9 -f "chrome|chromium"
+                    subprocess.run(["pkill", "-9", "-f", "chrome|chromium"], capture_output=True)
+                    # self._log("info", "🚀 执行了核弹级清理 (pkill)")
+                except Exception:
+                    pass
+
+            # 3. 强制垃圾回收
+            import gc
+            gc.collect()
+
         except Exception as e:
             self._log("warning", f"⚠️ 进程清理异常 (UC): {e}")
 

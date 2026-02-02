@@ -286,18 +286,19 @@ class GeminiAutomation:
             return {"success": False, "error": "code input not found"}
 
         # Step 5: 轮询邮件获取验证码（传入发送时间)
-        self._log("info", "📬 开始轮询邮箱获取验证码...")
-        code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+        self._log("info", "📬 开始轮询邮箱获取验证码 (快速检查)...")
+        # 优化：初次轮询只等待 10 秒（约 2 次尝试），如果没收到直接重发，避免空等
+        code = mail_client.poll_for_code(timeout=10, interval=4, since_time=send_time)
 
         if not code:
-            self._log("warning", "⚠️ 验证码获取超时，尝试重新发送...")
+            self._log("warning", "⚠️ 快速轮询超时 (10s)，尝试重新发送...")
             # 更新发送时间（在点击按钮之前记录）
             send_time = datetime.now()
             # 尝试点击重新发送按钮
             if self._click_resend_code_button(page):
                 self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
-                # 再次轮询验证码
-                code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
+                # 再次轮询验证码 (完整等待 -> 优化为 20s)
+                code = mail_client.poll_for_code(timeout=20, interval=4, since_time=send_time)
                 if not code:
                     self._log("error", "❌ 重新发送后仍未收到验证码")
                     self._save_screenshot(page, "code_timeout_after_resend")
@@ -711,9 +712,9 @@ class GeminiAutomation:
         return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v} Safari/537.36"
 
     def _kill_browser_process(self, pid: int = None) -> None:
-        """强制清理当前进程下的所有浏览器子进程"""
+        """强制清理当前进程下的所有浏览器子进程 (以及核弹级清理)"""
         try:
-            # 不再依赖传入的 PID，而是扫描当前 Python 进程的所有子进程
+            # 1. 精确清理：扫描当前 Python 进程的所有子进程
             import psutil
             current_proc = psutil.Process()
             children = current_proc.children(recursive=True)
@@ -726,12 +727,28 @@ class GeminiAutomation:
                         self._log("info", f"🔪 发现残留进程，强制清理: PID={child.pid} Name={name}")
                         child.kill()
                         try:
-                            # 必须调用 wait() 来回收僵尸进程 (reap zombies)，否则在 Docker (PID 1) 环境下会残留
+                            # 必须调用 wait() 来回收僵尸进程
                             child.wait(timeout=2)
                         except psutil.TimeoutExpired:
                             pass
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
-                    
+            
+            # 2. 核弹级清理：仅在 Linux 下作为兜底，杀掉所有名字带 chrome 的进程
+            import platform
+            if platform.system() == "Linux":
+                try:
+                    import subprocess
+                    # pkill -9 -f "chrome|chromium"
+                    # 使用 subprocess 调用系统命令，忽略错误
+                    subprocess.run(["pkill", "-9", "-f", "chrome|chromium"], capture_output=True)
+                    # self._log("info", "🚀 执行了核弹级清理 (pkill)")
+                except Exception:
+                    pass
+
+            # 3. 强制垃圾回收
+            import gc
+            gc.collect()
+
         except Exception as e:
             self._log("warning", f"⚠️ 进程清理异常: {e}")

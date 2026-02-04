@@ -381,14 +381,13 @@ class LoginService(BaseTaskService[LoginTask]):
 
         # 优化策略：
         # 1. 显示总共过期数量
-        # 2. 单次任务最多只处理 10 个，避免内存爆炸
+        # 2. 原限制单次10个已取消，现在一次性全部刷新
         total_expiring = len(expiring_accounts)
-        batch_limit = 10
         
-        accounts_to_refresh = expiring_accounts[:batch_limit]
+        accounts_to_refresh = expiring_accounts
         planned_count = len(accounts_to_refresh)
         
-        logger.info(f"[LOGIN] 当前共有 {total_expiring} 个账号过期，本次计划刷新 {planned_count} 个")
+        logger.info(f"[LOGIN] 当前共有 {total_expiring} 个账号过期，本次计划刷新全部 {planned_count} 个")
 
         try:
             return await self.start_login(accounts_to_refresh)

@@ -305,17 +305,7 @@ class GeminiAutomationUC:
         except Exception:
             pass
 
-        # 方法2.5: 查找 div[role='button']
-        try:
-            div_btns = self.driver.find_elements(By.CSS_SELECTOR, "div[role='button']")
-            for btn in div_btns:
-                text = btn.text.strip() if btn.text else ""
-                if text and any(kw in text for kw in keywords):
-                    self.driver.execute_script("arguments[0].click();", btn)
-                    time.sleep(2)
-                    return True
-        except Exception:
-            pass
+
 
         # 增强调试：如果没有找到按钮，输出页面上所有按钮文本
         try:

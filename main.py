@@ -2060,7 +2060,14 @@ async def chat_impl(
     bound_account_id = binding_info.get("account_id") if binding_info else None
     bound_session_id = binding_info.get("session_id") if binding_info else None
     
-    session_lock = await multi_account_mgr.acquire_session_lock(session_cache_key)
+    # 优化并发：FAST 模式跳过全局锁竞争
+    if key_config.mode == ApiKeyMode.FAST:
+        # Fast 模式：使用本地一次性锁，避免通过管理器获取全局锁
+        # 这里的锁仅用于保持 async with 结构一致性，实际上无竞争
+        session_lock = asyncio.Lock()
+    else:
+        # Memory 模式：正常从管理器获取会话锁（存在全局锁竞争）
+        session_lock = await multi_account_mgr.acquire_session_lock(session_cache_key)
 
     # 4. 在锁的保护下检查缓存和处理Session（保证同一对话的请求串行化）
     async with session_lock:

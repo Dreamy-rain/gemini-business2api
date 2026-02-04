@@ -430,23 +430,7 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ 搜索按钮异常: {e}")
 
-        # 方法3: 查找 div[role='button'] (Google 常用)
-        try:
-            self._log("info", "🔍 尝试查找 div[role='button']...")
-            div_btns = page.eles("css:div[role='button']")
-            for btn in div_btns:
-                text = (btn.text or "").strip()
-                if text and any(kw in text for kw in keywords):
-                    try:
-                        self._log("info", f"✅ 找到匹配 div 按钮: '{text}'")
-                        btn.click()
-                        self._log("info", "✅ 成功点击发送验证码 div 按钮")
-                        time.sleep(3)
-                        return True
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+
 
         # 增强调试：如果没有找到按钮，输出页面上所有按钮文本
         try:
@@ -565,11 +549,28 @@ class GeminiAutomation:
 
     def _wait_for_business_params(self, page, timeout: int = 30) -> bool:
         """等待业务页面参数生成（csesidx 和 cid）"""
-        for _ in range(timeout):
+        for i in range(timeout):
             url = page.url
             if "csesidx=" in url and "/cid/" in url:
                 self._log("info", f"business params ready: {url}")
                 return True
+            
+            # 如果停留在 /admin/ 且有 csesidx 但没有 cid，可能是账号选择页
+            if "csesidx=" in url and "/cid/" not in url and "/admin/" in url:
+                if i % 3 == 0:  # 每3秒检查一次
+                    try:
+                        # 查找包含 /cid/ 的链接
+                        links = page.eles("tag:a")
+                        for link in links:
+                            href = link.attr("href") or ""
+                            if "/cid/" in href:
+                                self._log("info", f"🔍 发现账号链接，尝试点击: {href}")
+                                link.click()
+                                time.sleep(2)
+                                break
+                    except Exception:
+                        pass
+
             time.sleep(1)
         return False
 
@@ -698,12 +699,22 @@ class GeminiAutomation:
         """清理浏览器用户数据目录"""
         if not user_data_dir:
             return
-        try:
-            import shutil
-            if os.path.exists(user_data_dir):
-                shutil.rmtree(user_data_dir, ignore_errors=True)
-        except Exception:
-            pass
+        
+        # 尝试多次清理，应对文件锁
+        for i in range(5):
+            try:
+                import shutil
+                if os.path.exists(user_data_dir):
+                    shutil.rmtree(user_data_dir, ignore_errors=True)
+                
+                # 如果目录仍然存在，说明清理失败
+                if os.path.exists(user_data_dir):
+                    time.sleep(1)
+                    continue
+                else:
+                    break
+            except Exception:
+                time.sleep(1)
 
     @staticmethod
     def _get_ua() -> str:
@@ -714,6 +725,20 @@ class GeminiAutomation:
     def _kill_browser_process(self, pid: int = None) -> None:
         """强制清理当前进程下的所有浏览器子进程 (以及核弹级清理)"""
         try:
+            # 0. 如果指定了 PID，先尝试精确杀死
+            if pid:
+                try:
+                    import psutil
+                    proc = psutil.Process(pid)
+                    self._log("info", f"🔪 尝试精确清理指定 PID: {pid}")
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=2)
+                    except:
+                        pass
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
             # 1. 精确清理：扫描当前 Python 进程的所有子进程
             import psutil
             current_proc = psutil.Process()

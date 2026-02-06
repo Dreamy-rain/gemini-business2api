@@ -20,8 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TZ=Asia/Shanghai
 
 # 1. 核心系统依赖（最重且最稳定的部分，放在最前面以永久利用缓存）
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && \
+RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     gcc \
     curl \
@@ -38,7 +37,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
 
 # 2. Python 依赖安装（使用清华源加速）
 COPY requirements.txt .
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 3. 后端代码复制（变动较频繁的部分）
 COPY core ./core

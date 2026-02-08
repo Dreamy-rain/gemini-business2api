@@ -14,10 +14,10 @@
         </div>
         <div class="flex flex-col items-end gap-1">
           <div class="rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary">
-            v2.7-gptmail
+            v2.8-gptmail
           </div>
           <div class="text-xs text-muted-foreground">
-            2026-01-29 20:45 | Anti-Bot Detection Enhanced
+            2026-02-08 21:00 | Dual-Channel Login + Shared Verify Stage
           </div>
         </div>
       </div>

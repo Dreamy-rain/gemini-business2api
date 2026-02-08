@@ -169,37 +169,153 @@ class GeminiAutomation:
         return page
 
     def _run_flow(self, page, email: str, mail_client) -> dict:
-        """执行登录流程 - GPTMail 定制版（手动输入邮箱方式）"""
-
-        # 记录开始时间，用于邮件时间过滤
-        from datetime import datetime
+        """执行登录流程 - 双通道：legacy 优先，manual 回退，共享验证码阶段"""
 
         send_time = datetime.now()
 
-        # Step 1: 访问 Gemini Business 首页（让 Google 自动跳转到登录页面）
-        self._log("info", f"🌐 正在访问 Gemini Business 首页: {email}")
-        page.get("https://business.gemini.google/", timeout=self.timeout)
-        time.sleep(8)  # 等待页面加载和自动跳转
+        legacy_result = self._try_legacy_login_hint_flow(page, email)
+        if legacy_result.get("success"):
+            send_time = legacy_result.get("send_time", send_time)
+            self._log("info", "✅ [legacy] 已进入验证阶段，开始共享验证码流程")
+            return self._complete_verification_and_extract(
+                page,
+                email,
+                mail_client,
+                send_time,
+                branch="legacy",
+            )
 
-        # 输出当前 URL，用于调试
-        current_url = page.url
-        self._log("info", f"📍 当前 URL: {current_url}")
+        legacy_reason = legacy_result.get("reason", "unknown")
+        self._log("warning", f"⚠️ [legacy] 失败，准备回退 manual，原因: {legacy_reason}")
 
-        # Step 2: 检查是否已经登录
-        has_business_params = (
-            "business.gemini.google" in current_url
-            and "csesidx=" in current_url
-            and "/cid/" in current_url
-        )
+        manual_result = self._try_manual_input_flow(page, email)
+        if manual_result.get("success"):
+            send_time = manual_result.get("send_time", send_time)
+            self._log("info", "✅ [manual] 已进入验证阶段，开始共享验证码流程")
+            return self._complete_verification_and_extract(
+                page,
+                email,
+                mail_client,
+                send_time,
+                branch="manual",
+            )
 
-        if has_business_params:
-            self._log("info", "✅ 检测到已登录，直接提取配置")
-            return self._extract_config(page, email)
+        manual_reason = manual_result.get("reason", "unknown")
+        self._save_screenshot(page, "dual_channel_failed")
+        return {
+            "success": False,
+            "error": f"both login channels failed: legacy={legacy_reason}; manual={manual_reason}",
+        }
 
-        # Step 3: 查找邮箱输入框并填写
-        self._log("info", "📧 正在查找邮箱输入框...")
+    def _try_legacy_login_hint_flow(self, page, email: str) -> dict:
+        """通道A：沿用上游风格的 loginHint + 发送验证码路径"""
+        try:
+            self._log("info", f"🌐 [legacy] 访问登录页: {AUTH_HOME_URL}login")
+            page.get(f"{AUTH_HOME_URL}login", timeout=self.timeout)
+            time.sleep(5)
 
-        # 尝试多种选择器
+            current_url = page.url
+            self._log("info", f"📍 [legacy] 当前 URL: {current_url}")
+
+            if self._has_business_params(current_url):
+                self._log("info", "✅ [legacy] 已登录，直接提取配置")
+                return {"success": True, "send_time": datetime.now()}
+
+            email_input = self._find_email_input(page)
+            if not email_input:
+                return {
+                    "success": False,
+                    "reason": "email input not found on legacy page",
+                }
+
+            self._log("info", f"⌨️ [legacy] 输入邮箱: {email}")
+            if not self._simulate_human_input(email_input, email):
+                email_input.input(email, clear=True)
+
+            time.sleep(1)
+            send_time = datetime.now()
+
+            clicked = self._click_send_code_button(page)
+            if not clicked:
+                try:
+                    email_input.input("\n")
+                    clicked = True
+                    self._log("info", "✅ [legacy] 未找到发送按钮，已回车提交")
+                except Exception:
+                    clicked = False
+
+            if not clicked:
+                return {
+                    "success": False,
+                    "reason": "send-code action failed on legacy page",
+                }
+
+            time.sleep(6)
+            current_url = page.url
+            self._log("info", f"📍 [legacy] 发送后 URL: {current_url}")
+
+            if "signin-error" in current_url:
+                self._log("error", "❌ [legacy] 命中 signin-error")
+                self._save_screenshot(page, "legacy_signin_error")
+                return {"success": False, "reason": "legacy signin-error"}
+
+            return {"success": True, "send_time": send_time}
+        except Exception as e:
+            self._log("warning", f"⚠️ [legacy] 流程异常: {e}")
+            return {"success": False, "reason": f"legacy exception: {e}"}
+
+    def _try_manual_input_flow(self, page, email: str) -> dict:
+        """通道B：business 首页手动输入邮箱 + 点击继续"""
+        try:
+            self._log("info", f"🌐 [manual] 访问 Gemini Business 首页: {email}")
+            page.get("https://business.gemini.google/", timeout=self.timeout)
+            time.sleep(8)
+
+            current_url = page.url
+            self._log("info", f"📍 [manual] 当前 URL: {current_url}")
+
+            if self._has_business_params(current_url):
+                self._log("info", "✅ [manual] 已登录，直接提取配置")
+                return {"success": True, "send_time": datetime.now()}
+
+            email_input = self._find_email_input(page)
+            if not email_input:
+                self._save_screenshot(page, "manual_email_input_not_found")
+                return {
+                    "success": False,
+                    "reason": "email input not found on manual page",
+                }
+
+            self._log("info", f"⌨️ [manual] 输入邮箱: {email}")
+            if not self._simulate_human_input(email_input, email):
+                self._log("warning", "⚠️ [manual] 模拟输入失败，使用直接输入")
+                email_input.input(email, clear=True)
+            time.sleep(1)
+
+            continue_btn = self._find_continue_button(page)
+            if not continue_btn:
+                self._save_screenshot(page, "manual_continue_button_not_found")
+                return {"success": False, "reason": "continue button not found"}
+
+            send_time = datetime.now()
+            continue_btn.click()
+            self._log("info", "✅ [manual] 已点击继续按钮")
+            time.sleep(8)
+
+            current_url = page.url
+            self._log("info", f"📍 [manual] 点击后 URL: {current_url}")
+            if "signin-error" in current_url:
+                self._log("error", "❌ [manual] 命中 signin-error")
+                self._save_screenshot(page, "manual_signin_error")
+                return {"success": False, "reason": "manual signin-error"}
+
+            return {"success": True, "send_time": send_time}
+        except Exception as e:
+            self._log("warning", f"⚠️ [manual] 流程异常: {e}")
+            return {"success": False, "reason": f"manual exception: {e}"}
+
+    def _find_email_input(self, page):
+        """查找邮箱输入框（兼容 legacy / manual 页面）"""
         selectors = [
             "css:input[name='loginHint']",
             "css:input[id='email-input']",
@@ -209,191 +325,137 @@ class GeminiAutomation:
             "css:input[aria-label*='email']",
         ]
 
-        email_input = None
         for selector in selectors:
             try:
                 email_input = page.ele(selector, timeout=2)
                 if email_input:
                     self._log("info", f"✅ 找到邮箱输入框: {selector}")
-                    break
+                    return email_input
             except Exception:
                 continue
+        return None
 
-        if not email_input:
-            self._log("error", "❌ 未找到邮箱输入框")
-            self._log("error", f"❌ 当前 URL: {current_url}")
-            self._save_screenshot(page, "email_input_not_found")
-            return {"success": False, "error": "email input not found"}
-
-        # Step 4: 输入邮箱地址（模拟人类输入）
-        self._log("info", f"⌨️ 正在输入邮箱: {email}")
-        if not self._simulate_human_input(email_input, email):
-            self._log("warning", "⚠️ 模拟输入失败，使用直接输入")
-            email_input.input(email, clear=True)
-        time.sleep(1)
-
-        # Step 5: 查找并点击"使用邮箱继续"按钮
-        self._log("info", "🔘 正在查找并点击继续按钮...")
+    def _find_continue_button(self, page):
+        """查找继续按钮"""
         continue_keywords = ["使用邮箱继续", "继续", "Continue", "Next", "下一步"]
-        buttons = page.eles("tag:button")
-
-        continue_btn = None
-        for btn in buttons:
-            text = (btn.text or "").strip()
-            if text and any(kw in text for kw in continue_keywords):
-                continue_btn = btn
-                self._log("info", f"✅ 找到继续按钮: '{text}'")
-                break
-
-        if not continue_btn:
-            self._log("error", "❌ 未找到继续按钮")
-            self._save_screenshot(page, "continue_button_not_found")
-            return {"success": False, "error": "continue button not found"}
-
-        # 点击按钮（Google 会自动发送验证码）
         try:
-            continue_btn.click()
-            self._log("info", "✅ 已点击继续按钮，Google 将自动发送验证码")
-            time.sleep(8)  # 等待页面跳转和验证码发送
+            buttons = page.eles("tag:button")
+            for btn in buttons:
+                text = (btn.text or "").strip()
+                if text and any(kw in text for kw in continue_keywords):
+                    self._log("info", f"✅ 找到继续按钮: '{text}'")
+                    return btn
+        except Exception:
+            pass
+        return None
 
-            # 输出当前 URL，用于调试
-            current_url = page.url
-            self._log("info", f"📍 点击后 URL: {current_url}")
+    def _has_business_params(self, url: str) -> bool:
+        """判断 URL 是否已包含可提取配置参数"""
+        return "business.gemini.google" in url and "csesidx=" in url and "/cid/" in url
 
-            # 检查是否跳转到错误页面
-            if "signin-error" in current_url:
-                self._log("error", "❌ Google 拒绝登录：跳转到 signin-error 页面")
-                self._log(
-                    "error",
-                    "可能原因：1) 邮箱域名被识别 2) 检测到自动化 3) 请求频率过高",
-                )
-                self._save_screenshot(page, "signin_error")
-                return {
-                    "success": False,
-                    "error": "Google signin-error: email rejected or bot detected",
-                }
-        except Exception as e:
-            self._log("error", f"❌ 点击继续按钮失败: {e}")
-            self._save_screenshot(page, "continue_button_click_failed")
-            return {"success": False, "error": f"continue button click failed: {e}"}
+    def _complete_verification_and_extract(
+        self,
+        page,
+        email: str,
+        mail_client,
+        send_time: datetime,
+        branch: str,
+    ) -> dict:
+        """共享验证码阶段：等待输入框 -> 拉取验证码 -> 输入提交 -> 提取配置"""
+        current_url = page.url
+        if self._has_business_params(current_url):
+            self._log("info", f"✅ [{branch}] 当前已是业务页，直接提取配置")
+            return self._extract_config(page, email)
 
-        # Step 6: 等待验证码输入框出现
-        self._log("info", "⏳ 等待验证码输入框出现...")
+        self._log("info", f"⏳ [{branch}] 等待验证码输入框出现...")
         code_input = self._wait_for_code_input(page)
         if not code_input:
-            self._log("error", "❌ 验证码输入框未出现")
-            self._save_screenshot(page, "code_input_missing")
-            return {"success": False, "error": "code input not found"}
+            self._save_screenshot(page, f"{branch}_code_input_missing")
+            return {"success": False, "error": f"[{branch}] code input not found"}
 
-        # Step 7: 轮询邮件获取验证码（传入发送时间)
-        self._log("info", "📬 开始轮询邮箱获取验证码...")
+        self._log("info", f"📬 [{branch}] 开始轮询邮箱获取验证码...")
         code = mail_client.poll_for_code(timeout=40, interval=4, since_time=send_time)
 
         if not code:
-            self._log("warning", "⚠️ 验证码获取超时，尝试重新发送...")
-            # 更新发送时间（在点击按钮之前记录）
-            send_time = datetime.now()
-            # 尝试点击重新发送按钮
+            self._log("warning", f"⚠️ [{branch}] 验证码超时，尝试重新发送")
+            resend_time = datetime.now()
             if self._click_resend_code_button(page):
-                self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
-                # 再次轮询验证码
+                self._log("info", f"🔄 [{branch}] 已点击重新发送按钮")
                 code = mail_client.poll_for_code(
-                    timeout=40, interval=4, since_time=send_time
+                    timeout=40, interval=4, since_time=resend_time
                 )
-                if not code:
-                    self._log("error", "❌ 重新发送后仍未收到验证码")
-                    self._save_screenshot(page, "code_timeout_after_resend")
-                    return {
-                        "success": False,
-                        "error": "verification code timeout after resend",
-                    }
-            else:
-                self._log("error", "❌ 验证码超时且未找到重新发送按钮")
-                self._save_screenshot(page, "code_timeout")
-                return {"success": False, "error": "verification code timeout"}
+            if not code:
+                self._save_screenshot(page, f"{branch}_code_timeout")
+                return {
+                    "success": False,
+                    "error": f"[{branch}] verification code timeout",
+                }
 
-        self._log("info", f"✅ 收到验证码: {code}")
+        self._log("info", f"✅ [{branch}] 收到验证码: {code}")
 
-        # Step 6: 输入验证码并提交
         code_input = page.ele("css:input[jsname='ovqh0b']", timeout=3) or page.ele(
             "css:input[type='tel']", timeout=2
         )
-
         if not code_input:
-            self._log("error", "❌ 验证码输入框已失效")
-            return {"success": False, "error": "code input expired"}
+            return {"success": False, "error": f"[{branch}] code input expired"}
 
-        # 尝试模拟人类输入，失败则降级到直接注入
-        self._log("info", "⌨️ 正在输入验证码 (模拟人类输入)...")
+        self._log("info", f"⌨️ [{branch}] 输入验证码")
         if not self._simulate_human_input(code_input, code):
-            self._log("warning", "⚠️ 模拟输入失败，降级为直接输入")
             code_input.input(code, clear=True)
             time.sleep(0.5)
 
-        # 直接使用回车提交，不再查找按钮
-        self._log("info", "⏎ 按下回车键提交验证码")
+        self._log("info", f"⏎ [{branch}] 回车提交验证码")
         code_input.input("\n")
 
-        # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
-        self._log("info", "⏳ 等待验证后自动跳转...")
-        time.sleep(
-            12
-        )  # 增加等待时间，让页面有足够时间完成重定向（如果网络慢可以继续增加）
+        self._log("info", f"⏳ [{branch}] 等待验证后自动跳转")
+        time.sleep(12)
 
-        # 记录当前 URL 状态
         current_url = page.url
-        self._log("info", f"📍 验证后 URL: {current_url}")
+        self._log("info", f"📍 [{branch}] 验证后 URL: {current_url}")
 
-        # 检查是否还停留在验证码页面（说明提交失败）
         if "verify-oob-code" in current_url:
-            self._log("error", "❌ 验证码提交失败，仍停留在验证页面")
-            self._save_screenshot(page, "verification_submit_failed")
-            return {"success": False, "error": "verification code submission failed"}
+            self._save_screenshot(page, f"{branch}_verification_submit_failed")
+            return {
+                "success": False,
+                "error": f"[{branch}] verification code submission failed",
+            }
 
-        # Step 8: 处理协议页面（如果有）
+        if "signin-error" in current_url:
+            self._save_screenshot(page, f"{branch}_signin_error_after_verify")
+            return {"success": False, "error": f"[{branch}] signin-error after verify"}
+
         self._handle_agreement_page(page)
 
-        # Step 9: 检查是否已经在正确的页面
         current_url = page.url
-        has_business_params = (
-            "business.gemini.google" in current_url
-            and "csesidx=" in current_url
-            and "/cid/" in current_url
-        )
-
-        if has_business_params:
-            # 已经在正确的页面，不需要再次导航
-            self._log("info", "already on business page with parameters")
+        if self._has_business_params(current_url):
+            self._log("info", f"✅ [{branch}] 已在 business 参数页")
             return self._extract_config(page, email)
 
-        # Step 10: 如果不在正确的页面，尝试导航
         if "business.gemini.google" not in current_url:
-            self._log("info", "navigating to business page")
+            self._log("info", f"🌐 [{branch}] 导航到 business 页面")
             page.get("https://business.gemini.google/", timeout=self.timeout)
-            time.sleep(5)  # 增加等待时间
-            current_url = page.url
-            self._log("info", f"URL after navigation: {current_url}")
+            time.sleep(5)
 
-        # Step 11: 检查是否需要设置用户名
-        if "cid" not in page.url:
-            if self._handle_username_setup(page):
-                time.sleep(5)  # 增加等待时间
+        if "cid" not in page.url and self._handle_username_setup(page):
+            time.sleep(5)
 
-        # Step 12: 等待 URL 参数生成（csesidx 和 cid）
-        self._log("info", "waiting for URL parameters")
+        self._log("info", f"⏳ [{branch}] 等待 URL 参数生成")
         if not self._wait_for_business_params(page):
-            self._log("warning", "URL parameters not generated, trying refresh")
+            self._log("warning", f"⚠️ [{branch}] 首次等待失败，尝试刷新")
             page.refresh()
-            time.sleep(5)  # 增加等待时间
+            time.sleep(5)
             if not self._wait_for_business_params(page):
-                self._log("error", "URL parameters generation failed")
                 current_url = page.url
-                self._log("error", f"final URL: {current_url}")
-                self._save_screenshot(page, "params_missing")
-                return {"success": False, "error": "URL parameters not found"}
+                self._log(
+                    "error", f"❌ [{branch}] URL 参数生成失败，最终 URL: {current_url}"
+                )
+                self._save_screenshot(page, f"{branch}_params_missing")
+                return {
+                    "success": False,
+                    "error": f"[{branch}] URL parameters not found",
+                }
 
-        # Step 13: 提取配置
-        self._log("info", "🎊 登录流程完成，正在提取配置...")
+        self._log("info", f"🎊 [{branch}] 登录流程完成，提取配置")
         return self._extract_config(page, email)
 
     def _click_send_code_button(self, page) -> bool:

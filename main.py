@@ -1460,6 +1460,7 @@ async def admin_get_settings(request: Request):
             "gptmail_base_url": config.basic.gptmail_base_url,
             "gptmail_api_key": config.basic.gptmail_api_key,
             "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
+            "gptmail_domain": config.basic.gptmail_domain,
             "browser_engine": config.basic.browser_engine,
             "browser_headless": config.basic.browser_headless,
             "refresh_window_hours": config.basic.refresh_window_hours,
@@ -1521,6 +1522,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
         basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
         basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
+        basic.setdefault("gptmail_domain", config.basic.gptmail_domain)
         basic.setdefault("browser_engine", config.basic.browser_engine)
         basic.setdefault("browser_headless", config.basic.browser_headless)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)

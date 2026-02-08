@@ -61,7 +61,7 @@ class BasicConfig(BaseModel):
     freemail_domain: str = Field(default="", description="Freemail 邮箱域名（可选，留空则随机选择）")
     mail_proxy_enabled: bool = Field(default=False, description="是否启用临时邮箱代理（使用账户操作代理）")
     gptmail_base_url: str = Field(default="https://mail.chatgpt.org.uk", description="GPTMail API地址")
-    gptmail_api_key: str = Field(default="", description="GPTMail API key")
+    gptmail_api_key: str = Field(default="gpt-test", description="GPTMail API key")
     gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
     gptmail_domain: str = Field(default="", description="GPTMail 邮箱域名（可选，留空则随机选择）")
     browser_engine: str = Field(default="dp", description="浏览器引擎")
@@ -214,6 +214,7 @@ class ConfigManager:
             gptmail_base_url=str(basic_data.get("gptmail_base_url") or "https://mail.chatgpt.org.uk").strip(),
             gptmail_api_key=str(basic_data.get("gptmail_api_key") or "").strip(),
             gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
+            gptmail_domain=str(basic_data.get("gptmail_domain") or "").strip(),
             browser_engine=basic_data.get("browser_engine") or "dp",
             browser_headless=_parse_bool(basic_data.get("browser_headless"), False),
             refresh_window_hours=int(refresh_window_raw),

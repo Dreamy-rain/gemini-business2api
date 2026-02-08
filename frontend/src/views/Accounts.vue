@@ -562,9 +562,6 @@
             </p>
             <p class="mt-1 text-muted-foreground">详细声明请查看项目 <a href="https://github.com/Dreamy-rain/gemini-business2api/blob/main/docs/DISCLAIMER.md" target="_blank" class="text-primary hover:underline font-medium">DISCLAIMER.md</a></p>
           </div>
-          <Checkbox v-model="registerAgreed">
-            我已阅读并同意上述说明与限制
-          </Checkbox>
           </div>
         </div>
 
@@ -581,7 +578,7 @@
               v-if="addMode === 'register'"
               class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
                      hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="isRegistering || !registerAgreed"
+              :disabled="isRegistering"
               @click="handleRegister"
             >
               开始注册
@@ -590,7 +587,7 @@
               v-else
               class="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity
                      hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-              :disabled="isImporting || !registerAgreed"
+              :disabled="isImporting"
               @click="handleImport"
             >
               导入并保存
@@ -1215,7 +1212,6 @@ const isLoadingHistory = ref(false)  // 加载历史记录状态
 type TaskLogLine = { time: string; level: string; message: string }
 const registerLogClearMarker = ref<TaskLogLine | null>(null)
 const loginLogClearMarker = ref<TaskLogLine | null>(null)
-const registerAgreed = ref(false)
 const registerTask = ref<RegisterTask | null>(null)
 const loginTask = ref<LoginTask | null>(null)
 const refreshingAccountIds = ref<Set<string>>(new Set())  // 正在刷新的账户ID集合（仅用于显示状态）
@@ -1603,7 +1599,6 @@ const openRegisterModal = () => {
   importError.value = ''
   isImporting.value = false
   importFileName.value = ''
-  registerAgreed.value = false
   // 重置为设置中的邮箱服务提供商
   selectedMailProvider.value = settings.value?.basic?.temp_mail_provider || defaultMailProvider
 }

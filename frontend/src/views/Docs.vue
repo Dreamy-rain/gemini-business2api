@@ -218,88 +218,6 @@
           </div>
         </div>
 
-        <!-- 使用教程 -->
-        <div v-if="activeTab === 'tutorials'" class="space-y-6">
-          <div class="space-y-2">
-            <p class="text-sm font-semibold">DuckMail 自动注册教程</p>
-            <p class="mt-1 text-xs text-muted-foreground">
-              DuckMail 是一个临时邮箱服务，可用于自动注册 Google 账号。
-            </p>
-            <div class="mt-3 space-y-3 text-xs text-muted-foreground">
-              <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">步骤 1：配置 DuckMail</p>
-                <p class="mt-2">访问 <a href="https://domain.duckmail.sbs/" target="_blank" class="text-primary hover:underline">https://domain.duckmail.sbs/</a>，登录注册后：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• 添加域名，按照提示进行 DNS 解析</li>
-                  <li>• 创建自己的密钥（API Key）</li>
-                  <li>• 前往本系统"配置面板"，找到"DuckMail 配置"部分</li>
-                  <li>• 填写 DuckMail API Key</li>
-                  <li>• <strong>推荐：</strong>在"默认注册域名"中填入自己的域名（DuckMail 可能会出现密码错误情况，建议使用自己的域名）</li>
-                </ul>
-              </div>
-
-              <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">步骤 2：开始注册</p>
-                <p class="mt-2">前往"账户管理"页面：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• 点击"添加账户"按钮</li>
-                  <li>• 选择"自动注册"标签</li>
-                  <li>• 设置注册数量</li>
-                  <li>• 勾选同意声明</li>
-                  <li>• 点击"开始注册"</li>
-                </ul>
-              </div>
-
-              <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">步骤 3：查看进度</p>
-                <p class="mt-2">注册过程会自动进行：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• 系统会自动打开"任务状态"弹窗</li>
-                  <li>• 可以查看实时日志和进度</li>
-                  <li>• 注册完成后会显示成功/失败数量</li>
-                  <li>• 成功的账号会自动添加到账户列表</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <p class="text-sm font-semibold">常见问题</p>
-            <div class="mt-3 space-y-3 text-xs text-muted-foreground">
-              <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">❓ 自动注册/刷新失败怎么办？</p>
-                <p class="mt-2">关闭无头浏览器可以直接看到问题所在：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• 前往"配置面板"，找到"自动化配置"部分</li>
-                  <li>• 取消勾选"无头模式"</li>
-                  <li>• 重新执行注册/刷新操作，观察浏览器窗口</li>
-                </ul>
-                <p class="mt-3 font-medium text-foreground">可能的原因：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• <strong>IP 被检测拦截：</strong>同一 IP 多次注册有风控，建议更换合适的 IP</li>
-                  <li>• <strong>验证码问题：</strong>Google 可能要求人机验证</li>
-                  <li>• <strong>网络问题：</strong>检查网络连接是否稳定</li>
-                </ul>
-              </div>
-
-              <div class="rounded-2xl border border-border bg-muted/30 p-4">
-                <p class="font-medium text-foreground">❓ 503 Service Unavailable 错误</p>
-                <p class="mt-2">如果后台日志出现以下错误：</p>
-                <pre class="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl border border-border bg-card px-3 py-2 text-[11px] font-mono">INFO:     127.0.0.1:7860 - "GET /admin/register/current HTTP/1.1" 503 Service Unavailable
-INFO:     127.0.0.1:7860 - "GET /admin/login/current HTTP/1.1" 503 Service Unavailable
-INFO:     127.0.0.1:7860 - "POST /admin/register/start HTTP/1.1" 503 Service Unavailable</pre>
-                <p class="mt-3 font-medium text-foreground">解决方法：</p>
-                <ul class="mt-2 space-y-1 pl-4">
-                  <li>• 这是浏览器引擎没有正常启动导致的</li>
-                  <li>• 在虚拟环境内重新安装依赖：<code class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px]">pip install -r requirements.txt</code></li>
-                  <li>• 删除之前的进程（检查是否有残留的 Chrome 进程）</li>
-                  <li>• 重新启动服务</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- 使用声明 -->
         <div v-if="activeTab === 'disclaimer'" class="space-y-6">
           <div class="space-y-2">
@@ -378,10 +296,9 @@ INFO:     127.0.0.1:7860 - "POST /admin/register/start HTTP/1.1" 503 Service Una
 <script setup lang="ts">
 import { ref } from 'vue'
 
-const activeTab = ref('tutorials')
+const activeTab = ref('api')
 
 const tabs = [
-  { id: 'tutorials', label: '使用教程' },
   { id: 'api', label: 'API 文档' },
   { id: 'disclaimer', label: '使用声明' },
 ]

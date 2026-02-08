@@ -91,6 +91,7 @@ export interface Settings {
     gptmail_base_url?: string
     gptmail_api_key?: string
     gptmail_verify_ssl?: boolean
+    gptmail_domain?: string
     browser_engine?: string
     browser_headless?: boolean
     refresh_window_hours?: number

@@ -2262,10 +2262,76 @@ async def chat_impl(
         # 记录已失败的账户，避免重复使用
         failed_accounts = set()
 
-        # 重试逻辑：最多尝试 max_retries+1 次（初次+重试）
         while retry_count <= max_retries:
+            # ------------------------------------------------------------------
+            # 1. 账户切换逻辑 (仅在重试阶段触发)
+            # ------------------------------------------------------------------
+            if retry_count > 0:
+                logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 正在重试 ({retry_count}/{max_retries})")
+
+                # 快速失败：检查是否还有可用账户（避免无效重试）
+                available_count = sum(
+                    1 for acc in multi_account_mgr.accounts.values()
+                    if (acc.should_retry() and
+                        not acc.config.is_expired() and
+                        not acc.config.disabled and
+                        acc.config.account_id not in failed_accounts)
+                )
+
+                if available_count == 0:
+                    logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用，快速失败")
+                    await finalize_result("error", 503, "All accounts unavailable")
+                    if req.stream: yield f"data: {json.dumps({'error': {'message': 'All accounts unavailable'}})}\n\n"
+                    return
+
+                # 尝试切换账户
+                try:
+                    max_switch_tries = min(MAX_ACCOUNT_SWITCH_TRIES, available_count)
+                    new_account = None
+
+                    for _ in range(max_switch_tries):
+                        candidate = await multi_account_mgr.get_account(None, request_id)
+                        if candidate.config.account_id not in failed_accounts:
+                            new_account = candidate
+                            break
+
+                    if not new_account:
+                        raise Exception("All available accounts failed to switch")
+
+                    logger.info(f"[CHAT] [req_{request_id}] 切换账户: {account_manager.config.account_id} -> {new_account.config.account_id}")
+
+                    # 创建新 Session
+                    new_sess = await create_google_session(new_account, http_client, USER_AGENT, request_id)
+
+                    # 更新缓存绑定
+                    await multi_account_mgr.set_session_cache(
+                        session_cache_key,
+                        new_account.config.account_id,
+                        new_sess
+                    )
+
+                    # 更新当前上下文状态
+                    account_manager = new_account
+                    current_retry_mode = True
+                    current_file_ids = []  # 清空 ID，强制重新上传
+
+                except Exception as create_err:
+                    error_type = type(create_err).__name__
+                    logger.error(f"[CHAT] [req_{request_id}] 账户切换失败 ({error_type}): {str(create_err)}")
+                    
+                    status_code = create_err.status_code if isinstance(create_err, HTTPException) else None
+                    uptime_tracker.record_request("account_pool", False, status_code=status_code)
+                    
+                    status = classify_error_status(status_code, create_err)
+                    await finalize_result(status, status_code, f"Account Failover Failed: {str(create_err)[:200]}")
+                    if req.stream: yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
+                    return
+
+            # ------------------------------------------------------------------
+            # 2. 执行请求逻辑
+            # ------------------------------------------------------------------
             try:
-                # 安全：使用.get()防止缓存被清理导致KeyError
+                # A. Session 检查与恢复
                 cached = multi_account_mgr.global_session_cache.get(session_cache_key)
                 if not cached:
                     logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 缓存已清理，重建Session")
@@ -2281,18 +2347,17 @@ async def chat_impl(
                 else:
                     current_session = cached["session_id"]
 
-                # A. 如果有图片且还没上传到当前 Session，先上传
-                # 注意：每次重试如果是新 Session，都需要重新上传图片
+                # B. 图片上传 (如果有图片且未上传)
                 if current_images and not current_file_ids:
                     for img in current_images:
                         fid = await upload_context_file(current_session, img["mime"], img["data"], account_manager, http_client, USER_AGENT, request_id)
                         current_file_ids.append(fid)
 
-                # B. 准备文本 (重试模式下发全文)
+                # C. 准备文本 (重试模式下可能需要发送全文)
                 if current_retry_mode:
                     current_text = build_full_context_text(req.messages)
 
-                # C. 发起对话
+                # D. 发起对话流
                 async for chunk in stream_chat_generator(
                     current_session,
                     current_text,
@@ -2307,15 +2372,12 @@ async def chat_impl(
                 ):
                     yield chunk
 
-                # 请求成功，重置账户失败计数
+                # --- 成功路径 ---
                 account_manager.is_available = True
                 account_manager.error_count = 0
-                account_manager.conversation_count += 1  # 增加对话次数
-
-                # 记录账号池状态（请求成功）
+                account_manager.conversation_count += 1
                 uptime_tracker.record_request("account_pool", True)
 
-                # 保存对话次数到统计数据
                 async with stats_lock:
                     if "account_conversations" not in global_stats:
                         global_stats["account_conversations"] = {}
@@ -2323,11 +2385,10 @@ async def chat_impl(
                     await save_stats(global_stats)
 
                 await finalize_result("success", 200, None)
+                return
 
-                break
-
-            except (httpx.HTTPError, ssl.SSLError, HTTPException) as e:
-                # 提取错误信息
+            except (httpx.HTTPError, ssl.SSLError, HTTPException, ValueError) as e:
+                # --- 失败处理 ---
                 is_http_exception = isinstance(e, HTTPException)
                 status_code = e.status_code if is_http_exception else None
                 error_detail = (
@@ -2336,17 +2397,12 @@ async def chat_impl(
                     else f"{type(e).__name__}: {str(e)[:200]}"
                 )
 
-                # 记录当前失败的账户
+                # 记录失败
                 failed_accounts.add(account_manager.config.account_id)
-
-                # 记录账号池状态（请求失败）
                 uptime_tracker.record_request("account_pool", False, status_code=status_code)
 
-                # 判断请求类型以传递quota_type（使用字典映射）
+                # 错误处理回调
                 quota_type = MODEL_TO_QUOTA_TYPE.get(req.model)
-                # 普通对话模型返回None（text配额是基础配额，所有请求都需要）
-
-                # 使用统一的错误处理入口
                 if is_http_exception:
                     account_manager.handle_http_error(status_code, str(e.detail) if hasattr(e, 'detail') else "", request_id, quota_type)
                 else:
@@ -2354,77 +2410,8 @@ async def chat_impl(
 
                 retry_count += 1
 
-                # 检查是否还能继续重试
-                if retry_count <= max_retries:
-                    logger.warning(f"[CHAT] [{account_manager.config.account_id}] [req_{request_id}] 正在重试 ({retry_count}/{max_retries})")
-
-                    # 快速失败：检查是否还有可用账户（避免无效重试）
-                    available_count = sum(
-                        1 for acc in multi_account_mgr.accounts.values()
-                        if (acc.should_retry() and
-                            not acc.config.is_expired() and
-                            not acc.config.disabled and
-                            acc.config.account_id not in failed_accounts)
-                    )
-
-                    if available_count == 0:
-                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用，快速失败")
-                        await finalize_result("error", 503, "All accounts unavailable")
-                        if req.stream: yield f"data: {json.dumps({'error': {'message': 'All accounts unavailable'}})}\n\n"
-                        return
-
-                    # 尝试切换到其他账户（客户端会传递完整上下文）
-                    try:
-                        # 获取新账户，跳过已失败的账户
-                        max_account_tries = min(MAX_ACCOUNT_SWITCH_TRIES, available_count)  # 限制尝试次数
-                        new_account = None
-
-                        for _ in range(max_account_tries):
-                            candidate = await multi_account_mgr.get_account(None, request_id)
-                            if candidate.config.account_id not in failed_accounts:
-                                new_account = candidate
-                                break
-
-                        if not new_account:
-                            logger.error(f"[CHAT] [req_{request_id}] 所有可用账户均已失败")
-                            await finalize_result("error", 503, "All available accounts failed")
-                            if req.stream: yield f"data: {json.dumps({'error': {'message': 'All available accounts failed'}})}\n\n"
-                            return
-
-                        logger.info(f"[CHAT] [req_{request_id}] 切换账户: {account_manager.config.account_id} -> {new_account.config.account_id}")
-
-                        # 创建新 Session
-                        new_sess = await create_google_session(new_account, http_client, USER_AGENT, request_id)
-
-                        # 更新缓存绑定到新账户
-                        await multi_account_mgr.set_session_cache(
-                            session_cache_key,
-                            new_account.config.account_id,
-                            new_sess
-                        )
-
-                        # 更新账户管理器
-                        account_manager = new_account
-
-                        # 设置重试模式（发送完整上下文）
-                        current_retry_mode = True
-                        current_file_ids = []  # 清空 ID，强制重新上传到新 Session
-
-                    except Exception as create_err:
-                        error_type = type(create_err).__name__
-                        logger.error(f"[CHAT] [req_{request_id}] 账户切换失败 ({error_type}): {str(create_err)}")
-                        # 记录账号池状态（账户切换失败）
-                        status_code = create_err.status_code if isinstance(create_err, HTTPException) else None
-
-                        uptime_tracker.record_request("account_pool", False, status_code=status_code)
-
-                        status = classify_error_status(status_code, create_err)
-
-                        await finalize_result(status, status_code, f"Account Failover Failed: {str(create_err)[:200]}")
-                        if req.stream: yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
-                        return
-                else:
-                    # 已达到最大重试次数
+                # 检查是否超过最大重试次数
+                if retry_count > max_retries:
                     logger.error(f"[CHAT] [req_{request_id}] 已达到最大重试次数 ({max_retries})，请求失败")
                     status = classify_error_status(status_code, e)
                     await finalize_result(status, status_code, error_detail)
@@ -2678,6 +2665,11 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         latency_ms = int((first_response_time - start_time) * 1000)
         uptime_tracker.record_request(model_name, True, latency_ms)
     else:
+        # 如果没有首字时间，说明没有任何内容生成
+        if not full_content and not file_ids_info:
+             uptime_tracker.record_request(model_name, False)
+             logger.error(f"[API] [{account_manager.config.account_id}] [req_{request_id}] 响应为空 (无文本且无图片)")
+             raise ValueError("Empty response from model")
         uptime_tracker.record_request(model_name, True)
 
     total_time = time.time() - start_time

@@ -285,28 +285,40 @@ class GeminiAutomation:
             self._save_screenshot(page, "code_input_missing")
             return {"success": False, "error": "code input not found"}
 
-        # Step 5: 轮询邮件获取验证码（传入发送时间)
-        self._log("info", "📬 开始轮询邮箱获取验证码 (快速检查)...")
-        # 优化：初次轮询只等待 10 秒（约 2 次尝试），如果没收到直接重发，避免空等
-        code = mail_client.poll_for_code(timeout=10, interval=4, since_time=send_time)
+        # Step 5: 轮询邮件获取验证码（支持重试）
+        self._log("info", "📬 开始轮询邮箱获取验证码...")
+        
+        max_retries = 2
+        poll_timeout = 20
+        code = None
+
+        # 初始轮询
+        self._log("info", "polling for verification code (attempt 1)...")
+        code = mail_client.poll_for_code(timeout=poll_timeout, interval=4, since_time=send_time)
+
+        # 重试循环
+        if not code:
+            for i in range(max_retries):
+                self._log("warning", f"⚠️ 轮询超时 ({poll_timeout}s)，尝试重新发送 (重试 {i+1}/{max_retries})...")
+                
+                # 更新发送时间
+                send_time = datetime.now()
+                
+                # 尝试点击重新发送按钮
+                if self._click_resend_code_button(page):
+                    self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
+                    code = mail_client.poll_for_code(timeout=poll_timeout, interval=4, since_time=send_time)
+                    if code:
+                        break
+                else:
+                    self._log("error", "❌ 验证码超时且未找到重新发送按钮")
+                    self._save_screenshot(page, "code_timeout_resend_missing")
+                    return {"success": False, "error": "verification code timeout"}
 
         if not code:
-            self._log("warning", "⚠️ 快速轮询超时 (10s)，尝试重新发送...")
-            # 更新发送时间（在点击按钮之前记录）
-            send_time = datetime.now()
-            # 尝试点击重新发送按钮
-            if self._click_resend_code_button(page):
-                self._log("info", "🔄 已点击重新发送按钮，等待新验证码...")
-                # 再次轮询验证码 (完整等待 -> 优化为 20s)
-                code = mail_client.poll_for_code(timeout=20, interval=4, since_time=send_time)
-                if not code:
-                    self._log("error", "❌ 重新发送后仍未收到验证码")
-                    self._save_screenshot(page, "code_timeout_after_resend")
-                    return {"success": False, "error": "verification code timeout after resend"}
-            else:
-                self._log("error", "❌ 验证码超时且未找到重新发送按钮")
-                self._save_screenshot(page, "code_timeout")
-                return {"success": False, "error": "verification code timeout"}
+            self._log("error", "❌ 多次重试后仍未收到验证码")
+            self._save_screenshot(page, "code_timeout_final")
+            return {"success": False, "error": "verification code timeout"}
 
         self._log("info", f"✅ 收到验证码: {code}")
 

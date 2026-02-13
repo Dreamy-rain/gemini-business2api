@@ -188,25 +188,37 @@ class GeminiAutomationUC:
             return {"success": False, "error": "code input not found"}
 
         # 获取验证码（传入发送时间）
-        # 获取验证码（传入发送时间）
-        self._log("info", "polling for verification code (fast path)...")
-        # 优化：初次轮询只等待 10 秒
-        code = mail_client.poll_for_code(timeout=10, interval=4, since_time=send_time)
+        # 获取验证码（支持重试）
+        max_retries = 2
+        poll_timeout = 20
+        code = None
+
+        # 初始轮询
+        self._log("info", "polling for verification code (attempt 1)...")
+        code = mail_client.poll_for_code(timeout=poll_timeout, interval=4, since_time=send_time)
+
+        # 重试循环
+        if not code:
+            for i in range(max_retries):
+                self._log("warning", f"polling timeout ({poll_timeout}s), trying resend (retry {i+1}/{max_retries})...")
+                
+                # 更新发送时间（寻找新邮件）
+                send_time = datetime.now()
+                
+                if self._click_resend_code_button():
+                    self._log("info", "clicked resend button, polling again...")
+                    code = mail_client.poll_for_code(timeout=poll_timeout, interval=4, since_time=send_time)
+                    if code:
+                        break
+                else:
+                    self._log("error", "verification code timeout and resend button not found")
+                    self._save_screenshot("code_timeout_resend_missing")
+                    return {"success": False, "error": "verification code timeout"}
 
         if not code:
-            self._log("warning", "fast polling timeout (10s), trying resend...")
-            send_time = datetime.now()
-            if self._click_resend_code_button():
-                self._log("info", "clicked resend button, polling again...")
-                code = mail_client.poll_for_code(timeout=20, interval=4, since_time=send_time)
-                if not code:
-                    self._log("error", "verification code timeout after resend")
-                    self._save_screenshot("code_timeout_after_resend")
-                    return {"success": False, "error": "verification code timeout after resend"}
-            else:
-                self._log("error", "verification code timeout and resend button not found")
-                self._save_screenshot("code_timeout")
-                return {"success": False, "error": "verification code timeout"}
+            self._log("error", "verification code timeout after retries")
+            self._save_screenshot("code_timeout_final")
+            return {"success": False, "error": "verification code timeout"}
 
         self._log("info", f"code received: {code}")
 

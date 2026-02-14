@@ -153,7 +153,7 @@ class RetryConfig(BaseModel):
     account_failure_threshold: int = Field(default=3, ge=1, le=10, description="账户失败阈值")
     rate_limit_cooldown_seconds: int = Field(default=3600, ge=3600, le=43200, description="429冷却时间（秒）")
     session_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400, description="会话缓存时间（秒，0表示禁用缓存）")
-    auto_refresh_accounts_seconds: int = Field(default=60, ge=0, le=600, description="自动刷新账号间隔（秒，0禁用）")
+    auto_refresh_accounts_seconds: int = Field(default=600, ge=0, le=3600, description="自动刷新账号间隔（秒，0禁用）")
 
 
 class PublicDisplayConfig(BaseModel):

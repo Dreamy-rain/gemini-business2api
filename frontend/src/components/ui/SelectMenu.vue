@@ -37,13 +37,17 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 type Option = { label: string; value: string }
 
-const props = defineProps<{
-  modelValue: string | string[]
+const props = withDefaults(defineProps<{
+  modelValue: string | string[] | undefined
   options: Array<string | Option>
   multiple?: boolean
   placeholder?: string
   placement?: 'up' | 'down'
-}>()
+}>(), {
+  modelValue: undefined,
+  multiple: false,
+  placement: 'down'
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string | string[]): void

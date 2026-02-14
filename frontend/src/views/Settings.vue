@@ -342,7 +342,7 @@
                   <span>自动刷新账号间隔（秒，0禁用）</span>
                   <HelpTip text="仅在数据库存储启用时生效：用于检测账号配置变化并重载列表，不会刷新 cookie。文件存储模式不会触发。" />
                 </div>
-                <input v-model.number="localSettings.retry.auto_refresh_accounts_seconds" type="number" min="0" max="600" class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2" />
+                <input v-model.number="localSettings.retry.auto_refresh_accounts_seconds" type="number" min="0" max="3600" class="col-span-2 rounded-2xl border border-input bg-background px-3 py-2" />
               </div>
             </div>
           </div>

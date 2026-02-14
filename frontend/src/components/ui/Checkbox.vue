@@ -27,10 +27,13 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{
-  modelValue: boolean
+const props = withDefaults(defineProps<{
+  modelValue: boolean | undefined
   disabled?: boolean
-}>()
+}>(), {
+  modelValue: false,
+  disabled: false
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void

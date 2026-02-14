@@ -92,7 +92,7 @@ async def _get_pool():
             logger.info(f"[STORAGE] Initializing PostgreSQL pool for loop {id(loop)}...")
             pool = await asyncpg.create_pool(
                 db_url,
-                min_size=1,
+                min_size=0,
                 max_size=10,
                 command_timeout=30,
             )
@@ -310,7 +310,7 @@ def save_stats_sync(stats: dict) -> bool:
     return True
 
 
-async def start_stats_persistence_task(interval: int = 30):
+async def start_stats_persistence_task(interval: int = 300):
     """
     Background task to persist stats from buffer to database.
     This prevents every request from triggering a database write.

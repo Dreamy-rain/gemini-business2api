@@ -9,10 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
-from core.mail_providers import create_temp_mail_client
-from core.gemini_automation import GeminiAutomation
-from core.gemini_automation_uc import GeminiAutomationUC
-from core.outbound_proxy import OutboundProxyConfig
+from core.browser_worker import run_in_subprocess
 from core.proxy_utils import parse_proxy_setting
 
 logger = logging.getLogger("gemini.register")
@@ -161,23 +158,9 @@ class RegisterService(BaseTaskService[RegisterTask]):
         if mail_provider in ("duckmail", "gptmail", "freemail", "moemail"):
              temp_mail_provider = mail_provider
 
-        log_cb("info", f"📧 步骤 1/3: 注册临时邮箱 (提供商={temp_mail_provider})...")
-
         if temp_mail_provider == "freemail" and not config.basic.freemail_jwt_token:
             log_cb("error", "❌ Freemail JWT Token 未配置")
             return {"success": False, "error": "Freemail JWT Token 未配置"}
-
-        client = create_temp_mail_client(
-            temp_mail_provider,
-            domain=domain,
-            log_cb=log_cb,
-        )
-
-        if not client.register_account(domain=domain):
-            log_cb("error", f"❌ {temp_mail_provider} 邮箱注册失败")
-            return {"success": False, "error": f"{temp_mail_provider} 注册失败"}
-
-        log_cb("info", f"✅ 邮箱注册成功: {client.email}")
 
         # 根据配置选择浏览器引擎
         browser_engine = (config.basic.browser_engine or "dp").lower()
@@ -186,47 +169,58 @@ class RegisterService(BaseTaskService[RegisterTask]):
         # 使用配置的账户操作代理（用于访问 Gemini 网站）
         browser_proxy, _ = parse_proxy_setting(config.basic.proxy_for_auth)
 
-        log_cb("info", f"🌐 步骤 2/3: 启动浏览器 (引擎={browser_engine}, 无头模式={headless}, 代理={browser_proxy or '无'})...")
+        # 构建子进程任务参数（邮箱注册 + 浏览器登录 都在子进程中完成）
+        mail_config = {}
+        if temp_mail_provider == "freemail":
+            mail_config["base_url"] = config.basic.freemail_base_url
+            mail_config["jwt_token"] = config.basic.freemail_jwt_token
+            mail_config["verify_ssl"] = config.basic.freemail_verify_ssl
+            mail_config["domain"] = domain or config.basic.freemail_domain
+        elif temp_mail_provider == "gptmail":
+            mail_config["base_url"] = config.basic.gptmail_base_url
+            mail_config["api_key"] = config.basic.gptmail_api_key
+            mail_config["verify_ssl"] = config.basic.gptmail_verify_ssl
+            mail_config["domain"] = domain or config.basic.gptmail_domain
+        elif temp_mail_provider == "moemail":
+            mail_config["base_url"] = config.basic.moemail_base_url
+            mail_config["api_key"] = config.basic.moemail_api_key
+            mail_config["domain"] = domain or config.basic.moemail_domain
+        elif temp_mail_provider == "duckmail":
+            mail_config["base_url"] = config.basic.duckmail_base_url
+            mail_config["api_key"] = config.basic.duckmail_api_key
+            mail_config["verify_ssl"] = config.basic.duckmail_verify_ssl
 
-        if browser_engine == "dp":
-            # DrissionPage 引擎：支持有头和无头模式
-            automation = GeminiAutomation(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
-        else:
-            # undetected-chromedriver 引擎
-             if headless:
-                log_cb("warning", "⚠️ UC 引擎无头模式反检测能力弱，强制使用有头模式")
-                headless = False
-             automation = GeminiAutomationUC(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
-        # 允许外部取消时立刻关闭浏览器
-        self._add_cancel_hook(task.id, lambda: getattr(automation, "stop", lambda: None)())
+        task_params = {
+            "action": "register",
+            "email": "",  # 注册流程中邮箱由子进程创建
+            "browser_engine": browser_engine,
+            "headless": headless,
+            "proxy": browser_proxy or "",
+            "user_agent": self.user_agent,
+            "mail_provider": temp_mail_provider,
+            "domain": domain,
+            "mail_config": mail_config,
+        }
 
-        try:
-            log_cb("info", "🔐 步骤 3/3: 执行 Gemini 自动登录...")
-            result = automation.login_and_extract(client.email, client)
-        except Exception as exc:
-            log_cb("error", f"❌ 自动登录异常: {exc}")
-            return {"success": False, "error": str(exc)}
+        # 在独立子进程中执行邮箱注册 + 浏览器登录
+        result = run_in_subprocess(
+            task_params,
+            log_callback=log_cb,
+            timeout=300,
+            cancel_check=lambda: task.cancel_requested,
+        )
 
         if not result.get("success"):
             error = result.get("error", "自动化流程失败")
-            log_cb("error", f"❌ 自动登录失败: {error}")
+            log_cb("error", f"❌ 注册失败: {error}")
             return {"success": False, "error": error}
 
+        email = result.get("email", "")
         log_cb("info", "✅ Gemini 登录成功，正在保存配置...")
 
         config_data = result["config"]
         config_data["mail_provider"] = temp_mail_provider
-        config_data["mail_address"] = client.email
+        config_data["mail_address"] = email
 
         # 保存邮箱自定义配置
         if temp_mail_provider == "freemail":
@@ -242,16 +236,16 @@ class RegisterService(BaseTaskService[RegisterTask]):
             config_data["mail_verify_ssl"] = config.basic.gptmail_verify_ssl
             config_data["mail_domain"] = config.basic.gptmail_domain
         elif temp_mail_provider == "moemail":
-            config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
+            config_data["mail_password"] = result.get("mail_email_id", "") or result.get("mail_password", "")
             config_data["mail_base_url"] = config.basic.moemail_base_url
             config_data["mail_api_key"] = config.basic.moemail_api_key
             config_data["mail_domain"] = config.basic.moemail_domain
         elif temp_mail_provider == "duckmail":
-            config_data["mail_password"] = getattr(client, "password", "")
+            config_data["mail_password"] = result.get("mail_password", "")
             config_data["mail_base_url"] = config.basic.duckmail_base_url
             config_data["mail_api_key"] = config.basic.duckmail_api_key
         else:
-            config_data["mail_password"] = getattr(client, "password", "")
+            config_data["mail_password"] = result.get("mail_password", "")
 
         accounts_data = load_accounts_from_source()
         updated = False
@@ -267,7 +261,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         log_cb("info", "✅ 配置已保存到数据库")
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        log_cb("info", f"🎉 账户注册完成: {client.email}")
+        log_cb("info", f"🎉 账户注册完成: {email}")
         log_cb("info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-        return {"success": True, "email": client.email, "config": config_data}
+        return {"success": True, "email": email, "config": config_data}

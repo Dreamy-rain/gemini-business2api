@@ -846,9 +846,10 @@ async def startup_event():
         logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
 
     # 启动数据库统计数据后台持久化任务
-    if storage.is_database_enabled():
-        asyncio.create_task(storage.start_stats_persistence_task(interval=60))
-        logger.info("[SYSTEM] 数据库统计后台持久化任务已启动 (间隔: 60s)")
+    # [OPTIMIZE] 彻底禁用统计数据上报数据库
+    # if storage.is_database_enabled():
+    #     asyncio.create_task(storage.start_stats_persistence_task(interval=60))
+    #     logger.info("[SYSTEM] 数据库统计后台持久化任务已启动 (间隔: 60s)")
 
     # 启动全局统计定时清理任务
     asyncio.create_task(global_stats_cleanup_task())
@@ -870,9 +871,10 @@ async def startup_event():
     # 启动会话绑定管理器（从数据库加载绑定关系，启动持久化任务）
     try:
         binding_mgr = get_session_binding_manager()
-        await binding_mgr.load_from_db()
-        asyncio.create_task(binding_mgr.start_persist_task())
-        logger.info("[SYSTEM] 会话绑定管理器已启动（持久化间隔: 60秒）")
+        # [OPTIMIZE] 禁用会话绑定持久化，避免流浪模式产生的海量临时数据写入数据库
+        # await binding_mgr.load_from_db()
+        # asyncio.create_task(binding_mgr.start_persist_task())
+        logger.info("[SYSTEM] 会话绑定管理器已启动（内存模式，不持久化）")
     except Exception as e:
         logger.error(f"[SYSTEM] 启动会话绑定管理器失败: {e}")
 

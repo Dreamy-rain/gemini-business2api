@@ -166,8 +166,9 @@ async def save_stats(stats):
         stats_to_save["rate_limit_timestamps"] = list(stats_to_save["rate_limit_timestamps"])
 
     # 1. 尝试保存到数据库（通过 storage 的后台缓冲区，极快）
-    if storage.is_database_enabled():
-        storage.save_stats_sync(stats_to_save)
+    # [OPTIMIZE] 为了节省 Neon 数据库资源，不再将统计数据写入数据库，仅保存在本地文件
+    # if storage.is_database_enabled():
+    #     storage.save_stats_sync(stats_to_save)
     
     # 2. 定期保存到本地文件作为备份 (每 50 次请求保存一次文件，减少磁盘写入)
     if stats_to_save.get("total_requests", 0) % 50 == 0:

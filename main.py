@@ -695,9 +695,10 @@ async def global_stats_cleanup_task(interval_seconds: int = 3600):
             await asyncio.sleep(interval_seconds)
             async with stats_lock:
                 clean_global_stats(global_stats)
+                # [OPTIMIZE] 彻底禁用每小时的统计归档，确保存储真正休眠
                 # 如果数据库启用，顺便保存一份
-                if storage.is_database_enabled():
-                    await storage.save_stats(global_stats)
+                # if storage.is_database_enabled():
+                #     await storage.save_stats(global_stats)
             logger.debug("[CLEANUP] 全局统计数据清理完成")
         except asyncio.CancelledError:
             break

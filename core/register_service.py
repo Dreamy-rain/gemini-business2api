@@ -186,36 +186,44 @@ class RegisterService(BaseTaskService[RegisterTask]):
         # 使用配置的账户操作代理（用于访问 Gemini 网站）
         browser_proxy, _ = parse_proxy_setting(config.basic.proxy_for_auth)
 
-        log_cb("info", f"🌐 步骤 2/3: 启动浏览器 (引擎={browser_engine}, 无头模式={headless}, 代理={browser_proxy or '无'})...")
+        log_cb("info", f"🌐 步骤 2/3: 浏览器自动化...")
 
-        if browser_engine == "dp":
-            # DrissionPage 引擎：支持有头和无头模式
-            automation = GeminiAutomation(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
-        else:
-            # undetected-chromedriver 引擎
-             if headless:
-                log_cb("warning", "⚠️ UC 引擎无头模式反检测能力弱，强制使用有头模式")
-                headless = False
-             automation = GeminiAutomationUC(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
-        # 允许外部取消时立刻关闭浏览器
-        self._add_cancel_hook(task.id, lambda: getattr(automation, "stop", lambda: None)())
+        # ---- 构建子进程参数（所有值在主进程中读好）----
 
-        try:
-            log_cb("info", "🔐 步骤 3/3: 执行 Gemini 自动登录...")
-            result = automation.login_and_extract(client.email, client)
-        except Exception as exc:
-            log_cb("error", f"❌ 自动登录异常: {exc}")
-            return {"success": False, "error": str(exc)}
+        # 邮件配置传给子进程（子进程只做浏览器登录，邮件客户端用于读取验证码）
+        mail_config_for_subprocess = {
+            "mail_address": client.email,
+            "mail_password": getattr(client, "password", "") or "",
+        }
+        # 透传邮件客户端的连接参数
+        for attr in ("proxy_url", "no_proxy", "direct_fallback", "base_url",
+                      "api_key", "jwt_token", "verify_ssl"):
+            val = getattr(client, attr, None)
+            if val is not None:
+                mail_config_for_subprocess[attr.replace("proxy_url", "proxy")] = val
+
+        subprocess_params = {
+            "action": "login",  # 子进程只做登录，邮件注册已在主进程完成
+            "email": client.email,
+            "browser_engine": browser_engine,
+            "headless": headless,
+            "proxy": browser_proxy or "",
+            "user_agent": self.user_agent,
+            "mail_provider": temp_mail_provider,
+            "mail_config": mail_config_for_subprocess,
+        }
+        # moemail 需要额外的 email_id
+        if temp_mail_provider == "moemail":
+            mail_config_for_subprocess["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
+
+        # ---- 在独立子进程中执行浏览器自动化 ----
+        from core.subprocess_worker import run_browser_in_subprocess
+        result = run_browser_in_subprocess(
+            subprocess_params,
+            log_callback=log_cb,
+            timeout=300,
+            cancel_check=lambda: task.cancel_requested,
+        )
 
         if not result.get("success"):
             error = result.get("error", "自动化流程失败")

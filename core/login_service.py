@@ -252,35 +252,46 @@ class LoginService(BaseTaskService[LoginTask]):
         from core.proxy_utils import parse_proxy_setting
         browser_proxy = proxy_url if proxy_url else parse_proxy_setting(config.basic.proxy_for_auth)[0]
 
-        log_cb("info", f"🌐 启动浏览器 (引擎={browser_engine}, 无头模式={headless}, 代理={browser_proxy or '无'})...")
-
-        if browser_engine == "dp":
-            # DrissionPage 引擎：支持有头和无头模式
-            automation = GeminiAutomation(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
+        # ---- 构建子进程参数（所有值在主进程中读好）----
+        mail_config_for_subprocess = {
+            "mail_address": account.get("mail_address") or account_id,
+            "mail_password": mail_password or "",
+            "proxy": proxy_url,
+            "no_proxy": no_proxy,
+            "direct_fallback": direct_fallback,
+        }
+        if mail_provider == "microsoft":
+            mail_config_for_subprocess["client_id"] = mail_client_id or ""
+            mail_config_for_subprocess["refresh_token"] = mail_refresh_token or ""
+            mail_config_for_subprocess["tenant"] = mail_tenant
         else:
-            # undetected-chromedriver 引擎：无头模式反检测能力弱，强制使用有头模式
-            if headless:
-                log_cb("warning", "⚠️ UC 引擎无头模式反检测能力弱，强制使用有头模式")
-                headless = False
-            automation = GeminiAutomationUC(
-                user_agent=self.user_agent,
-                proxy=browser_proxy,
-                headless=headless,
-                log_callback=log_cb,
-            )
-        # 允许外部取消时立刻关闭浏览器
-        self._add_cancel_hook(task.id, lambda: getattr(automation, "stop", lambda: None)())
-        try:
-            log_cb("info", "🔐 执行 Gemini 自动登录...")
-            result = automation.login_and_extract(account_id, client)
-        except Exception as exc:
-            log_cb("error", f"❌ 自动登录异常: {exc}")
-            return {"success": False, "email": account_id, "error": str(exc)}
+            # 临时邮箱：透传账户级配置（工厂函数会自动回退到全局配置）
+            for cfg_key in ("mail_base_url", "mail_api_key", "mail_jwt_token", "mail_verify_ssl", "mail_domain"):
+                val = account.get(cfg_key)
+                if val is not None:
+                    # 去掉 mail_ 前缀映射到工厂参数名
+                    factory_key = cfg_key.replace("mail_", "", 1)
+                    mail_config_for_subprocess[factory_key] = val
+
+        subprocess_params = {
+            "action": "login",
+            "email": account_id,
+            "browser_engine": browser_engine,
+            "headless": headless,
+            "proxy": browser_proxy or "",
+            "user_agent": self.user_agent,
+            "mail_provider": mail_provider,
+            "mail_config": mail_config_for_subprocess,
+        }
+
+        # ---- 在独立子进程中执行浏览器自动化 ----
+        from core.subprocess_worker import run_browser_in_subprocess
+        result = run_browser_in_subprocess(
+            subprocess_params,
+            log_callback=log_cb,
+            timeout=300,
+            cancel_check=lambda: task.cancel_requested,
+        )
         if not result.get("success"):
             error = result.get("error", "自动化流程失败")
             log_cb("error", f"❌ 自动登录失败: {error}")

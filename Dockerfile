@@ -55,9 +55,7 @@ COPY entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 
-EXPOSE 7860
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -f http://127.0.0.1:${PORT:-7860}/admin/health || exit 1
+EXPOSE 8080
 
 CMD ["./entrypoint.sh"]

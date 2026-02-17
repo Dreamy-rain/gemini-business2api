@@ -98,9 +98,16 @@ from core.outbound_proxy import (
 )
 
 # 模型到配额类型的映射
+# 所有文本模型默认映射到 "text"，确保 429 走 quota 级冷却而非全局冷却
 MODEL_TO_QUOTA_TYPE = {
     "gemini-imagen": "images",
-    "gemini-veo": "videos"
+    "gemini-veo": "videos",
+    # 文本模型统一映射为 text 配额
+    "gemini-auto": "text",
+    "gemini-2.5-flash": "text",
+    "gemini-2.5-pro": "text",
+    "gemini-3-flash-preview": "text",
+    "gemini-3-pro-preview": "text",
 }
 
 # ---------- 日志配置 ----------
@@ -2175,25 +2182,8 @@ async def chat_impl(
                         status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
                         await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
                         raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                    # 继续尝试下一个账户
-                    # 记录账号池状态（账户可用）
-                    uptime_tracker.record_request("account_pool", True)
-                    break
-                except Exception as e:
-                    last_error = e
-                    error_type = type(e).__name__
-                    # 安全获取账户ID
-                    account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
-                    logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
-                    # 记录账号池状态（单个账户失败）
-                    status_code = e.status_code if isinstance(e, HTTPException) else None
-                    uptime_tracker.record_request("account_pool", False, status_code=status_code)
-                    if attempt == max_account_tries - 1:
-                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
-                        status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
-                        await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
-                        raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                    # 继续尝试下一个账户
+                    # 退避延迟后继续尝试下一个账户
+                    await asyncio.sleep(min(2 * (attempt + 1), 6))  # 2s, 4s, 6s
 
     # 消息瘦身：根据是否首次对话决定是否保留 system 提示词
     stripped_messages_dict = strip_to_last_user_message(original_messages_dict, is_first_message=is_new_conversation)
@@ -2440,6 +2430,11 @@ async def chat_impl(
                     await finalize_result(status, status_code, error_detail)
                     if req.stream: yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_retries}) exceeded: {e}'}})}\n\n"
                     return
+
+                # 指数退避延迟，避免快速连续请求触发 429
+                backoff_seconds = min(2 ** retry_count, 8)  # 2s, 4s, 8s
+                logger.info(f"[CHAT] [req_{request_id}] 退避 {backoff_seconds}s 后重试...")
+                await asyncio.sleep(backoff_seconds)
 
     if req.stream:
         return StreamingResponse(response_wrapper(), media_type="text/event-stream")

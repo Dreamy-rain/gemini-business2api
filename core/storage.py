@@ -89,12 +89,23 @@ async def _get_pool():
             raise ValueError("DATABASE_URL is not set")
         try:
             import asyncpg
+            import ssl
             logger.info(f"[STORAGE] Initializing PostgreSQL pool for loop {id(loop)}...")
+            
+            # 兼容性修复：适配 CockroachDB 无证书环境
+            ssl_ctx = None
+            if "sslmode=require" in db_url or "sslmode=verify-full" in db_url:
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+            
             pool = await asyncpg.create_pool(
                 db_url,
                 min_size=0,
-                max_size=10,
-                command_timeout=30,
+                max_size=5,
+                command_timeout=15,
+                connect_timeout=10,
+                ssl=ssl_ctx
             )
             await _init_tables(pool)
             

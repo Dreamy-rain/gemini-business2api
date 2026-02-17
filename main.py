@@ -2813,5 +2813,16 @@ async def not_found_handler(request: Request, exc: HTTPException):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", "7860"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print("\n" + "="*50)
+    print("Gemini Business2API 正在启动...")
+    print(f"监听地址: 0.0.0.0")
+    print(f"监听端口: {os.getenv('PORT', '7860')}")
+    print("="*50 + "\n")
+    
+    try:
+        port = int(os.getenv("PORT", "7860"))
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except Exception as e:
+        print(f"\n[CRITICAL ERROR] 无法启动应用: {e}")
+        import traceback
+        traceback.print_exc()

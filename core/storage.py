@@ -104,7 +104,7 @@ async def _get_pool():
                 min_size=0,
                 max_size=5,
                 command_timeout=15,
-                connect_timeout=10,
+                timeout=10,
                 ssl=ssl_ctx
             )
             await _init_tables(pool)

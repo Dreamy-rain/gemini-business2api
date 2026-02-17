@@ -16,6 +16,8 @@ fi
 export MALLOC_TRIM_THRESHOLD_=131072
 export MALLOC_MMAP_THRESHOLD_=131072
 export MALLOC_ARENA_MAX=2
+# 强制设置监听端口为 7860 (适配 Zeabur 特定配置)
+export PORT=7860
 
 # 启动 Python 应用（无论 Xvfb 是否成功）
 echo "[ENTRYPOINT] Starting Python application..."

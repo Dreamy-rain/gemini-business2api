@@ -19,6 +19,6 @@ export MALLOC_ARENA_MAX=2
 # 强制设置监听端口为 7860 (适配 Zeabur 特定配置)
 export PORT=7860
 
-# 启动 Python 应用（无论 Xvfb 是否成功）
-echo "[ENTRYPOINT] Starting Python application..."
-exec python -u main.py
+# 启动 Python 应用，强制指定端口为 7860
+echo "[ENTRYPOINT] Starting Python application on port 7860..."
+exec PORT=7860 python -u main.py

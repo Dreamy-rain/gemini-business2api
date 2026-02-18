@@ -58,7 +58,7 @@ class LoginService(BaseTaskService[LoginTask]):
             log_prefix="REFRESH",
         )
         self._is_polling = False
-        self._auto_refresh_paused = True  # 运行时开关：默认暂停（不自动刷新）
+        self._auto_refresh_paused = False  # 运行时开关：默认启用自动刷新
 
     def _get_active_account_ids(self) -> set:
         """获取当前正在处理中（PENDING 或 RUNNING）的所有账号 ID"""

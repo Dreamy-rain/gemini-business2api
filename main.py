@@ -503,6 +503,8 @@ def _set_multi_account_mgr(new_mgr):
         register_service.multi_account_mgr = new_mgr
     if login_service:
         login_service.multi_account_mgr = new_mgr
+    # 为新的管理器重启后台缓存清理任务（旧对象的清理任务引用已失效）
+    asyncio.create_task(new_mgr.start_background_cleanup())
 
 def _get_global_stats():
     return global_stats
@@ -639,14 +641,6 @@ async def lifespan(app: FastAPI):
         logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
 
     # [OPTIMIZE] 彻底禁用统计数据上报数据库 (原逻辑保留在注释中)
-    
-    yield
-    
-    # --- Shutdown ---
-    logger.info("Application shutdown...")
-    # if storage.is_database_enabled():
-    #     asyncio.create_task(storage.start_stats_persistence_task(interval=60))
-    #     logger.info("[SYSTEM] 数据库统计后台持久化任务已启动 (间隔: 60s)")
 
     # 启动全局统计定时清理任务
     asyncio.create_task(global_stats_cleanup_task())
@@ -674,6 +668,11 @@ async def lifespan(app: FastAPI):
         logger.info("[SYSTEM] 会话绑定管理器已启动（内存模式，不持久化）")
     except Exception as e:
         logger.error(f"[SYSTEM] 启动会话绑定管理器失败: {e}")
+
+    yield
+
+    # --- Shutdown ---
+    logger.info("Application shutdown...")
 
 # ---------- OpenAI 兼容接口 ----------
 app = FastAPI(title="Gemini-Business OpenAI Gateway", lifespan=lifespan)

@@ -116,6 +116,10 @@ def run_browser_in_subprocess(
     # 等待日志线程结束
     log_thread.join(timeout=5)
 
+    # 子进程已退出，但浏览器子孙进程可能仍然残留（如 page.quit() 失败）
+    # 在主进程侧执行兜底清理
+    _cleanup_orphan_browsers(child_pid)
+
     # 读取 stdout 获取结果
     try:
         stdout_data = proc.stdout.read().decode("utf-8", errors="replace")
@@ -169,6 +173,43 @@ def _read_stderr_logs(
                         pass
     except Exception:
         pass
+
+
+def _cleanup_orphan_browsers(child_pid: int) -> None:
+    """主进程侧兜底清理：子进程退出后扫除可能残留的浏览器子孙进程。
+
+    子进程退出后，其浏览器子进程可能变成孤儿进程（PPID=1 或被 init 接管）。
+    此函数扫描当前主进程的所有子孙进程，杀掉名字包含 chrome/chromium 的残留。
+    """
+    try:
+        import psutil
+
+        # 扫描主进程（当前进程）的所有子孙进程
+        current = psutil.Process()
+        children = current.children(recursive=True)
+        killed = 0
+
+        for child in children:
+            try:
+                name = child.name().lower()
+                if "chrom" in name or "google-chrome" in name:
+                    logger.info(
+                        f"[SUBPROCESS] 🔪 清理残留浏览器进程: PID={child.pid} Name={name}"
+                    )
+                    child.kill()
+                    try:
+                        child.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        pass
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+
+        if killed:
+            logger.info(f"[SUBPROCESS] 兜底清理完成，共清理 {killed} 个残留浏览器进程")
+
+    except Exception as e:
+        logger.warning(f"[SUBPROCESS] 兜底清理异常: {e}")
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:

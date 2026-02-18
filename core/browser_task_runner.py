@@ -10,6 +10,7 @@ stdout 输出结果（RESULT:{json}）。
 只在此脚本中导入，主进程不加载。
 """
 
+import atexit
 import json
 import os
 import sys
@@ -20,6 +21,37 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_script_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
+
+
+def _final_browser_cleanup():
+    """子进程退出前的最终清理：杀掉自身的所有浏览器子孙进程，防止内存泄漏。"""
+    try:
+        import psutil
+        current = psutil.Process()
+        children = current.children(recursive=True)
+        for child in children:
+            try:
+                name = child.name().lower()
+                if "chrom" in name or "google-chrome" in name:
+                    child.kill()
+                    try:
+                        child.wait(timeout=3)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # 强制垃圾回收
+    try:
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+
+# 注册退出清理钩子（无论正常退出还是异常退出都会执行）
+atexit.register(_final_browser_cleanup)
 
 
 def _log(level: str, message: str) -> None:

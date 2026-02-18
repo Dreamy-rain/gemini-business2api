@@ -234,6 +234,7 @@ class ConfigManager:
 
         # 3. 加载基础配置（YAML > 默认值）
         basic_data = yaml_data.get("basic", {})
+        # [REVERT] 默认刷新窗口回滚为 1 小时（虽然 UI "即将过期" 阈值为 3 小时，但保持自动刷新在临期前 1 小时执行）
         refresh_window_raw = basic_data.get("refresh_window_hours", 1)
         register_default_raw = basic_data.get("register_default_count", 1)
         register_domain_raw = basic_data.get("register_domain", "")

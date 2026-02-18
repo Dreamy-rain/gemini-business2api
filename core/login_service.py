@@ -58,7 +58,22 @@ class LoginService(BaseTaskService[LoginTask]):
             log_prefix="REFRESH",
         )
         self._is_polling = False
-        self._auto_refresh_paused = False  # 运行时开关：默认启用自动刷新
+        # 自动刷新逻辑配置：Docker 环境默认暂停（本地开发场景），非 Docker 默认开启
+        # 优先级：环境变量 AUTO_REFRESH_ENABLED > 环境检测
+        is_docker = os.path.exists('/.dockerenv') or os.environ.get('IS_DOCKER') == '1'
+        env_refresh_enabled = os.environ.get("AUTO_REFRESH_ENABLED")
+        
+        if env_refresh_enabled is not None:
+            # 显式设置了环境变量则以环境变量为准
+            self._auto_refresh_paused = env_refresh_enabled.lower() not in ("true", "1")
+        else:
+            # 未设置环境变量时：Docker 环境默认暂停，非 Docker 默认开启
+            self._auto_refresh_paused = True if is_docker else False
+        
+        if self._auto_refresh_paused:
+            logger.info("[LOGIN] 自动刷新已初始化为暂停状态 (环境: %s)", "Docker" if is_docker else "Native")
+        else:
+            logger.info("[LOGIN] 自动刷新已初始化为启用状态")
 
     def _get_active_account_ids(self) -> set:
         """获取当前正在处理中（PENDING 或 RUNNING）的所有账号 ID"""
@@ -398,7 +413,11 @@ class LoginService(BaseTaskService[LoginTask]):
                 continue
 
             if remaining <= config.basic.refresh_window_hours:
+                logger.info(f"[LOGIN] 账号 {account_id} 即将过期 (剩余 {remaining:.2f}h <= {config.basic.refresh_window_hours}h)，加入刷新队列")
                 expiring.append(account.get("id"))
+            else:
+                # 仅在 debug 模式下输出未过期账号信息，避免刷屏
+                logger.debug(f"[LOGIN] 账号 {account_id} 状态良好 (剩余 {remaining:.2f}h > {config.basic.refresh_window_hours}h)，暂不刷新")
 
         return expiring
 

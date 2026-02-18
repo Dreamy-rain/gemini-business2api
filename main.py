@@ -503,8 +503,20 @@ def _set_multi_account_mgr(new_mgr):
         register_service.multi_account_mgr = new_mgr
     if login_service:
         login_service.multi_account_mgr = new_mgr
-    # 为新的管理器重启后台缓存清理任务（旧对象的清理任务引用已失效）
-    asyncio.create_task(new_mgr.start_background_cleanup())
+    
+    # 为新的管理器重启后台缓存清理任务
+    # 注意：此回调可能在线程池中被调用，必须使用 run_coroutine_threadsafe 调度到主循环
+    if main_loop and not main_loop.is_closed():
+        try:
+            asyncio.run_coroutine_threadsafe(new_mgr.start_background_cleanup(), main_loop)
+        except Exception as e:
+            logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
+    else:
+        # Fallback: 如果没有捕获到 loop (极少情况)，尝试直接创建
+        try:
+            asyncio.create_task(new_mgr.start_background_cleanup())
+        except RuntimeError:
+            logger.warning("[SYSTEM] 无法启动缓存清理任务: no event loop")
 
 def _get_global_stats():
     return global_stats
@@ -597,10 +609,20 @@ def process_media(data: bytes, mime: str, chat_id: str, file_id: str, base_url: 
 
 from contextlib import asynccontextmanager
 
+
+# 全局事件循环引用（用于跨线程调度任务）
+main_loop: asyncio.AbstractEventLoop = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global global_stats
+    global global_stats, main_loop
+    
+    # 获取并保存主事件循环引用
+    try:
+        main_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
     
     # --- Startup ---
     # 文件迁移逻辑

@@ -118,7 +118,9 @@ def run_browser_in_subprocess(
 
     # 子进程已退出，但浏览器子孙进程可能仍然残留（如 page.quit() 失败）
     # 在主进程侧执行兜底清理
-    _cleanup_orphan_browsers(child_pid)
+    # [REVERT] 移除激进的进程清理调用，防止误杀并发任务的浏览器进程
+    # 子进程内部已有完善的 atexit 清理机制
+    # _cleanup_orphan_browsers(child_pid)
 
     # 读取 stdout 获取结果
     try:

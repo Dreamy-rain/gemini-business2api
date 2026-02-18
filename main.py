@@ -509,14 +509,18 @@ def _set_multi_account_mgr(new_mgr):
     if main_loop and not main_loop.is_closed():
         try:
             asyncio.run_coroutine_threadsafe(new_mgr.start_background_cleanup(), main_loop)
+            logger.info("[SYSTEM] 已调度后台缓存清理任务")
         except Exception as e:
             logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
     else:
         # Fallback: 如果没有捕获到 loop (极少情况)，尝试直接创建
         try:
+            logger.warning(f"[SYSTEM] main_loop 未就绪 (IsNone={main_loop is None}), 尝试直接 create_task")
             asyncio.create_task(new_mgr.start_background_cleanup())
-        except RuntimeError:
-            logger.warning("[SYSTEM] 无法启动缓存清理任务: no event loop")
+        except RuntimeError as e:
+            logger.error(f"[SYSTEM] 无法启动缓存清理任务: {e}")
+            # 不抛出异常，避免影响主流程保存
+            pass
 
 def _get_global_stats():
     return global_stats
@@ -621,8 +625,9 @@ async def lifespan(app: FastAPI):
     # 获取并保存主事件循环引用
     try:
         main_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        pass
+        logger.info(f"[SYSTEM] 主事件循环已捕获: {id(main_loop)}")
+    except RuntimeError as e:
+        logger.error(f"[SYSTEM] 无法在 lifespan 中捕获事件循环: {e}")
     
     # --- Startup ---
     # 文件迁移逻辑
@@ -1355,6 +1360,14 @@ async def admin_get_current_register_task(request: Request):
 @app.post("/admin/login/start")
 @require_login()
 async def admin_start_login(request: Request, account_ids: List[str] = Body(...)):
+    global main_loop
+    if main_loop is None:
+        try:
+            main_loop = asyncio.get_running_loop()
+            logger.info(f"[SYSTEM] 在 login/start 接口中捕获主事件循环: {id(main_loop)}")
+        except Exception:
+            pass
+
     if not login_service:
         raise HTTPException(503, "login service unavailable")
     task = await login_service.start_login(account_ids)
@@ -1396,6 +1409,14 @@ async def admin_get_current_login_task(request: Request):
 @app.post("/admin/login/check")
 @require_login()
 async def admin_check_login_refresh(request: Request):
+    global main_loop
+    if main_loop is None:
+        try:
+            main_loop = asyncio.get_running_loop()
+            logger.info(f"[SYSTEM] 在 login/check 接口中捕获主事件循环: {id(main_loop)}")
+        except Exception:
+            pass
+
     if not login_service:
         raise HTTPException(503, "login service unavailable")
     task = await login_service.check_and_refresh()

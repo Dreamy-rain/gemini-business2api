@@ -228,6 +228,9 @@ def _kill_proc(proc: subprocess.Popen) -> None:
         # 2. 获取所有子孙进程（需要在杀父进程之前获取）
         children = parent.children(recursive=True)
 
+        if children:
+            logger.info(f"[SUBPROCESS] 🧹 中止任务时清理了 {len(children)} 个子孙进程 (浏览器等)")
+
         # 3. 杀死所有子孙进程
         for child in children:
             try:

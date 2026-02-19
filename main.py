@@ -1139,6 +1139,16 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
 
+class ImageGenerationRequest(BaseModel):
+    """OpenAI /v1/images/generations 请求格式"""
+    prompt: str
+    model: str = "gemini-imagen"
+    n: Optional[int] = 1
+    size: Optional[str] = "1024x1024"
+    response_format: Optional[str] = None  # "url" or "b64_json"，None 表示使用系统配置
+    quality: Optional[str] = "standard"  # "standard" or "hd"
+    style: Optional[str] = "natural"  # "natural" or "vivid"
+
 def create_chunk(id: str, created: int, model: str, delta: dict, finish_reason: Union[str, None]) -> str:
     chunk = {
         "id": id,
@@ -2045,27 +2055,30 @@ async def chat_impl(
                  if isinstance(last_msg.content, str):
                      last_user_content = last_msg.content.strip()
                  elif isinstance(last_msg.content, list):
-                     # 如果是列表，提取第一个文本部分
+                     # 拼接所有文本片段（而非只取第一个），避免客户端分片导致漏判硬指令
+                     text_parts = []
                      for part in last_msg.content:
                          if isinstance(part, dict) and part.get("type") == "text":
-                             last_user_content = part.get("text", "").strip()
-                             break
+                             text_parts.append(part.get("text", ""))
+                     last_user_content = "".join(text_parts).strip()
+                 else:
+                     last_user_content = str(last_msg.content).strip()
 
-        # 指令处理 (增强版: 支持上下文污染的情况)
-        # 正则匹配最后出现的指令 (忽略标点符号)
-        command_pattern = r"(?:换号|重置|切换账号|Reset Session|Switch Account)[!！.。]*$"
+        # 指令处理 (增强版: 支持上下文污染 + 多文本分片 + 尾部标点)
+        # 仅当命令位于消息末尾，且前面是起始/空白/常见分隔符时触发
+        command_pattern = r"(?:^|[\s,，;；:：/\\|\-—_~`'\"“”‘’()（）\[\]{}<>])(?P<cmd>换号|重置|切换账号|reset\s+session|switch\s+account)\s*[!！.。]*$"
         match = re.search(command_pattern, last_user_content, re.IGNORECASE)
-        
+
         intercept_response_content = None
         if match:
-            command = match.group().strip("!！.。")
-            if command in ["重置", "Reset Session"]:
+            command_raw = re.sub(r"\s+", " ", match.group("cmd")).strip().lower()
+            if command_raw in ["重置", "reset session"]:
                 logger.info(f"[COMMAND] [req_{request_id}] 触发指令: 重置 (ChatID: {chat_id_for_binding})")
                 await binding_mgr.reset_session_binding(chat_id_for_binding)
                 await multi_account_mgr.clear_session_cache(chat_id_for_binding)
                 intercept_response_content = "✅ 记忆已重置，当前账号环境保留。"
-            
-            elif command in ["换号", "切换账号", "Switch Account"]:
+
+            elif command_raw in ["换号", "切换账号", "switch account"]:
                 logger.info(f"[COMMAND] [req_{request_id}] 触发指令: 换号 (ChatID: {chat_id_for_binding})")
                 await binding_mgr.remove_binding(chat_id_for_binding)
                 await multi_account_mgr.clear_session_cache(chat_id_for_binding)
@@ -2518,6 +2531,99 @@ async def chat_impl(
         "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     }
+
+# ---------- 图片生成 API (OpenAI 兼容) ----------
+@app.post("/v1/images/generations")
+async def generate_images(
+    req: ImageGenerationRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None)
+):
+    """OpenAI 兼容的图片生成接口
+
+    将 /v1/images/generations 请求转换为内部格式处理，
+    然后将响应转换回 OpenAI 图片生成格式
+    """
+    # API Key 验证（使用本地多 Key 方案）
+    key_config = verify_api_key(authorization, config.basic)
+
+    # 生成请求ID
+    request_id = str(uuid.uuid4())[:6]
+
+    # 转换为 ChatRequest 格式
+    chat_req = ChatRequest(
+        model=req.model,
+        messages=[
+            Message(role="user", content=req.prompt)
+        ],
+        stream=False  # 图片生成不支持流式
+    )
+
+    logger.info(f"[IMAGE-GEN] [req_{request_id}] 收到图片生成请求: model={req.model}, prompt={req.prompt[:100]}")
+
+    try:
+        # 调用 chat_impl 获取响应（适配本地签名，传入 key_config）
+        chat_response = await chat_impl(chat_req, request, authorization, key_config)
+
+        # 从响应中提取图片
+        message_content = chat_response["choices"][0]["message"]["content"]
+
+        # 解析 markdown 中的图片
+        b64_pattern = r'!\[.*?\]\(data:([^;]+);base64,([^\)]+)\)'
+        b64_matches = re.findall(b64_pattern, message_content)
+        url_pattern = r'!\[.*?\]\((https?://[^\)]+)\)'
+        url_matches = re.findall(url_pattern, message_content)
+
+        # 确定响应格式：始终使用系统配置
+        system_format = config_manager.image_output_format
+        response_format = "b64_json" if system_format == "base64" else "url"
+
+        logger.info(f"[IMAGE-GEN] [req_{request_id}] 使用系统配置: {system_format} -> {response_format}")
+
+        # 构建 OpenAI 格式的响应
+        created_time = int(time.time())
+        data_list = []
+
+        if response_format == "b64_json":
+            # 返回 base64 格式
+            for mime, b64_data in b64_matches[:req.n]:
+                data_list.append({"b64_json": b64_data, "revised_prompt": req.prompt})
+
+            # 如果没有 base64 但有 URL，下载并转换
+            if not data_list and url_matches:
+                for url in url_matches[:req.n]:
+                    try:
+                        resp = await http_client.get(url)
+                        if resp.status_code == 200:
+                            b64_data = base64.b64encode(resp.content).decode()
+                            data_list.append({"b64_json": b64_data, "revised_prompt": req.prompt})
+                    except Exception as e:
+                        logger.error(f"[IMAGE-GEN] [req_{request_id}] 下载图片失败: {url}, {str(e)}")
+        else:
+            # 返回 URL 格式
+            for url in url_matches[:req.n]:
+                data_list.append({"url": url, "revised_prompt": req.prompt})
+
+            # 如果没有 URL 但有 base64，保存并生成 URL
+            if not data_list and b64_matches:
+                base_url = get_base_url(request)
+                chat_id = f"img-{uuid.uuid4()}"
+                for idx, (mime, b64_data) in enumerate(b64_matches[:req.n], 1):
+                    try:
+                        img_data = base64.b64decode(b64_data)
+                        file_id = f"gen-{uuid.uuid4()}"
+                        url = save_image_to_hf(img_data, chat_id, file_id, mime, base_url, IMAGE_DIR)
+                        data_list.append({"url": url, "revised_prompt": req.prompt})
+                    except Exception as e:
+                        logger.error(f"[IMAGE-GEN] [req_{request_id}] 保存图片失败: {str(e)}")
+
+        logger.info(f"[IMAGE-GEN] [req_{request_id}] 图片生成完成: {len(data_list)}张")
+
+        return {"created": created_time, "data": data_list}
+
+    except Exception as e:
+        logger.error(f"[IMAGE-GEN] [req_{request_id}] 图片生成失败: {type(e).__name__}: {str(e)}")
+        raise
 
 # ---------- 图片生成处理函数 ----------
 def parse_images_from_response(data_list: list) -> tuple[list, str]:

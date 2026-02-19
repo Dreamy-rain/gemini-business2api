@@ -495,6 +495,25 @@ multi_account_mgr = load_multi_account_config(
 # ---------- 自动注册/刷新服务 ----------
 register_service = None
 login_service = None
+# 全局缓存清理任务句柄（确保同一时刻仅有一个）
+cache_cleanup_task: Optional[asyncio.Task] = None
+
+async def _restart_cache_cleanup_task(new_mgr):
+    """重启缓存清理任务：先停旧任务，再启动新任务。"""
+    global cache_cleanup_task
+
+    if cache_cleanup_task and not cache_cleanup_task.done():
+        cache_cleanup_task.cancel()
+        try:
+            await cache_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"[SYSTEM] 停止旧缓存清理任务异常: {e}")
+
+    cache_cleanup_task = asyncio.create_task(new_mgr.start_background_cleanup())
+    logger.info(f"[SYSTEM] 后台缓存清理任务已重启 (task={id(cache_cleanup_task)})")
+
 
 def _set_multi_account_mgr(new_mgr):
     global multi_account_mgr
@@ -503,20 +522,19 @@ def _set_multi_account_mgr(new_mgr):
         register_service.multi_account_mgr = new_mgr
     if login_service:
         login_service.multi_account_mgr = new_mgr
-    
+
     # 为新的管理器重启后台缓存清理任务
     # 注意：此回调可能在线程池中被调用，必须使用 run_coroutine_threadsafe 调度到主循环
     if main_loop and not main_loop.is_closed():
         try:
-            asyncio.run_coroutine_threadsafe(new_mgr.start_background_cleanup(), main_loop)
-            logger.info("[SYSTEM] 已调度后台缓存清理任务")
+            asyncio.run_coroutine_threadsafe(_restart_cache_cleanup_task(new_mgr), main_loop)
         except Exception as e:
             logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
     else:
         # Fallback: 如果没有捕获到 loop (极少情况)，尝试直接创建
         try:
             logger.warning(f"[SYSTEM] main_loop 未就绪 (IsNone={main_loop is None}), 尝试直接 create_task")
-            asyncio.create_task(new_mgr.start_background_cleanup())
+            asyncio.create_task(_restart_cache_cleanup_task(new_mgr))
         except RuntimeError as e:
             logger.error(f"[SYSTEM] 无法启动缓存清理任务: {e}")
             # 不抛出异常，避免影响主流程保存
@@ -620,7 +638,7 @@ main_loop: asyncio.AbstractEventLoop = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global global_stats, main_loop
+    global global_stats, main_loop, cache_cleanup_task
     
     # 获取并保存主事件循环引用
     try:
@@ -655,8 +673,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"[SYSTEM] 统计数据已加载: {global_stats.get('total_requests', 0)} 次请求, {global_stats.get('total_visitors', 0)} 位访客")
 
     # 启动缓存清理任务
-    asyncio.create_task(multi_account_mgr.start_background_cleanup())
-    logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
+    cache_cleanup_task = asyncio.create_task(multi_account_mgr.start_background_cleanup())
+    logger.info(f"[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟, task={id(cache_cleanup_task)}）")
 
     # 启动自动刷新账号任务
     if os.environ.get("ACCOUNTS_CONFIG"):
@@ -699,6 +717,14 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
+    if cache_cleanup_task and not cache_cleanup_task.done():
+        cache_cleanup_task.cancel()
+        try:
+            await cache_cleanup_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"[SYSTEM] 停止缓存清理任务异常: {e}")
     logger.info("Application shutdown...")
 
 # ---------- OpenAI 兼容接口 ----------

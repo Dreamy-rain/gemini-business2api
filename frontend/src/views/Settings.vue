@@ -408,6 +408,7 @@ const videoOutputOptions = [
 const imageModelOptions = computed(() => {
   const baseOptions = [
     { label: 'Gemini 3 Pro Preview', value: 'gemini-3-pro-preview' },
+    { label: 'Gemini 3.1 Pro Preview', value: 'gemini-3.1-pro-preview' },
     { label: 'Gemini 3 Flash Preview', value: 'gemini-3-flash-preview' },
     { label: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
     { label: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },

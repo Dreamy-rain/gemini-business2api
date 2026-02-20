@@ -108,6 +108,7 @@ MODEL_TO_QUOTA_TYPE = {
     "gemini-2.5-pro": "text",
     "gemini-3-flash-preview": "text",
     "gemini-3-pro-preview": "text",
+    "gemini-3.1-pro-preview": "text",
 }
 
 # ---------- 日志配置 ----------
@@ -407,7 +408,8 @@ MODEL_MAPPING = {
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-pro": "gemini-2.5-pro",
     "gemini-3-flash-preview": "gemini-3-flash-preview",
-    "gemini-3-pro-preview": "gemini-3-pro-preview"
+    "gemini-3-pro-preview": "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview": "gemini-3.1-pro-preview"
 }
 
 # ---------- HTTP 客户端 ----------

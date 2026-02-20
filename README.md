@@ -58,6 +58,7 @@
 | `gemini-2.5-pro`         | ✅    | ✅        | ✅          | 可选     | -        |
 | `gemini-3-flash-preview` | ✅    | ✅        | ✅          | 可选     | -        |
 | `gemini-3-pro-preview`   | ✅    | ✅        | ✅          | 可选     | -        |
+| `gemini-3.1-pro-preview` | ✅    | ✅        | ✅          | 可选     | -        |
 | `gemini-imagen`          | ✅    | ✅        | ✅          | ✅        | -        |
 | `gemini-veo`             | ✅    | ✅        | ✅          | -        | ✅        |
 

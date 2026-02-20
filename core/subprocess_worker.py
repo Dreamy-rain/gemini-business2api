@@ -77,6 +77,7 @@ def run_browser_in_subprocess(
     # 后台线程实时读取 stderr 日志用的缓冲区
     stderr_lines = []
     tracked_browser_pids = set()
+    cleanup_reason = "unknown"
 
     try:
         # 写入参数到 stdin
@@ -84,6 +85,7 @@ def run_browser_in_subprocess(
             proc.stdin.write(params_json.encode("utf-8"))
             proc.stdin.close()
         except Exception as exc:
+            cleanup_reason = "stdin_write_failed"
             _kill_proc(proc)
             return {"success": False, "error": f"参数写入失败: {exc}"}
 
@@ -110,12 +112,14 @@ def run_browser_in_subprocess(
 
                 # 检查超时
                 if elapsed > timeout:
+                    cleanup_reason = "timeout"
                     log_callback("error", f"⏰ 浏览器子进程超时 ({timeout}s)，正在终止...")
                     _kill_proc(proc)
                     return {"success": False, "error": f"浏览器操作超时 ({timeout}s)"}
 
                 # 检查取消
                 if cancel_check and cancel_check():
+                    cleanup_reason = "cancel"
                     log_callback("warning", "🚫 收到取消请求，正在终止浏览器子进程...")
                     _kill_proc(proc)
                     return {"success": False, "error": "任务已取消"}
@@ -123,20 +127,21 @@ def run_browser_in_subprocess(
                 # 检查子进程是否结束
                 retcode = proc.poll()
                 if retcode is not None:
+                    cleanup_reason = "normal_exit"
                     break
 
                 # 短暂等待
                 time.sleep(0.3)
 
         except Exception as exc:
+            cleanup_reason = "manage_exception"
             _kill_proc(proc)
             return {"success": False, "error": f"子进程管理异常: {exc}"}
 
         # 等待日志线程结束
         log_thread.join(timeout=5)
 
-        # 子进程已退出，执行兜底清理（BROWSER_LOCK 保证同时只有一个浏览器任务，不会误杀）
-        _cleanup_orphan_browsers(child_pid, tracked_browser_pids)
+        # 子进程已退出，统一在 finally 执行兜底清理（覆盖正常/超时/取消/异常所有路径）
 
         # 读取 stdout 获取结果
         try:
@@ -163,6 +168,18 @@ def run_browser_in_subprocess(
         return {"success": False, "error": "子进程未返回结果"}
 
     finally:
+        # 统一兜底清理：覆盖正常/超时/取消/异常所有路径
+        cleanup_stats = _cleanup_orphan_browsers(
+            child_pid,
+            tracked_browser_pids,
+            reason=cleanup_reason,
+        )
+        if cleanup_stats.get("remaining_after_cleanup", 0) > 0:
+            logger.warning(
+                "[SUBPROCESS] ⚠️ 清理后仍有浏览器残留: "
+                f"{cleanup_stats['remaining_after_cleanup']} (reason={cleanup_reason})"
+            )
+
         # 【关键】无论何种返回路径，都必须关闭管道并释放内存
         _close_proc_pipes(proc)
         stderr_lines.clear()
@@ -223,15 +240,27 @@ def _collect_browser_descendants(root_pid: int) -> set[int]:
     return browser_pids
 
 
-def _cleanup_orphan_browsers(child_pid: int, tracked_browser_pids: Optional[set[int]] = None) -> None:
+def _cleanup_orphan_browsers(
+    child_pid: int,
+    tracked_browser_pids: Optional[set[int]] = None,
+    reason: str = "unknown",
+) -> dict:
     """主进程侧兜底清理：子进程退出后扫除可能残留的浏览器进程。"""
     if tracked_browser_pids is None:
         tracked_browser_pids = set()
 
+    stats = {
+        "reason": reason,
+        "tracked_candidates": 0,
+        "tracked_killed": 0,
+        "fallback_candidates": 0,
+        "fallback_killed": 0,
+        "fallback_rounds": 0,
+        "remaining_after_cleanup": 0,
+    }
+
     try:
         import psutil
-
-        killed = 0
 
         # 1) 精确清理：优先清理采样到的浏览器 PID（子进程退出后即使被系统接管也能清）
         for pid in list(tracked_browser_pids):
@@ -239,6 +268,7 @@ def _cleanup_orphan_browsers(child_pid: int, tracked_browser_pids: Optional[set[
                 proc = psutil.Process(pid)
                 name = proc.name().lower()
                 if "chrom" in name or "google-chrome" in name:
+                    stats["tracked_candidates"] += 1
                     logger.info(
                         f"[SUBPROCESS] 🔪 清理残留浏览器进程(跟踪命中): PID={pid} Name={name}"
                     )
@@ -247,34 +277,70 @@ def _cleanup_orphan_browsers(child_pid: int, tracked_browser_pids: Optional[set[
                         proc.wait(timeout=3)
                     except psutil.TimeoutExpired:
                         pass
-                    killed += 1
+                    stats["tracked_killed"] += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
-        # 2) 回退清理：继续扫描当前主进程可见的子孙进程
-        current = psutil.Process()
-        children = current.children(recursive=True)
-        for child in children:
-            try:
-                name = child.name().lower()
-                if "chrom" in name or "google-chrome" in name:
-                    logger.info(
-                        f"[SUBPROCESS] 🔪 清理残留浏览器进程: PID={child.pid} Name={name}"
-                    )
-                    child.kill()
-                    try:
-                        child.wait(timeout=3)
-                    except psutil.TimeoutExpired:
-                        pass
-                    killed += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
+        # 2) 回退清理：循环扫描当前主进程可见的子孙进程，尽量打干净
+        max_rounds = 3
+        for round_idx in range(max_rounds):
+            stats["fallback_rounds"] = round_idx + 1
+            current = psutil.Process()
+            children = current.children(recursive=True)
+            round_killed = 0
+            for child in children:
+                try:
+                    name = child.name().lower()
+                    if "chrom" in name or "google-chrome" in name:
+                        stats["fallback_candidates"] += 1
+                        logger.info(
+                            f"[SUBPROCESS] 🔪 清理残留浏览器进程: PID={child.pid} Name={name}"
+                        )
+                        child.kill()
+                        try:
+                            child.wait(timeout=3)
+                        except psutil.TimeoutExpired:
+                            pass
+                        stats["fallback_killed"] += 1
+                        round_killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
 
-        if killed:
-            logger.info(f"[SUBPROCESS] 兜底清理完成，共清理 {killed} 个残留浏览器进程")
+            # 当前轮次没有命中可清理目标，提前退出
+            if round_killed == 0:
+                break
+
+            time.sleep(0.2)
+
+        # 3) 复查：统计剩余浏览器进程数
+        try:
+            current = psutil.Process()
+            children = current.children(recursive=True)
+            remaining = 0
+            for child in children:
+                try:
+                    name = child.name().lower()
+                    if "chrom" in name or "google-chrome" in name:
+                        remaining += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            stats["remaining_after_cleanup"] = remaining
+        except Exception:
+            pass
+
+        total_killed = stats["tracked_killed"] + stats["fallback_killed"]
+        if total_killed or stats["remaining_after_cleanup"]:
+            logger.info(
+                "[SUBPROCESS] 兜底清理统计: "
+                f"reason={reason}, tracked={stats['tracked_killed']}/{stats['tracked_candidates']}, "
+                f"fallback={stats['fallback_killed']}/{stats['fallback_candidates']}, "
+                f"remaining={stats['remaining_after_cleanup']}, rounds={stats['fallback_rounds']}"
+            )
 
     except Exception as e:
         logger.warning(f"[SUBPROCESS] 兜底清理异常: {e}")
+
+    return stats
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:

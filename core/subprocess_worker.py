@@ -161,6 +161,8 @@ def _read_stderr_logs(
                 continue
 
             stderr_lines.append(line)
+            if len(stderr_lines) > 200:
+                del stderr_lines[:-200]
 
             if line.startswith("LOG:"):
                 # 格式: LOG:level:message

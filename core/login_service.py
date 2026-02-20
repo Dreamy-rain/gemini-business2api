@@ -12,8 +12,6 @@ from core.account import load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.mail_providers import create_temp_mail_client
-from core.gemini_automation import GeminiAutomation
-from core.gemini_automation_uc import GeminiAutomationUC
 from core.microsoft_mail_client import MicrosoftMailClient
 from core.outbound_proxy import OutboundProxyConfig
 
@@ -118,6 +116,10 @@ class LoginService(BaseTaskService[LoginTask]):
         loop = asyncio.get_running_loop()
         self._append_log(task, "info", f"🚀 刷新任务已启动 (共 {len(task.account_ids)} 个账号)")
 
+        # 批量任务只加载一次账户配置，避免每个账号都触发全量重载
+        accounts = load_accounts_from_source()
+        accounts_dirty = False
+
         for idx, account_id in enumerate(task.account_ids, 1):
             # 队列平滑：除第一个账号外，每个账号之间随机等待 2-5 秒
             if idx > 1:
@@ -130,25 +132,28 @@ class LoginService(BaseTaskService[LoginTask]):
                 self._append_log(task, "warning", f"login task cancelled: {task.cancel_reason or 'cancelled'}")
                 task.status = TaskStatus.CANCELLED
                 task.finished_at = time.time()
-                return
+                break
 
             try:
                 self._append_log(task, "info", f"📊 进度: {idx}/{len(task.account_ids)}")
                 self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 self._append_log(task, "info", f"🔄 开始刷新账号: {account_id}")
                 self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-                result = await loop.run_in_executor(self._executor, self._refresh_one, account_id, task)
+                result = await loop.run_in_executor(self._executor, self._refresh_one, account_id, task, accounts)
             except TaskCancelledError:
                 # 线程侧已触发取消，直接结束任务
                 task.status = TaskStatus.CANCELLED
                 task.finished_at = time.time()
-                return
+                break
             except Exception as exc:
                 result = {"success": False, "email": account_id, "error": str(exc)}
             task.progress += 1
             task.results.append(result)
+            if len(task.results) > 50:
+                task.results = task.results[-50:]
 
             if result.get("success"):
+                accounts_dirty = True
                 task.success_count += 1
                 self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 self._append_log(task, "info", f"🎉 刷新成功: {account_id}")
@@ -161,6 +166,12 @@ class LoginService(BaseTaskService[LoginTask]):
                 self._append_log(task, "error", f"❌ 失败原因: {error}")
                 self._append_log(task, "error", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
+        # 批量任务结束后统一持久化一次，避免每个账号都重建管理器
+        if accounts_dirty:
+            self._append_log(task, "info", "💾 批量持久化刷新结果...")
+            self._apply_accounts_update(accounts)
+            self._append_log(task, "info", "✅ 批量配置已保存到数据库")
+
         if task.cancel_requested:
             task.status = TaskStatus.CANCELLED
         else:
@@ -170,9 +181,8 @@ class LoginService(BaseTaskService[LoginTask]):
         self._current_task_id = None
         self._append_log(task, "info", f"🏁 刷新任务完成 (成功: {task.success_count}, 失败: {task.fail_count}, 总计: {len(task.account_ids)})")
 
-    def _refresh_one(self, account_id: str, task: LoginTask) -> dict:
+    def _refresh_one(self, account_id: str, task: LoginTask, accounts: List[Dict[str, Any]]) -> dict:
         """刷新单个账户"""
-        accounts = load_accounts_from_source()
         account = next((acc for acc in accounts if acc.get("id") == account_id), None)
         if not account:
             return {"success": False, "email": account_id, "error": "账号不存在"}
@@ -312,7 +322,7 @@ class LoginService(BaseTaskService[LoginTask]):
             log_cb("error", f"❌ 自动登录失败: {error}")
             return {"success": False, "email": account_id, "error": error}
 
-        log_cb("info", "✅ Gemini 登录成功，正在保存配置...")
+        log_cb("info", "✅ Gemini 登录成功，配置待批量保存...")
 
         # 更新账户配置
         config_data = result["config"]
@@ -340,8 +350,6 @@ class LoginService(BaseTaskService[LoginTask]):
                 acc.update(config_data)
                 break
 
-        self._apply_accounts_update(accounts)
-        log_cb("info", "✅ 配置已保存到数据库")
         return {"success": True, "email": account_id, "config": config_data}
 
 

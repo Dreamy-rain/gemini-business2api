@@ -76,6 +76,7 @@ def run_browser_in_subprocess(
 
     # 后台线程实时读取 stderr 日志用的缓冲区
     stderr_lines = []
+    tracked_browser_pids = set()
 
     try:
         # 写入参数到 stdin
@@ -96,10 +97,16 @@ def run_browser_in_subprocess(
 
         # 等待子进程完成（带超时和取消检查）
         start_time = time.monotonic()
+        last_scan = 0.0
 
         try:
             while True:
                 elapsed = time.monotonic() - start_time
+
+                # 定期采样子进程树中的浏览器 PID，便于子进程退出后兜底清理
+                if elapsed - last_scan >= 0.5:
+                    tracked_browser_pids.update(_collect_browser_descendants(child_pid))
+                    last_scan = elapsed
 
                 # 检查超时
                 if elapsed > timeout:
@@ -129,7 +136,7 @@ def run_browser_in_subprocess(
         log_thread.join(timeout=5)
 
         # 子进程已退出，执行兜底清理（BROWSER_LOCK 保证同时只有一个浏览器任务，不会误杀）
-        _cleanup_orphan_browsers(child_pid)
+        _cleanup_orphan_browsers(child_pid, tracked_browser_pids)
 
         # 读取 stdout 获取结果
         try:
@@ -159,6 +166,7 @@ def run_browser_in_subprocess(
         # 【关键】无论何种返回路径，都必须关闭管道并释放内存
         _close_proc_pipes(proc)
         stderr_lines.clear()
+        tracked_browser_pids.clear()
         # 强制垃圾回收，释放 Popen 对象、管道缓冲区等循环引用
         gc.collect()
         logger.debug(f"[SUBPROCESS] 管道已关闭，GC 已触发 (PID={child_pid})")
@@ -194,20 +202,58 @@ def _read_stderr_logs(
         pass
 
 
-def _cleanup_orphan_browsers(child_pid: int) -> None:
-    """主进程侧兜底清理：子进程退出后扫除可能残留的浏览器子孙进程。
-
-    子进程退出后，其浏览器子进程可能变成孤儿进程（PPID=1 或被 init 接管）。
-    此函数扫描当前主进程的所有子孙进程，杀掉名字包含 chrome/chromium 的残留。
-    """
+def _collect_browser_descendants(root_pid: int) -> set[int]:
+    """采集指定进程树中的浏览器子孙 PID。"""
     try:
         import psutil
 
-        # 扫描主进程（当前进程）的所有子孙进程
-        current = psutil.Process()
-        children = current.children(recursive=True)
+        root = psutil.Process(root_pid)
+        descendants = root.children(recursive=True)
+    except Exception:
+        return set()
+
+    browser_pids: set[int] = set()
+    for proc in descendants:
+        try:
+            name = proc.name().lower()
+            if "chrom" in name or "google-chrome" in name:
+                browser_pids.add(proc.pid)
+        except Exception:
+            continue
+    return browser_pids
+
+
+def _cleanup_orphan_browsers(child_pid: int, tracked_browser_pids: Optional[set[int]] = None) -> None:
+    """主进程侧兜底清理：子进程退出后扫除可能残留的浏览器进程。"""
+    if tracked_browser_pids is None:
+        tracked_browser_pids = set()
+
+    try:
+        import psutil
+
         killed = 0
 
+        # 1) 精确清理：优先清理采样到的浏览器 PID（子进程退出后即使被系统接管也能清）
+        for pid in list(tracked_browser_pids):
+            try:
+                proc = psutil.Process(pid)
+                name = proc.name().lower()
+                if "chrom" in name or "google-chrome" in name:
+                    logger.info(
+                        f"[SUBPROCESS] 🔪 清理残留浏览器进程(跟踪命中): PID={pid} Name={name}"
+                    )
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        pass
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+
+        # 2) 回退清理：继续扫描当前主进程可见的子孙进程
+        current = psutil.Process()
+        children = current.children(recursive=True)
         for child in children:
             try:
                 name = child.name().lower()

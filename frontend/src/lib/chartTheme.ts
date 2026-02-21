@@ -22,6 +22,7 @@ export const chartColors = {
 // 模型专用色板
 export const modelColors: Record<string, string> = {
   'gemini-3-pro-preview': chartColors.primary,
+  'gemini-3.1-pro-preview': chartColors.primary,
   'gemini-2.5-pro': chartColors.cyan,
   'gemini-2.5-flash': chartColors.warning,
   'gemini-3-flash-preview': chartColors.pink,
@@ -37,6 +38,7 @@ export const validModels = [
   'gemini-2.5-pro',
   'gemini-3-flash-preview',
   'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview',
   'gemini-imagen',
   'gemini-veo',
 ]
@@ -163,15 +165,15 @@ export function getLineChartTheme() {
 export function getPieChartTheme(isMobile = false) {
   const legendPosition = isMobile
     ? {
-        left: 'center',
-        bottom: 0,
-        orient: 'horizontal' as const,
-      }
+      left: 'center',
+      bottom: 0,
+      orient: 'horizontal' as const,
+    }
     : {
-        left: 0,
-        top: 'middle',
-        orient: 'vertical' as const,
-      }
+      left: 0,
+      top: 'middle',
+      orient: 'vertical' as const,
+    }
 
   const pieCenter = isMobile ? ['50%', '42%'] : ['60%', '50%']
   const pieRadius = isMobile ? ['35%', '55%'] : ['45%', '70%']

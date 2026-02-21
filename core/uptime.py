@@ -28,6 +28,7 @@ SERVICES = {
     "gemini-2.5-pro": {"name": "Gemini 2.5 Pro", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
     "gemini-3-flash-preview": {"name": "Gemini 3 Flash Preview", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
     "gemini-3-pro-preview": {"name": "Gemini 3 Pro Preview", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
+    "gemini-3.1-pro-preview": {"name": "Gemini 3.1 Pro Preview", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
     "gemini-imagen": {"name": "Gemini Imagen", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
     "gemini-veo": {"name": "Gemini Veo", "heartbeats": deque(maxlen=MAX_HEARTBEATS)},
 }
@@ -37,6 +38,7 @@ SUPPORTED_MODELS = [
     "gemini-2.5-pro",
     "gemini-3-flash-preview",
     "gemini-3-pro-preview",
+    "gemini-3.1-pro-preview",
     "gemini-imagen",
     "gemini-veo",
 ]

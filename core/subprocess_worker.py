@@ -16,6 +16,13 @@ import threading
 import time
 from typing import Callable, Optional
 
+from core.browser_process_utils import (
+    bump_hit,
+    has_automation_marker,
+    init_cleanup_stats,
+    is_browser_related_process,
+)
+
 logger = logging.getLogger("gemini.subprocess_worker")
 
 # 子进程脚本路径
@@ -232,8 +239,8 @@ def _collect_browser_descendants(root_pid: int) -> set[int]:
     browser_pids: set[int] = set()
     for proc in descendants:
         try:
-            name = proc.name().lower()
-            if "chrom" in name or "google-chrome" in name:
+            matched, _ = is_browser_related_process(proc.name(), proc.cmdline())
+            if matched:
                 browser_pids.add(proc.pid)
         except Exception:
             continue
@@ -249,17 +256,7 @@ def _cleanup_orphan_browsers(
     if tracked_browser_pids is None:
         tracked_browser_pids = set()
 
-    stats = {
-        "reason": reason,
-        "tracked_candidates": 0,
-        "tracked_killed": 0,
-        "fallback_candidates": 0,
-        "fallback_killed": 0,
-        "fallback_rounds": 0,
-        "global_candidates": 0,
-        "global_killed": 0,
-        "remaining_after_cleanup": 0,
-    }
+    stats = init_cleanup_stats(reason)
 
     try:
         import psutil
@@ -268,11 +265,13 @@ def _cleanup_orphan_browsers(
         for pid in list(tracked_browser_pids):
             try:
                 proc = psutil.Process(pid)
-                name = proc.name().lower()
-                if "chrom" in name or "google-chrome" in name:
+                matched, process_type = is_browser_related_process(proc.name(), proc.cmdline())
+                if matched:
                     stats["tracked_candidates"] += 1
+                    bump_hit(stats, "tracked", process_type, "candidates")
                     logger.info(
-                        f"[SUBPROCESS] 🔪 清理残留浏览器进程(跟踪命中): PID={pid} Name={name}"
+                        "[SUBPROCESS] 🔪 清理残留浏览器进程(跟踪命中): "
+                        f"PID={pid} Name={proc.name().lower()} Type={process_type}"
                     )
                     proc.kill()
                     try:
@@ -280,6 +279,7 @@ def _cleanup_orphan_browsers(
                     except psutil.TimeoutExpired:
                         pass
                     stats["tracked_killed"] += 1
+                    bump_hit(stats, "tracked", process_type, "killed")
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 pass
 
@@ -292,11 +292,13 @@ def _cleanup_orphan_browsers(
             round_killed = 0
             for child in children:
                 try:
-                    name = child.name().lower()
-                    if "chrom" in name or "google-chrome" in name:
+                    matched, process_type = is_browser_related_process(child.name(), child.cmdline())
+                    if matched:
                         stats["fallback_candidates"] += 1
+                        bump_hit(stats, "fallback", process_type, "candidates")
                         logger.info(
-                            f"[SUBPROCESS] 🔪 清理残留浏览器进程: PID={child.pid} Name={name}"
+                            "[SUBPROCESS] 🔪 清理残留浏览器进程: "
+                            f"PID={child.pid} Name={child.name().lower()} Type={process_type}"
                         )
                         child.kill()
                         try:
@@ -304,6 +306,7 @@ def _cleanup_orphan_browsers(
                         except psutil.TimeoutExpired:
                             pass
                         stats["fallback_killed"] += 1
+                        bump_hit(stats, "fallback", process_type, "killed")
                         round_killed += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
@@ -319,18 +322,22 @@ def _cleanup_orphan_browsers(
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
                     name = (proc.info.get('name') or "").lower()
-                    if "chrom" in name or "google-chrome" in name:
-                        cmdline = proc.info.get('cmdline') or []
-                        cmdline_str = " ".join(cmdline).lower()
-                        if "--gemini-business-automation" in cmdline_str or "gemini_chrome_" in cmdline_str or "uc-profile-" in cmdline_str:
-                            stats["global_candidates"] += 1
-                            logger.info(f"[SUBPROCESS] 🔪 全局扫描命中残留浏览器进程: PID={proc.pid} Name={name}")
-                            proc.kill()
-                            try:
-                                proc.wait(timeout=3)
-                            except psutil.TimeoutExpired:
-                                pass
-                            stats["global_killed"] += 1
+                    cmdline = proc.info.get('cmdline') or []
+                    matched, process_type = is_browser_related_process(name, cmdline)
+                    if matched and has_automation_marker(" ".join(cmdline).lower()):
+                        stats["global_candidates"] += 1
+                        bump_hit(stats, "global", process_type, "candidates")
+                        logger.info(
+                            "[SUBPROCESS] 🔪 全局扫描命中残留浏览器进程: "
+                            f"PID={proc.pid} Name={name} Type={process_type}"
+                        )
+                        proc.kill()
+                        try:
+                            proc.wait(timeout=3)
+                        except psutil.TimeoutExpired:
+                            pass
+                        stats["global_killed"] += 1
+                        bump_hit(stats, "global", process_type, "killed")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
         except Exception as e:
@@ -342,11 +349,12 @@ def _cleanup_orphan_browsers(
             for proc in psutil.process_iter(['name', 'cmdline']):
                 try:
                     name = (proc.info.get('name') or "").lower()
-                    if "chrom" in name or "google-chrome" in name:
-                        cmdline = proc.info.get('cmdline') or []
-                        cmdline_str = " ".join(cmdline).lower()
-                        if "--gemini-business-automation" in cmdline_str or "gemini_chrome_" in cmdline_str or "uc-profile-" in cmdline_str:
-                            remaining += 1
+                    cmdline = proc.info.get('cmdline') or []
+                    cmdline_str = " ".join(cmdline).lower()
+                    matched, process_type = is_browser_related_process(name, cmdline)
+                    if matched and has_automation_marker(cmdline_str):
+                        remaining += 1
+                        bump_hit(stats, "global", process_type, "remaining")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
             stats["remaining_after_cleanup"] = remaining
@@ -355,12 +363,17 @@ def _cleanup_orphan_browsers(
 
         total_killed = stats["tracked_killed"] + stats["fallback_killed"] + stats["global_killed"]
         if total_killed or stats["remaining_after_cleanup"]:
+            hit_summary = ", ".join(
+                f"{key}=kill {item['killed']}/{item['candidates']}, remaining {item['remaining']}"
+                for key, item in sorted(stats["hits"].items())
+            )
             logger.info(
                 "[SUBPROCESS] 兜底清理统计: "
                 f"reason={reason}, tracked={stats['tracked_killed']}/{stats['tracked_candidates']}, "
                 f"fallback={stats['fallback_killed']}/{stats['fallback_candidates']}, "
                 f"global={stats['global_killed']}/{stats['global_candidates']}, "
                 f"remaining={stats['remaining_after_cleanup']}, rounds={stats['fallback_rounds']}"
+                + (f", by_type=[{hit_summary}]" if hit_summary else "")
             )
 
     except Exception as e:

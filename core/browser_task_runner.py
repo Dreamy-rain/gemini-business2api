@@ -22,6 +22,8 @@ _project_root = os.path.dirname(_script_dir)
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+from core.browser_process_utils import is_browser_related_process
+
 
 def _final_browser_cleanup():
     """子进程退出前的最终清理：杀掉自身的所有浏览器子孙进程，防止内存泄漏。"""
@@ -31,8 +33,8 @@ def _final_browser_cleanup():
         children = current.children(recursive=True)
         for child in children:
             try:
-                name = child.name().lower()
-                if "chrom" in name or "google-chrome" in name:
+                matched, _ = is_browser_related_process(child.name(), child.cmdline())
+                if matched:
                     child.kill()
                     try:
                         child.wait(timeout=3)

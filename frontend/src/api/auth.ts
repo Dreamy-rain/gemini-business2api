@@ -16,5 +16,5 @@ export const authApi = {
     apiClient.post('/logout'),
 
   checkAuth: () =>
-    apiClient.get('/admin/health'),
+    apiClient.get('/session/status'),
 }

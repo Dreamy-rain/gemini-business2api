@@ -68,9 +68,11 @@ router.beforeEach(async (to) => {
 
   // 需要认证的路由
   if (to.meta.requiresAuth) {
-    const isAuthenticated = await authStore.checkAuth()
-    if (!isAuthenticated) {
-      return { name: 'login' }
+    if (!authStore.isLoggedIn) {
+      const isAuthenticated = await authStore.checkAuth()
+      if (!isAuthenticated) {
+        return { name: 'login' }
+      }
     }
   }
 

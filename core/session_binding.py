@@ -12,6 +12,27 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _hash_tag(value: str, length: int = 12) -> str:
+    """返回稳定哈希标签，用于日志脱敏。"""
+    if not value:
+        return "none"
+    return hashlib.sha256(value.encode()).hexdigest()[:length]
+
+
+def _extract_bearer_token(headers: dict) -> Optional[str]:
+    """严格解析 Authorization: Bearer <token>。"""
+    auth_header = (headers.get("authorization") or "").strip()
+    if not auth_header:
+        return None
+
+    parts = auth_header.split()
+    if len(parts) != 2 or parts[0] != "Bearer" or not parts[1].strip():
+        logger.warning("[SESSION-BIND] event=invalid_authorization_header")
+        return None
+
+    return parts[1].strip()
+
+
 def extract_chat_id(
     messages: list,
     client_ip: str = "",
@@ -40,22 +61,27 @@ def extract_chat_id(
     
     # 0. 【最高优先级】基于 API Key 锁定 (Single User Mode)
     # 用户需求：无论客户端如何切分上下文，API Key 永远对应同一个云端会话
-    auth_header = headers.get("authorization", "").strip()
-    if auth_header:
-        # 提取 Key (去除 Bearer 前缀)
-        api_key = auth_header.replace("Bearer ", "").replace("bearer ", "").strip()
-        if api_key:
-            # 使用 API Key 的哈希作为全局唯一 ChatID
-            chat_id = hashlib.md5(f"apikey:{api_key}".encode()).hexdigest()
-            logger.info(f"[SESSION-BIND] ChatID锁定(API Key): {api_key[:6]}... -> {chat_id[:8]}...")
-            return chat_id, "apikey_hash"
+    api_key = _extract_bearer_token(headers)
+    if api_key:
+        # 使用 API Key 的哈希作为全局唯一 ChatID
+        chat_id = hashlib.md5(f"apikey:{api_key}".encode()).hexdigest()
+        logger.info(
+            "[SESSION-BIND] event=chat_id_from_apikey source=authorization token_hash=%s chat_hash=%s",
+            _hash_tag(api_key),
+            _hash_tag(chat_id),
+        )
+        return chat_id, "apikey_hash"
 
     # 1. 优先检查请求头
     header_keys = ['x-conversation-id', 'x-chat-id', 'conversation-id', 'chat-id']
     for key in header_keys:
         value = headers.get(key, "").strip()
         if value:
-            logger.info(f"[SESSION-BIND] ChatID来源: 请求头 {key}={value[:16]}...")
+            logger.info(
+                "[SESSION-BIND] event=chat_id_from_header source=%s value_hash=%s",
+                key,
+                _hash_tag(value),
+            )
             return value, f"header:{key}"
     
     # 2. 检查请求体字段
@@ -63,8 +89,13 @@ def extract_chat_id(
     for key in body_keys:
         value = body.get(key, "")
         if isinstance(value, str) and value.strip():
-            logger.info(f"[SESSION-BIND] ChatID来源: 请求体 {key}={value[:16]}...")
-            return value.strip(), f"body:{key}"
+            normalized = value.strip()
+            logger.info(
+                "[SESSION-BIND] event=chat_id_from_body source=%s value_hash=%s",
+                key,
+                _hash_tag(normalized),
+            )
+            return normalized, f"body:{key}"
     
     # 检查 metadata 中的 ID
     metadata = body.get('metadata', {})
@@ -72,8 +103,13 @@ def extract_chat_id(
         for key in body_keys:
             value = metadata.get(key, "")
             if isinstance(value, str) and value.strip():
-                logger.info(f"[SESSION-BIND] ChatID来源: metadata.{key}={value[:16]}...")
-                return value.strip(), f"metadata:{key}"
+                normalized = value.strip()
+                logger.info(
+                    "[SESSION-BIND] event=chat_id_from_metadata source=%s value_hash=%s",
+                    key,
+                    _hash_tag(normalized),
+                )
+                return normalized, f"metadata:{key}"
     
     # 3. 回退到消息指纹
     chat_id = generate_chat_id_from_messages(messages, client_ip)
@@ -88,12 +124,10 @@ def generate_chat_id_from_messages(messages: list, client_ip: str = "") -> str:
     """
     if not messages:
         chat_id = hashlib.md5(f"{client_ip}:{time.time()}".encode()).hexdigest()
-        logger.warning(f"[SESSION-BIND] 空消息列表，生成随机 ChatID: {chat_id[:8]}...")
+        logger.warning("[SESSION-BIND] event=generated_chat_id_random reason=empty_messages chat_hash=%s", _hash_tag(chat_id))
         return chat_id
-    
-    # 调试日志：显示收到的消息列表结构
-    msg_summary = [f"{m.get('role', '?')}:{str(m.get('content', ''))[:30]}" for m in messages[:5]]
-    logger.info(f"[SESSION-BIND] 消息列表({len(messages)}条): {msg_summary}")
+
+    logger.info("[SESSION-BIND] event=messages_received count=%s", len(messages))
     
     # 找第一条 user 消息（而非 messages[0]，避免 system prompt 干扰）
     first_user_msg = None
@@ -123,7 +157,13 @@ def generate_chat_id_from_messages(messages: list, client_ip: str = "") -> str:
     fingerprint = f"{client_ip}|{role}|{content}"
     chat_id = hashlib.md5(fingerprint.encode()).hexdigest()
     
-    logger.info(f"[SESSION-BIND] ChatID生成(指纹): IP={client_ip}, content={content[:40]}... -> {chat_id[:8]}...")
+    logger.info(
+        "[SESSION-BIND] event=chat_id_from_fingerprint ip_hash=%s role=%s content_length=%s chat_hash=%s",
+        _hash_tag(client_ip),
+        role or "unknown",
+        len(content),
+        _hash_tag(chat_id),
+    )
     
     return chat_id
 
@@ -208,24 +248,29 @@ class SessionBindingManager:
             if len(self._bindings) > self._max_bindings:
                 self._cleanup_oldest()
         
-        sess_tag = f" (Session={session_id[:12]}...)" if session_id else ""
-        logger.info(f"[SESSION-BIND] 绑定 ChatID={chat_id[:8]}... → Account={account_id}{sess_tag}")
+        sess_tag = "set" if session_id else "none"
+        logger.info(
+            "[SESSION-BIND] event=binding_set chat_hash=%s account_hash=%s session=%s",
+            _hash_tag(chat_id),
+            _hash_tag(account_id),
+            sess_tag,
+        )
     
     async def remove_binding(self, chat_id: str) -> bool:
         """
         解除绑定（用于异常漂移）
-        
+
         Returns:
             是否成功解除（True=存在并已解除，False=不存在）
         """
         async with self._lock:
             if chat_id in self._bindings:
-                old_binding = self._bindings[chat_id]
-                old_account = old_binding.get("account_id", "unknown")
-                old_sess = old_binding.get("session_id", "none")
                 del self._bindings[chat_id]
                 self._dirty = True
-                logger.info(f"[SESSION-BIND] 解绑 ChatID={chat_id[:8]}... (原账号: {old_account}, Session: {old_sess})")
+                logger.info(
+                    "[SESSION-BIND] event=binding_removed chat_hash=%s",
+                    _hash_tag(chat_id),
+                )
                 return True
             return False
     
@@ -241,7 +286,11 @@ class SessionBindingManager:
                 binding = self._bindings[chat_id]
                 binding["session_id"] = None  # 清除 Session ID
                 self._dirty = True
-                logger.info(f"[SESSION-BIND] 重置会话 ChatID={chat_id[:8]}... (保留账号: {binding.get('account_id')})")
+                logger.info(
+                    "[SESSION-BIND] event=session_binding_reset chat_hash=%s account_hash=%s",
+                    _hash_tag(chat_id),
+                    _hash_tag(str(binding.get('account_id', ''))),
+                )
                 return True
             return False
     

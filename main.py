@@ -1219,6 +1219,13 @@ async def admin_logout(request: Request):
     return {"success": True}
 
 
+@app.get("/session/status")
+@require_login(redirect_to_login=False)
+async def session_status(request: Request):
+    """认证状态检查端点（仅用于会话登录态探测）"""
+    return {"authenticated": True}
+
+
 
 @app.get("/admin/stats")
 @require_login()

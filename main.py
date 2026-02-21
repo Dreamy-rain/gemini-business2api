@@ -1123,6 +1123,14 @@ async def admin_login_post(request: Request, admin_key: str = Form(...)):
     raise HTTPException(401, "Invalid key")
 
 
+@app.get("/session/status")
+async def session_status(request: Request):
+    """检查当前 Session 是否已认证"""
+    if is_logged_in(request):
+        return {"authenticated": True}
+    raise HTTPException(401, "Unauthorized")
+
+
 @app.post("/logout")
 @require_login(redirect_to_login=False)
 async def admin_logout(request: Request):

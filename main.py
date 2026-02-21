@@ -566,22 +566,33 @@ async def _set_multi_account_mgr_async(new_mgr):
 
 
 def _set_multi_account_mgr(new_mgr):
-    # 兼容线程池回调入口：同步包装为主循环中的异步串行切换
-    if main_loop and not main_loop.is_closed():
-        try:
-            fut = asyncio.run_coroutine_threadsafe(_set_multi_account_mgr_async(new_mgr), main_loop)
-            fut.result(timeout=15)
-        except Exception as e:
-            logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
-    else:
-        # Fallback: 如果没有捕获到 loop (极少情况)，尝试直接创建
+    # 兼容多种调用场景：异步上下文（注册/登录服务）或子线程回调
+    # 关键点：检测是否已在事件循环中，避免死锁
+    if not main_loop or main_loop.is_closed():
         try:
             logger.warning(f"[SYSTEM] main_loop 未就绪 (IsNone={main_loop is None}), 尝试直接 create_task")
             asyncio.create_task(_set_multi_account_mgr_async(new_mgr))
         except RuntimeError as e:
             logger.error(f"[SYSTEM] 无法启动缓存清理任务: {e}")
-            # 不抛出异常，避免影响主流程保存
-            pass
+        return
+
+    # 检测是否已在主事件循环线程上（异步上下文中调用）
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is main_loop:
+        # 已在主事件循环线程上，直接 create_task（不阻塞）
+        asyncio.create_task(_set_multi_account_mgr_async(new_mgr))
+        logger.info("[SYSTEM] 缓存清理任务已通过 create_task 调度")
+    else:
+        # 从子线程调用，用 run_coroutine_threadsafe + 阻塞等待
+        try:
+            fut = asyncio.run_coroutine_threadsafe(_set_multi_account_mgr_async(new_mgr), main_loop)
+            fut.result(timeout=15)
+        except Exception as e:
+            logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
 
 def _get_global_stats():
     return global_stats
@@ -1003,7 +1014,8 @@ async def auto_refresh_accounts_task():
                 # 直接 await 异步版本，避免在异步上下文中调用同步包装导致死锁
                 await _set_multi_account_mgr_async(new_mgr)
                 _last_known_accounts_version = db_version
-                # 显式打断旧 manager 引用 + 强制 GC，确保内存完全回落
+                # 保存日志所需信息后，立即释放旧引用
+                new_account_count = len(multi_account_mgr.accounts)
                 del old_mgr, new_mgr
                 import gc; gc.collect()
                 trim_process_memory("auto_refresh_accounts")
@@ -1016,7 +1028,7 @@ async def auto_refresh_accounts_task():
                     after_browsers,
                     id(cache_cleanup_task) if cache_cleanup_task else "none",
                 )
-                logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(new_mgr.accounts)}")
+                logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {new_account_count}")
 
         except asyncio.CancelledError:
             logger.info("[AUTO-REFRESH] 自动刷新任务已停止")

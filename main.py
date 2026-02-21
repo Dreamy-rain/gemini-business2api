@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from util.streaming_parser import parse_json_array_stream_async
 from collections import deque
 from threading import Lock
+import psutil
 
 # ---------- 数据目录配置 ----------
 # 自动检测环境：HF Spaces Pro 使用 /data，本地使用 ./data
@@ -55,6 +56,8 @@ from core.message import (
     strip_to_last_user_message,
     extract_text_from_content
 )
+from core.memory_utils import trim_process_memory
+from core.browser_process_utils import has_automation_marker, is_browser_related_process
 from core.session_binding import (
     generate_chat_id,
     extract_chat_id,
@@ -499,6 +502,37 @@ register_service = None
 login_service = None
 # 全局缓存清理任务句柄（确保同一时刻仅有一个）
 cache_cleanup_task: Optional[asyncio.Task] = None
+auto_refresh_task: Optional[asyncio.Task] = None
+global_stats_task: Optional[asyncio.Task] = None
+media_cleanup_task_handle: Optional[asyncio.Task] = None
+login_polling_task: Optional[asyncio.Task] = None
+_manager_swap_lock = asyncio.Lock()
+
+
+def _collect_memory_and_browser_snapshot() -> tuple[float, int]:
+    """采集当前进程 RSS(MB) 与自动化标记浏览器残留数量。"""
+    rss_mb = 0.0
+    try:
+        rss_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    except Exception:
+        pass
+
+    browser_left = 0
+    try:
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                name = (proc.info.get("name") or "").lower()
+                cmdline = proc.info.get("cmdline") or []
+                cmdline_str = " ".join(cmdline).lower()
+                matched, _ptype = is_browser_related_process(name, cmdline)
+                if matched and has_automation_marker(cmdline_str):
+                    browser_left += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception:
+        pass
+
+    return rss_mb, browser_left
 
 async def _restart_cache_cleanup_task(new_mgr):
     """重启缓存清理任务：先停旧任务，再启动新任务。"""
@@ -517,26 +551,33 @@ async def _restart_cache_cleanup_task(new_mgr):
     logger.info(f"[SYSTEM] 后台缓存清理任务已重启 (task={id(cache_cleanup_task)})")
 
 
-def _set_multi_account_mgr(new_mgr):
+async def _set_multi_account_mgr_async(new_mgr):
+    """串行切换全局 manager，并等待缓存清理任务重启完成。"""
     global multi_account_mgr
-    multi_account_mgr = new_mgr
-    if register_service:
-        register_service.multi_account_mgr = new_mgr
-    if login_service:
-        login_service.multi_account_mgr = new_mgr
 
-    # 为新的管理器重启后台缓存清理任务
-    # 注意：此回调可能在线程池中被调用，必须使用 run_coroutine_threadsafe 调度到主循环
+    async with _manager_swap_lock:
+        multi_account_mgr = new_mgr
+        if register_service:
+            register_service.multi_account_mgr = new_mgr
+        if login_service:
+            login_service.multi_account_mgr = new_mgr
+
+        await _restart_cache_cleanup_task(new_mgr)
+
+
+def _set_multi_account_mgr(new_mgr):
+    # 兼容线程池回调入口：同步包装为主循环中的异步串行切换
     if main_loop and not main_loop.is_closed():
         try:
-            asyncio.run_coroutine_threadsafe(_restart_cache_cleanup_task(new_mgr), main_loop)
+            fut = asyncio.run_coroutine_threadsafe(_set_multi_account_mgr_async(new_mgr), main_loop)
+            fut.result(timeout=15)
         except Exception as e:
             logger.error(f"[SYSTEM] 调度缓存清理任务失败: {e}")
     else:
         # Fallback: 如果没有捕获到 loop (极少情况)，尝试直接创建
         try:
             logger.warning(f"[SYSTEM] main_loop 未就绪 (IsNone={main_loop is None}), 尝试直接 create_task")
-            asyncio.create_task(_restart_cache_cleanup_task(new_mgr))
+            asyncio.create_task(_set_multi_account_mgr_async(new_mgr))
         except RuntimeError as e:
             logger.error(f"[SYSTEM] 无法启动缓存清理任务: {e}")
             # 不抛出异常，避免影响主流程保存
@@ -641,6 +682,7 @@ main_loop: asyncio.AbstractEventLoop = None
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global global_stats, main_loop, cache_cleanup_task
+    global auto_refresh_task, global_stats_task, media_cleanup_task_handle, login_polling_task
     
     # 获取并保存主事件循环引用
     try:
@@ -682,7 +724,7 @@ async def lifespan(app: FastAPI):
     if os.environ.get("ACCOUNTS_CONFIG"):
         logger.info("[SYSTEM] 自动刷新账号已跳过（使用 ACCOUNTS_CONFIG）")
     elif storage.is_database_enabled() and AUTO_REFRESH_ACCOUNTS_SECONDS > 0:
-        asyncio.create_task(auto_refresh_accounts_task())
+        auto_refresh_task = asyncio.create_task(auto_refresh_accounts_task())
         logger.info(f"[SYSTEM] 自动刷新账号任务已启动（间隔: {AUTO_REFRESH_ACCOUNTS_SECONDS}秒）")
     elif storage.is_database_enabled():
         logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
@@ -690,16 +732,16 @@ async def lifespan(app: FastAPI):
     # [OPTIMIZE] 彻底禁用统计数据上报数据库 (原逻辑保留在注释中)
 
     # 启动全局统计定时清理任务
-    asyncio.create_task(global_stats_cleanup_task())
+    global_stats_task = asyncio.create_task(global_stats_cleanup_task())
 
     # 启动媒体文件定时清理任务
-    asyncio.create_task(media_cleanup_task())
+    media_cleanup_task_handle = asyncio.create_task(media_cleanup_task())
     logger.info(f"[SYSTEM] 媒体文件清理任务已启动（间隔: {MEDIA_CLEANUP_INTERVAL_SECONDS}秒，保留: {MEDIA_MAX_AGE_SECONDS}秒）")
 
     # 启动自动登录刷新轮询
     if login_service:
         try:
-            asyncio.create_task(login_service.start_polling())
+            login_polling_task = asyncio.create_task(login_service.start_polling())
             logger.info("[SYSTEM] 账户过期检查轮询已启动（间隔: 30分钟）")
         except Exception as e:
             logger.error(f"[SYSTEM] 启动登录服务失败: {e}")
@@ -719,14 +761,21 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
-    if cache_cleanup_task and not cache_cleanup_task.done():
-        cache_cleanup_task.cancel()
-        try:
-            await cache_cleanup_task
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.warning(f"[SYSTEM] 停止缓存清理任务异常: {e}")
+    for task_name, task in [
+        ("cache_cleanup", cache_cleanup_task),
+        ("auto_refresh", auto_refresh_task),
+        ("global_stats_cleanup", global_stats_task),
+        ("media_cleanup", media_cleanup_task_handle),
+        ("login_polling", login_polling_task),
+    ]:
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"[SYSTEM] 停止任务异常 ({task_name}): {e}")
     logger.info("Application shutdown...")
 
 # ---------- OpenAI 兼容接口 ----------
@@ -927,7 +976,14 @@ async def auto_refresh_accounts_task():
 
             # 比较更新时间变化
             if _last_known_accounts_version != db_version:
+                current_login_task = login_service.get_current_task() if login_service else None
+                current_login_status = getattr(getattr(current_login_task, "status", None), "value", None)
+                if current_login_status in ("pending", "running"):
+                    logger.info("[AUTO-REFRESH] 登录刷新任务进行中，跳过本轮数据库自动刷新以避免冲突")
+                    continue
+
                 logger.info("[AUTO-REFRESH] 检测到账号变化，正在自动刷新...")
+                before_rss_mb, before_browsers = _collect_memory_and_browser_snapshot()
 
                 old_mgr = multi_account_mgr
                 new_mgr = _reload_accounts(
@@ -946,6 +1002,16 @@ async def auto_refresh_accounts_task():
 
                 _set_multi_account_mgr(new_mgr)
                 _last_known_accounts_version = db_version
+                trim_process_memory("auto_refresh_accounts")
+                after_rss_mb, after_browsers = _collect_memory_and_browser_snapshot()
+                logger.info(
+                    "[AUTO-REFRESH] 审计: rss %.1fMB -> %.1fMB, browsers %d -> %d, cache_task=%s",
+                    before_rss_mb,
+                    after_rss_mb,
+                    before_browsers,
+                    after_browsers,
+                    id(cache_cleanup_task) if cache_cleanup_task else "none",
+                )
                 logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(new_mgr.accounts)}")
 
         except asyncio.CancelledError:

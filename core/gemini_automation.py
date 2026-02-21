@@ -13,6 +13,7 @@ from DrissionPage import ChromiumPage, ChromiumOptions
 from core.base_task_service import TaskCancelledError
 from core.concurrency import BROWSER_LOCK
 import psutil
+from core.browser_process_utils import is_browser_related_process
 
 
 # 常量
@@ -770,7 +771,7 @@ class GeminiAutomation:
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
 
-            # 1. 精确清理：扫描当前 Python 进程的所有子进程
+            # 1. 精确清理：扫描当前 Python 进程的所有浏览器相关子进程
             import psutil
             current_proc = psutil.Process()
             children = current_proc.children(recursive=True)
@@ -778,9 +779,12 @@ class GeminiAutomation:
             for child in children:
                 try:
                     name = child.name().lower()
-                    # 匹配 chrome, chromium, google-chrome 等
-                    if "chrom" in name or "google-chrome" in name:
-                        self._log("info", f"🔪 发现残留进程，强制清理: PID={child.pid} Name={name}")
+                    matched, process_type = is_browser_related_process(name, child.cmdline())
+                    if matched:
+                        self._log(
+                            "info",
+                            f"🔪 发现残留进程，强制清理: PID={child.pid} Name={name} Type={process_type}",
+                        )
                         child.kill()
                         try:
                             # 必须调用 wait() 来回收僵尸进程
@@ -789,20 +793,8 @@ class GeminiAutomation:
                             pass
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     pass
-            
-            # 2. 核弹级清理：仅在 Linux 下作为兜底，杀掉所有名字带 chrome 的进程
-            import platform
-            if platform.system() == "Linux":
-                try:
-                    import subprocess
-                    # pkill -9 -f "chrome|chromium"
-                    # 使用 subprocess 调用系统命令，忽略错误
-                    subprocess.run(["pkill", "-9", "-f", "chrome|chromium"], capture_output=True)
-                    # self._log("info", "🚀 执行了核弹级清理 (pkill)")
-                except Exception:
-                    pass
 
-            # 3. 强制垃圾回收
+            # 2. 强制垃圾回收
             import gc
             gc.collect()
 

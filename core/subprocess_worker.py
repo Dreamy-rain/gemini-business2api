@@ -6,7 +6,6 @@
 子进程退出后 OS 回收全部浏览器相关内存。
 """
 
-import gc
 import json
 import logging
 import os
@@ -15,6 +14,8 @@ import sys
 import threading
 import time
 from typing import Callable, Optional
+
+from core.memory_utils import trim_process_memory
 
 from core.browser_process_utils import (
     bump_hit,
@@ -191,8 +192,8 @@ def run_browser_in_subprocess(
         _close_proc_pipes(proc)
         stderr_lines.clear()
         tracked_browser_pids.clear()
-        # 强制垃圾回收，释放 Popen 对象、管道缓冲区等循环引用
-        gc.collect()
+        # 强制垃圾回收，并尝试将空闲堆归还给 OS
+        trim_process_memory("subprocess_worker_finally")
         logger.debug(f"[SUBPROCESS] 管道已关闭，GC 已触发 (PID={child_pid})")
 
 

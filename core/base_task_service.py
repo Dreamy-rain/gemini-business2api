@@ -122,6 +122,17 @@ class BaseTaskService(Generic[T]):
         
         self._max_completed_tasks = 50  # 最大保留50个已完成的任务历史
 
+    def _recycle_executor(self) -> None:
+        """回收线程池并重建，释放刷新/注册任务在线程中累积的内存碎片。"""
+        old_executor = self._executor
+        try:
+            old_executor.shutdown(wait=False, cancel_futures=False)
+        except Exception as exc:
+            logger.warning("[%s] executor recycle shutdown failed: %s", self._log_prefix, str(exc)[:120])
+
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        logger.info("[%s] executor recycled for memory reclamation", self._log_prefix)
+
     def get_task(self, task_id: str) -> Optional[T]:
         """获取指定任务"""
         return self._tasks.get(task_id)
@@ -242,6 +253,8 @@ class BaseTaskService(Generic[T]):
         finally:
             self._current_asyncio_task = None
             self._clear_cancel_hooks(task.id)
+            # 关键：每轮任务结束后回收线程池，降低线程局部缓存导致的 RSS 高位悬挂
+            self._recycle_executor()
             # 任务执行结束，清理过旧的历史记录
             self._cleanup_finished_tasks()
 

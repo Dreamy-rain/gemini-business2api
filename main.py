@@ -811,7 +811,6 @@ async def auto_refresh_accounts_task():
             # 1. 自动清理过期账号
             expired_ids = []
             for acc in multi_account_mgr.accounts.values():
-                # 注意：is_expired() 现在仅代表物理过期，不含提前量。物理清理逻辑只应针对物理过期的账号。
                 if acc.config.is_expired():
                     expired_ids.append(acc.config.account_id)
             
@@ -839,13 +838,8 @@ async def auto_refresh_accounts_task():
             valid_active_count = 0
             for acc_id, acc in multi_account_mgr.accounts.items():
                 c = acc.config
-                # 【逻辑加固】健康账号判定标准：
-                # 1. 未物理过期 (is_expired)
-                # 2. 未手动禁用 (disabled)
-                # 3. 必需字段完整 (secure_c_ses等)
-                # 4. 【关键】账户不是永久性损坏的。
-                #    这里改用专门设计的 is_healthy_for_capacity()：它会将 429 限流冷却期的账号也判定为 True。
-                if not c.is_expired() and not c.disabled and acc.is_healthy_for_capacity():
+                # 标准：未过期 + 未禁用 + 必需字段完整
+                if not c.is_expired() and not c.disabled:
                     if c.secure_c_ses and c.csesidx and c.config_id:
                         valid_active_count += 1
             

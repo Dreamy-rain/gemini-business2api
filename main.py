@@ -1222,12 +1222,26 @@ async def admin_stats(request: Request):
 async def admin_get_accounts(request: Request):
     """获取所有账户的状态信息"""
     accounts_info = []
+    beijing_tz = timezone(timedelta(hours=8))
+
     for account_id, account_manager in multi_account_mgr.accounts.items():
         config = account_manager.config
         remaining_hours = config.get_remaining_hours()
         status, status_color, remaining_display = format_account_expiration(remaining_hours)
         cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
         quota_status = account_manager.get_quota_status()
+
+        account_expires_at = getattr(config, "account_expires_at", None)
+        account_remaining_days = None
+        if account_expires_at:
+            if account_expires_at == "永久":
+                account_remaining_days = None
+            else:
+                try:
+                    expire_dt = datetime.strptime(account_expires_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=beijing_tz)
+                    account_remaining_days = (expire_dt - datetime.now(beijing_tz)).total_seconds() / 86400
+                except Exception:
+                    account_remaining_days = None
 
         accounts_info.append({
             "id": config.account_id,
@@ -1242,7 +1256,9 @@ async def admin_get_accounts(request: Request):
             "cooldown_reason": cooldown_reason,
             "conversation_count": account_manager.conversation_count,
             "session_usage_count": account_manager.session_usage_count,
-            "quota_status": quota_status  # 新增配额状态
+            "quota_status": quota_status,  # 新增配额状态
+            "account_expires_at": account_expires_at,
+            "account_remaining_days": account_remaining_days,
         })
 
     return {"total": len(accounts_info), "accounts": accounts_info}

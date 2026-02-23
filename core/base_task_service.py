@@ -386,7 +386,7 @@ class BaseTaskService(Generic[T]):
             
             # 第四重：清理残留的浏览器临时目录
             cleaned_dirs = self._patrol_clean_temp_dirs()
-            
+            logger.info("[%s] 巡警临时目录清理完成: %d 个", self._log_prefix, cleaned_dirs)
             if killed > 0 or cleaned_dirs > 0:
                 # 如果巡警确实干掉了东西，再做一次 gc + malloc_trim 把这些尸体的内存彻底归还
                 gc.collect()
@@ -422,9 +422,11 @@ class BaseTaskService(Generic[T]):
         """
         # 竞态保护：有活的任务 → 巡警不动
         if self._any_task_running():
-            logger.debug("[%s] 🛑 巡警待命：检测到其他任务正在执行，跳过本轮扫荡", self._log_prefix)
+            logger.info("[%s] 🛑 巡警待命：检测到其他任务正在执行，跳过本轮扫荡", self._log_prefix)
             return 0
-        
+
+        logger.info("[%s] 🛰️ 巡警出动：开始全系统残留进程扫描", self._log_prefix)
+
         killed = 0
         my_pid = None
         try:
@@ -460,8 +462,12 @@ class BaseTaskService(Generic[T]):
                         cmdline = proc.cmdline()
                     except (psutil.AccessDenied, psutil.NoSuchProcess):
                         cmdline = []
-                    
-                    matched, process_type = is_browser_related_process(name, cmdline)
+
+                    # Windows 下 conhost 可能作为浏览器子进程残留，直接纳入巡警击杀范围
+                    if "conhost" in name:
+                        matched, process_type = True, "conhost"
+                    else:
+                        matched, process_type = is_browser_related_process(name, cmdline)
                     
                     # 也检查环境变量标记
                     if not matched:
@@ -491,7 +497,7 @@ class BaseTaskService(Generic[T]):
                 except Exception:
                     continue
         except Exception as e:
-            logger.debug("[%s] 巡警扫描异常: %s", self._log_prefix, e)
+            logger.info("[%s] 巡警扫描异常: %s", self._log_prefix, e)
         return killed
 
     def _patrol_clean_temp_dirs(self) -> int:
@@ -514,5 +520,5 @@ class BaseTaskService(Generic[T]):
                         except Exception:
                             pass
         except Exception as e:
-            logger.debug("[%s] 巡警清理临时目录异常: %s", self._log_prefix, e)
+            logger.info("[%s] 巡警清理临时目录异常: %s", self._log_prefix, e)
         return cleaned

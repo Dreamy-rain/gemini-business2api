@@ -53,7 +53,8 @@ class AccountConfig:
     host_c_oses: Optional[str]
     csesidx: str
     config_id: str
-    expires_at: Optional[str] = None  # 账户过期时间 (格式: "2025-12-23 10:59:21")
+    expires_at: Optional[str] = None  # 会话过期时间 (格式: "2025-12-23 10:59:21")
+    account_expires_at: Optional[str] = None  # 账号有效期到期时间（通常为注册后30天）
     disabled: bool = False  # 手动禁用状态
     mail_provider: Optional[str] = None
     mail_address: Optional[str] = None
@@ -641,6 +642,7 @@ def load_multi_account_config(
             csesidx=acc["csesidx"],
             config_id=acc["config_id"],
             expires_at=acc.get("expires_at"),
+            account_expires_at=acc.get("account_expires_at"),
             disabled=acc.get("disabled", False),  # 读取手动禁用状态，默认为False
             mail_provider=acc.get("mail_provider"),
             mail_address=acc.get("mail_address"),

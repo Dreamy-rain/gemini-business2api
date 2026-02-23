@@ -72,9 +72,6 @@ class BaseTaskService(Generic[T]):
     基础任务服务类
     提供通用的任务管理、日志记录和账户更新功能
     """
-    
-    # 跨实例注册表：巡警通过它检查全局是否有任务正在执行
-    _all_instances: list = []
 
     def __init__(
         self,
@@ -124,9 +121,6 @@ class BaseTaskService(Generic[T]):
         self.set_multi_account_mgr = set_multi_account_mgr
         
         self._max_completed_tasks = 10  # 最大保留10个已完成的任务历史，减小内存占用
-        
-        # 将自身注册进全局实例表，供巡警跨服务检查运行状态
-        BaseTaskService._all_instances.append(self)
 
     def get_task(self, task_id: str) -> Optional[T]:
         """获取指定任务"""
@@ -358,161 +352,16 @@ class BaseTaskService(Generic[T]):
                         self._log_prefix, to_remove, len(self._tasks))
 
     async def _force_memory_release(self) -> None:
-        """任务结束后触发常规垃圾回收、底层 Arena 压缩，以及巡警清扫"""
-        await asyncio.sleep(2)  # 等待其他异步收尾和子进程完全自然退出（不要强制）
+        """任务结束后触发常规垃圾回收，清理多余的对象占用"""
+        await asyncio.sleep(2)  # 等待其他异步收尾和子进程完全退出
         try:
             import gc
             
             # 第一重：强制收集所有分代的 Python 孤立对象
             gc.collect()
             
-            # 第二重：安全地向操作系统剥离 glibc 的虚假残留高水位 (仅限于 Linux 容器)
-            import platform
-            system = platform.system()
-            if system == "Linux" or system == "Darwin":
-                import ctypes
-                import ctypes.util
-                try:
-                    libc_name = ctypes.util.find_library("c")
-                    libc = ctypes.CDLL(libc_name) if libc_name else ctypes.CDLL("libc.so.6")
-                    if hasattr(libc, "malloc_trim"):
-                        libc.malloc_trim(0)
-                        logger.debug("[%s] malloc_trim(0) 已触发", self._log_prefix)
-                except Exception as e:
-                    logger.debug("[%s] 底层内存刮擦失败: %s", self._log_prefix, e)
-            
-            # 第三重：巡警机制 —— 扫描并击杀所有漏网的浏览器残留进程
-            killed = self._patrol_kill_zombie_browsers()
-            
-            # 第四重：清理残留的浏览器临时目录
-            cleaned_dirs = self._patrol_clean_temp_dirs()
-            
-            if killed > 0 or cleaned_dirs > 0:
-                # 如果巡警确实干掉了东西，再做一次 gc + malloc_trim 把这些尸体的内存彻底归还
-                gc.collect()
-                if system == "Linux" or system == "Darwin":
-                    try:
-                        libc.malloc_trim(0)
-                    except Exception:
-                        pass
-            
-            logger.info("[%s] 任务回收完成 (巡警击杀: %d 进程, 清理: %d 临时目录)", 
-                        self._log_prefix, killed, cleaned_dirs)
+            # 记录清理情况
+            logger.info("[%s] 任务历史缩减及常规 GC 垃圾回收已完成", self._log_prefix)
                     
         except Exception as e:
-            logger.debug("[%s] 内存回收异常: %s", self._log_prefix, e)
-
-    @classmethod
-    def _any_task_running(cls) -> bool:
-        """检查所有服务实例中是否有任何任务正在执行（RUNNING 或 PENDING）"""
-        for instance in cls._all_instances:
-            for task in instance._tasks.values():
-                if task.status == TaskStatus.RUNNING:
-                    return True
-        return False
-
-    def _patrol_kill_zombie_browsers(self) -> int:
-        """巡警：全系统雷达扫描，无差别击杀所有浏览器残留进程。
-        
-        使用 process_iter 扫描整个系统进程表（而非仅 children），
-        因为当子进程异常退出后，Chrome 会被 Docker init 收养，
-        脱离主进程族谱，children() 根本看不到它。
-        
-        竞态保护：检测到任何服务有 RUNNING 任务时，巡警待命不出笼。
-        """
-        # 竞态保护：有活的任务 → 巡警不动
-        if self._any_task_running():
-            logger.debug("[%s] 🛑 巡警待命：检测到其他任务正在执行，跳过本轮扫荡", self._log_prefix)
-            return 0
-        
-        killed = 0
-        my_pid = None
-        try:
-            import psutil
-            from core.browser_process_utils import is_browser_related_process
-            
-            my_pid = psutil.Process().pid
-            
-            # 全系统扫描：遍历所有进程，不放过任何被 init 收养的孤儿
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    # 跳过自身
-                    if proc.pid == my_pid:
-                        continue
-                    
-                    name = (proc.info['name'] or '').lower()
-                    
-                    # 快速跳过：名字里完全没有浏览器特征的直接放行
-                    if not any(kw in name for kw in ('chrom', 'crashpad', 'zygote', 'gpu', 'renderer', 'utility')):
-                        # 名字不像浏览器，再查一下环境变量标记
-                        has_marker = False
-                        try:
-                            env = proc.environ()
-                            if env and env.get("GEMINI_AUTOMATION_MARKER") == "1":
-                                has_marker = True
-                        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                            pass
-                        if not has_marker:
-                            continue
-                    
-                    # 详细检查
-                    try:
-                        cmdline = proc.cmdline()
-                    except (psutil.AccessDenied, psutil.NoSuchProcess):
-                        cmdline = []
-                    
-                    matched, process_type = is_browser_related_process(name, cmdline)
-                    
-                    # 也检查环境变量标记
-                    if not matched:
-                        has_marker = False
-                        try:
-                            env = proc.environ()
-                            if env and env.get("GEMINI_AUTOMATION_MARKER") == "1":
-                                has_marker = True
-                                process_type = "marked_process"
-                        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                            pass
-                        if not has_marker:
-                            continue
-                    
-                    logger.warning(
-                        "[%s] 🚨 巡警发现残留进程: PID=%d Name=%s Type=%s → 执行击杀",
-                        self._log_prefix, proc.pid, name, process_type,
-                    )
-                    proc.kill()
-                    try:
-                        proc.wait(timeout=3)
-                    except Exception:
-                        pass
-                    killed += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-                except Exception:
-                    continue
-        except Exception as e:
-            logger.debug("[%s] 巡警扫描异常: %s", self._log_prefix, e)
-        return killed
-
-    def _patrol_clean_temp_dirs(self) -> int:
-        """巡警：清理 /tmp 下残留的 gemini_chrome_* 浏览器临时目录"""
-        cleaned = 0
-        try:
-            import tempfile
-            import shutil
-            import os
-            
-            tmp_root = tempfile.gettempdir()
-            for entry in os.listdir(tmp_root):
-                if entry.startswith("gemini_chrome_") or entry.startswith("uc-profile-"):
-                    full_path = os.path.join(tmp_root, entry)
-                    if os.path.isdir(full_path):
-                        try:
-                            shutil.rmtree(full_path, ignore_errors=True)
-                            cleaned += 1
-                            logger.debug("[%s] 巡警清理临时目录: %s", self._log_prefix, full_path)
-                        except Exception:
-                            pass
-        except Exception as e:
-            logger.debug("[%s] 巡警清理临时目录异常: %s", self._log_prefix, e)
-        return cleaned
+            logger.debug("[%s] 常规内存回收异常: %s", self._log_prefix, e)

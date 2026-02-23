@@ -393,7 +393,6 @@ ACCOUNT_FAILURE_THRESHOLD = config.retry.account_failure_threshold
 RATE_LIMIT_COOLDOWN_SECONDS = config.retry.rate_limit_cooldown_seconds
 SESSION_CACHE_TTL_SECONDS = config.retry.session_cache_ttl_seconds
 AUTO_REFRESH_ACCOUNTS_SECONDS = config.retry.auto_refresh_accounts_seconds
-MIN_HEALTHY_ACCOUNTS = 21
 
 # ---------- 模型映射配置 ----------
 MODEL_MAPPING = {
@@ -789,7 +788,7 @@ async def auto_refresh_accounts_task():
                 logger.info("[AUTO-REFRESH] 检测到账号变化，正在自动刷新...")
 
                 # 重新加载账号配置
-                new_mgr = _reload_accounts(
+                multi_account_mgr = _reload_accounts(
                     multi_account_mgr,
                     http_client,
                     USER_AGENT,
@@ -798,64 +797,9 @@ async def auto_refresh_accounts_task():
                     SESSION_CACHE_TTL_SECONDS,
                     global_stats
                 )
-                _set_multi_account_mgr(new_mgr)
 
                 _last_known_accounts_version = db_version
                 logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(multi_account_mgr.accounts)}")
-
-            # -----------------------------------------------------------------
-            # [MAINTENANCE] 追加：自动清理过期账号 与 自动补号逻辑
-            # 注：只要执行到这里，说明没有通过环境变量强行挂载只读配置，且启用了数据库。
-            # -----------------------------------------------------------------
-            
-            # 1. 自动清理过期账号
-            expired_ids = []
-            for acc in multi_account_mgr.accounts.values():
-                if acc.config.is_expired():
-                    expired_ids.append(acc.config.account_id)
-            
-            if expired_ids:
-                logger.info(f"[MAINTENANCE] 发现过期账号 {len(expired_ids)} 个，准备自动清理...")
-                try:
-                    new_mgr, success_count, _ = _bulk_delete_accounts(
-                        expired_ids,
-                        multi_account_mgr,
-                        http_client,
-                        USER_AGENT,
-                        ACCOUNT_FAILURE_THRESHOLD,
-                        RATE_LIMIT_COOLDOWN_SECONDS,
-                        SESSION_CACHE_TTL_SECONDS,
-                        global_stats
-                    )
-                    _set_multi_account_mgr(new_mgr)
-                    logger.info(f"[MAINTENANCE] 过期账号清理完成，成功删除 {success_count} 个")
-                    # 【关键点】清理后会触发内部写库，为了防止下一轮被当成外部变更而发生重复reload，这里立即重置一下版本状态。
-                    _last_known_accounts_version = await asyncio.to_thread(storage.get_accounts_updated_at_sync)
-                except Exception as e:
-                    logger.error(f"[MAINTENANCE] 清理过期账号时出错: {e}")
-
-            # 2. 统计健康账号数量并自动补号
-            valid_active_count = 0
-            for acc_id, acc in multi_account_mgr.accounts.items():
-                c = acc.config
-                # 标准：未过期 + 未禁用 + 必需字段完整
-                if not c.is_expired() and not c.disabled:
-                    if c.secure_c_ses and c.csesidx and c.config_id:
-                        valid_active_count += 1
-            
-            if valid_active_count < MIN_HEALTHY_ACCOUNTS:
-                need_count = MIN_HEALTHY_ACCOUNTS - valid_active_count
-                if register_service:
-                    try:
-                        # 尝试启动新号注册任务（依靠内置逻辑防止并发）
-                        await register_service.start_register(count=need_count)
-                        logger.info(f"[MAINTENANCE] 健康账号数量({valid_active_count})低于{MIN_HEALTHY_ACCOUNTS}，启动补号任务: {need_count} 个")
-                    except ValueError as e:
-                        # 预期行为：如果在运行中，会抛出 ValueError
-                        logger.debug(f"[MAINTENANCE] 补号任务挂起/拦截 (已在运行或不满足条件): {e}")
-                    except Exception as e:
-                        logger.error(f"[MAINTENANCE] 尝试启动补号任务出错: {e}")
-            # -----------------------------------------------------------------
 
         except asyncio.CancelledError:
             logger.info("[AUTO-REFRESH] 自动刷新任务已停止")

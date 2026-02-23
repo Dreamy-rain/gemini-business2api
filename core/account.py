@@ -68,31 +68,6 @@ class AccountConfig:
     mail_domain: Optional[str] = None
     mail_api_key: Optional[str] = None
 
-    def to_dict(self) -> dict:
-        """将配置转换为字典，确保所有关键元数据完整导出"""
-        d = {
-            "id": self.account_id,
-            "secure_c_ses": self.secure_c_ses,
-            "host_c_oses": self.host_c_oses,
-            "csesidx": self.csesidx,
-            "config_id": self.config_id,
-            "expires_at": self.expires_at,
-            "disabled": self.disabled,
-            "mail_provider": self.mail_provider,
-            "mail_address": self.mail_address,
-        }
-        # 仅在非空时添加其他字段，保持字典整洁
-        if self.mail_password: d["mail_password"] = self.mail_password
-        if self.mail_client_id: d["mail_client_id"] = self.mail_client_id
-        if self.mail_refresh_token: d["mail_refresh_token"] = self.mail_refresh_token
-        if self.mail_tenant: d["mail_tenant"] = self.mail_tenant
-        if self.mail_base_url: d["mail_base_url"] = self.mail_base_url
-        if self.mail_jwt_token: d["mail_jwt_token"] = self.mail_jwt_token
-        if self.mail_verify_ssl is not None: d["mail_verify_ssl"] = self.mail_verify_ssl
-        if self.mail_domain: d["mail_domain"] = self.mail_domain
-        if self.mail_api_key: d["mail_api_key"] = self.mail_api_key
-        return d
-
     def get_remaining_hours(self) -> Optional[float]:
         """计算账户剩余小时数"""
         if not self.expires_at:
@@ -113,19 +88,11 @@ class AccountConfig:
             return None
 
     def is_expired(self) -> bool:
-        """检查账户是否已【物理过期】（用于主流程判定是否该回收/删除）"""
+        """检查账户是否已过期"""
         remaining = self.get_remaining_hours()
         if remaining is None:
             return False  # 未设置过期时间，默认不过期
         return remaining <= 0
-
-    def should_refresh(self, window_hours: float = 12.0) -> bool:
-        """检查账户是否进入了【刷新窗口】（用于 LoginService 判定是否该后台续期）"""
-        remaining = self.get_remaining_hours()
-        if remaining is None:
-            return False
-        # 剩余时间少于窗口期，则可以触发刷新
-        return remaining < window_hours
 
 
 def format_account_expiration(remaining_hours: Optional[float]) -> tuple:
@@ -309,18 +276,6 @@ class AccountManager:
             return False  # 仍在冷却期
 
         # 普通错误永久禁用
-        return False
-
-    def is_healthy_for_capacity(self) -> bool:
-        """检查账户在容量评估时是否算作健康账号（即使正在冷却期内也算作健康）"""
-        if self.is_available:
-            return True
-            
-        # 即使账号处于不可用状态，如果是因为 429 或认证被限流，我们仍视其为“系统内存活的配额”，不应该因此触发重注。
-        # 只有 last_error_time 导致的错误计数过多，才会被永久判死。
-        if self.last_cooldown_time > 0:
-            return True
-            
         return False
 
     def get_cooldown_info(self) -> tuple[int, str | None]:

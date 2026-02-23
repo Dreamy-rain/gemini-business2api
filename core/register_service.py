@@ -265,7 +265,11 @@ class RegisterService(BaseTaskService[RegisterTask]):
         updated = False
         for acc in accounts_data:
             if acc.get("id") == config_data["id"]:
+                # 智能合并逻辑：如果账号已存在（比如是重新登录/注册同名账号），保留原有元数据
+                old_expires_at = acc.get("expires_at")
                 acc.update(config_data)
+                if not acc.get("expires_at") and old_expires_at:
+                    acc["expires_at"] = old_expires_at
                 updated = True
                 break
         if not updated:

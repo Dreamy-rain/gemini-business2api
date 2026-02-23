@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from core.account import load_accounts_from_source
+from core.account import bulk_delete_accounts, load_accounts_from_source
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.mail_providers import create_temp_mail_client
@@ -18,6 +18,9 @@ from core.microsoft_mail_client import MicrosoftMailClient
 from core.outbound_proxy import OutboundProxyConfig
 
 logger = logging.getLogger("gemini.login")
+
+MIN_AVAILABLE_ACCOUNTS = 21
+ACCOUNT_EXPIRY_RECYCLE_HOURS = 24
 
 
 @dataclass
@@ -45,6 +48,7 @@ class LoginService(BaseTaskService[LoginTask]):
         session_cache_ttl_seconds: int,
         global_stats_provider: Callable[[], dict],
         set_multi_account_mgr: Optional[Callable[[Any], None]] = None,
+        register_service: Optional[Any] = None,
     ) -> None:
         super().__init__(
             multi_account_mgr,
@@ -59,6 +63,7 @@ class LoginService(BaseTaskService[LoginTask]):
         )
         self._is_polling = False
         self._auto_refresh_paused = True  # 运行时开关：默认暂停（不自动刷新）
+        self.register_service = register_service
 
     def _get_active_account_ids(self) -> set:
         """获取当前正在处理中（PENDING 或 RUNNING）的所有账号 ID"""
@@ -335,7 +340,7 @@ class LoginService(BaseTaskService[LoginTask]):
         expiring = []
         beijing_tz = timezone(timedelta(hours=8))
         now = datetime.now(beijing_tz)
-        
+
         # 获取当前活跃账号，在扫描阶段就排除它们
         active_ids = self._get_active_account_ids()
 
@@ -381,6 +386,134 @@ class LoginService(BaseTaskService[LoginTask]):
 
         return expiring
 
+    def _parse_beijing_datetime(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            beijing_tz = timezone(timedelta(hours=8))
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").replace(tzinfo=beijing_tz)
+        except Exception:
+            return None
+
+    def _is_session_expired(self, account: dict) -> bool:
+        expires_at = self._parse_beijing_datetime(account.get("expires_at"))
+        if not expires_at:
+            return False
+        return expires_at <= datetime.now(timezone(timedelta(hours=8)))
+
+    def _get_near_account_expiry_ids(self) -> List[str]:
+        accounts = load_accounts_from_source()
+        active_ids = self._get_active_account_ids()
+        now = datetime.now(timezone(timedelta(hours=8)))
+        near_expiry_ids: List[str] = []
+
+        for account in accounts:
+            account_id = account.get("id")
+            if not account_id or account.get("disabled") or account_id in active_ids:
+                continue
+
+            account_expires_at = self._parse_beijing_datetime(account.get("account_expires_at"))
+            if not account_expires_at:
+                continue
+
+            remaining_hours = (account_expires_at - now).total_seconds() / 3600
+            if remaining_hours < ACCOUNT_EXPIRY_RECYCLE_HOURS:
+                near_expiry_ids.append(account_id)
+
+        return near_expiry_ids
+
+    def _is_rate_limited_cooldown(self, account_id: str) -> bool:
+        account_mgr = getattr(self.multi_account_mgr, "accounts", {}).get(account_id)
+        if not account_mgr:
+            return False
+
+        try:
+            cooldown_seconds, cooldown_reason = account_mgr.get_cooldown_info()
+            return cooldown_seconds > 0 and cooldown_reason == "限流冷却"
+        except Exception:
+            return False
+
+    def _compute_available_account_count(self) -> int:
+        accounts = load_accounts_from_source()
+        available = 0
+        for account in accounts:
+            if account.get("disabled"):
+                continue
+            if self._is_session_expired(account):
+                continue
+            available += 1
+        return available
+
+    async def check_and_recycle_expired_accounts(self) -> None:
+        if os.environ.get("ACCOUNTS_CONFIG"):
+            logger.info("[LOGIN] ACCOUNTS_CONFIG set, skipping recycle")
+            return
+
+        near_expiry_ids = self._get_near_account_expiry_ids()
+        delete_candidates = [
+            account_id for account_id in near_expiry_ids
+            if not self._is_rate_limited_cooldown(account_id)
+        ]
+
+        skipped_cooldown = sorted(set(near_expiry_ids) - set(delete_candidates))
+        if skipped_cooldown:
+            logger.info(
+                "[LOGIN] skip recycle for %d cooldown accounts: %s",
+                len(skipped_cooldown),
+                ", ".join(skipped_cooldown),
+            )
+
+        if delete_candidates:
+            try:
+                global_stats = self.global_stats_provider() or {}
+                new_mgr, success_count, errors = bulk_delete_accounts(
+                    delete_candidates,
+                    self.multi_account_mgr,
+                    self.http_client,
+                    self.user_agent,
+                    self.account_failure_threshold,
+                    self.rate_limit_cooldown_seconds,
+                    self.session_cache_ttl_seconds,
+                    global_stats,
+                )
+                self.multi_account_mgr = new_mgr
+                if self.set_multi_account_mgr:
+                    self.set_multi_account_mgr(new_mgr)
+                logger.info(
+                    "[LOGIN] recycled %d/%d near-expiry accounts",
+                    success_count,
+                    len(delete_candidates),
+                )
+                if errors:
+                    logger.warning("[LOGIN] recycle account errors: %s", "; ".join(errors))
+            except Exception as exc:
+                logger.error("[LOGIN] recycle accounts failed: %s", exc)
+
+        available_count = self._compute_available_account_count()
+        deficit = max(0, MIN_AVAILABLE_ACCOUNTS - available_count)
+        if deficit <= 0:
+            logger.debug("[LOGIN] available accounts=%d, no replenish needed", available_count)
+            return
+
+        if not self.register_service:
+            logger.warning(
+                "[LOGIN] available accounts=%d (<%d) but register service unavailable",
+                available_count,
+                MIN_AVAILABLE_ACCOUNTS,
+            )
+            return
+
+        try:
+            task = await self.register_service.start_register(count=deficit)
+            logger.info(
+                "[LOGIN] available accounts=%d, replenish deficit=%d queued task=%s",
+                available_count,
+                deficit,
+                task.id,
+            )
+        except Exception as exc:
+            logger.warning("[LOGIN] replenish enqueue failed (deficit=%d): %s", deficit, exc)
+
     async def check_and_refresh(self) -> Optional[LoginTask]:
         if os.environ.get("ACCOUNTS_CONFIG"):
             logger.info("[LOGIN] ACCOUNTS_CONFIG set, skipping refresh")
@@ -415,6 +548,7 @@ class LoginService(BaseTaskService[LoginTask]):
         logger.info("[LOGIN] refresh polling started (interval: 30 minutes)")
         try:
             while self._is_polling:
+                await self.check_and_recycle_expired_accounts()
                 # 检查运行时开关
                 if not self._auto_refresh_paused:
                     await self.check_and_refresh()

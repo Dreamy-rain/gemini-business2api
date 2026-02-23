@@ -497,6 +497,7 @@ def _set_multi_account_mgr(new_mgr):
         register_service.multi_account_mgr = new_mgr
     if login_service:
         login_service.multi_account_mgr = new_mgr
+        login_service.register_service = register_service
 
 def _get_global_stats():
     return global_stats
@@ -523,6 +524,7 @@ try:
         SESSION_CACHE_TTL_SECONDS,
         _get_global_stats,
         _set_multi_account_mgr,
+        register_service,
     )
 except Exception as e:
     logger.warning("[SYSTEM] 自动注册/刷新服务不可用: %s", e)

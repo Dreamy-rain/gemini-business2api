@@ -678,11 +678,12 @@ class GeminiAutomation:
             # 使用北京时区，确保时间计算正确（Cookie expiry 是 UTC 时间戳）
             beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
-                # 将 UTC 时间戳转为北京时间，再减去12小时作为刷新窗口
+                # 记录 Cookie 真正的物理过期时间（不再在提取层减去 12h 偏移，偏移判定交由业务层 should_refresh 处理）
                 cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
-                expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+                expires_at = cookie_expire_beijing.strftime("%Y-%m-%d %H:%M:%S")
             else:
-                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
+                # 如果没抓到 expiry，保守估计设置一个 12.5 小时的有效期（Gemini Cookie 正常通常为 13h+）
+                expires_at = (datetime.now(beijing_tz) + timedelta(hours=12.5)).strftime("%Y-%m-%d %H:%M:%S")
 
             config = {
                 "id": email,

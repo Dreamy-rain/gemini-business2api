@@ -322,7 +322,13 @@ class LoginService(BaseTaskService[LoginTask]):
 
         for acc in accounts:
             if acc.get("id") == account_id:
+                # 智能合并逻辑：保留原有元数据（如 expires_at），除非新结果有更新
+                old_expires_at = acc.get("expires_at")
                 acc.update(config_data)
+                
+                # 如果新配置没抓到 expires_at 或者新抓到的比旧的还要旧（逻辑兜底），保留旧的
+                if not acc.get("expires_at") and old_expires_at:
+                    acc["expires_at"] = old_expires_at
                 break
 
         self._apply_accounts_update(accounts)
@@ -365,19 +371,23 @@ class LoginService(BaseTaskService[LoginTask]):
                 pass
             else:
                 continue
+            # 改用 AccountConfig 内置的 should_refresh 方案进行判定
+            # 这里的 window_hours 默认是 12h，与 config.basic.refresh_window_hours 对应
+            refresh_window = getattr(config.basic, 'refresh_window_hours', 12.0)
+            
+            from core.account import AccountConfig
             expires_at = account.get("expires_at")
-            if not expires_at:
-                continue
-
-            try:
-                expire_time = datetime.strptime(expires_at, "%Y-%m-%d %H:%M:%S")
-                expire_time = expire_time.replace(tzinfo=beijing_tz)
-                remaining = (expire_time - now).total_seconds() / 3600
-            except Exception:
-                continue
-
-            if remaining <= config.basic.refresh_window_hours:
-                expiring.append(account.get("id"))
+            tmp_config = AccountConfig(
+                account_id=account_id,
+                secure_c_ses=account.get("secure_c_ses", ""),
+                host_c_oses=account.get("host_c_oses"),
+                csesidx=account.get("csesidx", ""),
+                config_id=account.get("config_id", ""),
+                expires_at=expires_at
+            )
+            
+            if tmp_config.should_refresh(window_hours=refresh_window):
+                expiring.append(account_id)
 
         return expiring
 

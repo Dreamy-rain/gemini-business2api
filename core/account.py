@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 全局账户配置读写锁，防止多线程下覆盖文件
-ACCOUNTS_CONFIG_LOCK = threading.Lock()
+# 全局账户配置读写锁，允许同线程在读改写流程中的嵌套加锁。
+ACCOUNTS_CONFIG_LOCK = threading.RLock()
 
 # HTTP错误名称映射
 HTTP_ERROR_NAMES = {

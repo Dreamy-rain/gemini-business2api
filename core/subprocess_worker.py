@@ -74,7 +74,7 @@ def run_browser_in_subprocess(
         return {"success": False, "error": f"参数写入失败: {exc}"}
 
     # 后台线程：实时读取 stderr 日志
-    stderr_lines = []
+    stderr_lines: Deque[str] = deque(maxlen=300)
     log_thread = threading.Thread(
         target=_read_stderr_logs,
         args=(proc, log_callback, stderr_lines),
@@ -82,11 +82,13 @@ def run_browser_in_subprocess(
     )
     log_thread.start()
 
-    # 后台线程：实时读取 stdout，防止 Linux 下超出 64KB 管道导致死锁挂起
-    stdout_lines = []
+    # 后台线程：实时读取 stdout，防止 Linux 下超出 64KB 管道导致死锁挂起。
+    # 仅保留 RESULT 行及少量尾部上下文，避免全量累积导致内存峰值抬升。
+    stdout_result_payload: list[str] = []
+    stdout_tail: Deque[str] = deque(maxlen=50)
     out_thread = threading.Thread(
         target=_read_stdout_worker,
-        args=(proc, stdout_lines),
+        args=(proc, stdout_result_payload, stdout_tail),
         daemon=True,
     )
     out_thread.start()
@@ -127,29 +129,25 @@ def run_browser_in_subprocess(
     log_thread.join(timeout=5)
     out_thread.join(timeout=5)
 
-    # 合并 stdout 获取结果
-    try:
-        stdout_data = "".join(stdout_lines)
-    except Exception:
-        stdout_data = ""
-
     logger.info(f"[SUBPROCESS] 子进程已结束 (PID={child_pid}, exitcode={proc.returncode})")
 
-    # 解析 RESULT: 行
-    for line in stdout_data.splitlines():
-        if line.startswith("RESULT:"):
-            try:
-                result = json.loads(line[7:])
-                return result
-            except json.JSONDecodeError as exc:
-                return {"success": False, "error": f"结果解析失败: {exc}"}
+    # 解析 RESULT: 行（由 stdout 线程捕获）
+    if stdout_result_payload:
+        try:
+            result = json.loads(stdout_result_payload[-1])
+            return result
+        except json.JSONDecodeError as exc:
+            return {"success": False, "error": f"结果解析失败: {exc}"}
 
     # 没有找到 RESULT 行
     if proc.returncode != 0:
         # 收集 stderr 中非 LOG: 开头的行作为错误信息
-        error_lines = [l for l in stderr_lines if not l.startswith("LOG:")]
+        error_lines = list(stderr_lines)
+        if not error_lines and stdout_tail:
+            # 有些运行时会把错误写到 stdout，这里保留少量上下文辅助定位问题。
+            error_lines = list(stdout_tail)
         error_msg = "\n".join(error_lines[-10:]) if error_lines else f"exitcode={proc.returncode}"
-        
+
         return {"success": False, "error": f"子进程异常退出: {error_msg}"}
 
     return {"success": False, "error": "子进程未返回结果"}
@@ -158,7 +156,7 @@ def run_browser_in_subprocess(
 def _read_stderr_logs(
     proc: subprocess.Popen,
     log_callback: Callable[[str, str], None],
-    stderr_lines: list,
+    stderr_lines: Deque[str],
 ) -> None:
     """后台线程：实时读取 stderr，解析 LOG: 前缀转发给回调。"""
     try:
@@ -183,15 +181,27 @@ def _read_stderr_logs(
         pass
 
 
-def _read_stdout_worker(proc: subprocess.Popen, stdout_lines: list) -> None:
+def _read_stdout_worker(
+    proc: subprocess.Popen,
+    stdout_result_payload: list[str],
+    stdout_tail: Deque[str],
+) -> None:
     """后台线程：实时提取 stdout 缓冲，避免管道堵塞死锁。"""
     try:
         for raw_line in proc.stdout:
             try:
-                line = raw_line.decode("utf-8", errors="replace")
-                stdout_lines.append(line)
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
             except Exception:
                 continue
+
+            if line.startswith("RESULT:"):
+                payload = line[7:]
+                if stdout_result_payload:
+                    stdout_result_payload[0] = payload
+                else:
+                    stdout_result_payload.append(payload)
+            elif line:
+                stdout_tail.append(line[:1000])
     except Exception:
         pass
 

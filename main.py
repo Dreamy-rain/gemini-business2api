@@ -103,6 +103,30 @@ MODEL_TO_QUOTA_TYPE = {
     "gemini-veo": "videos"
 }
 
+
+def get_request_quota_type(model_name: Optional[str]) -> str:
+    """Map request model name to quota cooldown type."""
+    if not model_name:
+        return "text"
+
+    normalized_model = model_name.strip().lower()
+    mapped_type = MODEL_TO_QUOTA_TYPE.get(normalized_model)
+    if mapped_type:
+        return mapped_type
+
+    # Handle prefixed model ids like "models/gemini-imagen".
+    model_tail = normalized_model.split("/")[-1]
+    mapped_type = MODEL_TO_QUOTA_TYPE.get(model_tail)
+    if mapped_type:
+        return mapped_type
+
+    if "imagen" in model_tail:
+        return "images"
+    if "veo" in model_tail:
+        return "videos"
+
+    return "text"
+
 # ---------- 日志配置 ----------
 
 # 内存日志缓冲区 (保留最近 1000 条日志，重启后清空)

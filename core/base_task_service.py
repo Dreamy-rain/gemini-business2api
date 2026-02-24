@@ -1,16 +1,21 @@
 """
-基础任务服务类
-提供通用的任务管理、日志记录和账户更新功能
+Base task service primitives.
+
+Provides queueing, cancellation, logging, and account-update helpers for
+register/refresh task services.
 """
+
+from __future__ import annotations
+
 import asyncio
 import logging
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Deque, Dict, Generic, List, Optional, TypeVar
-from collections import deque
 
 from core.account import update_accounts_config
 
@@ -18,11 +23,10 @@ logger = logging.getLogger("gemini.base_task")
 
 
 class TaskCancelledError(Exception):
-    """用于在线程/回调中快速中断任务执行。"""
+    """Raised to cooperatively stop task execution."""
 
 
 class TaskStatus(str, Enum):
-    """任务状态枚举"""
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
@@ -32,7 +36,6 @@ class TaskStatus(str, Enum):
 
 @dataclass
 class BaseTask:
-    """基础任务数据类"""
     id: str
     status: TaskStatus = TaskStatus.PENDING
     progress: int = 0
@@ -47,7 +50,6 @@ class BaseTask:
     cancel_reason: Optional[str] = None
 
     def to_dict(self) -> dict:
-        """转换为字典"""
         return {
             "id": self.id,
             "status": self.status.value,
@@ -64,15 +66,10 @@ class BaseTask:
         }
 
 
-T = TypeVar('T', bound=BaseTask)
+T = TypeVar("T", bound=BaseTask)
 
 
 class BaseTaskService(Generic[T]):
-    """
-    基础任务服务类
-    提供通用的任务管理、日志记录和账户更新功能
-    """
-
     def __init__(
         self,
         multi_account_mgr,
@@ -85,20 +82,6 @@ class BaseTaskService(Generic[T]):
         set_multi_account_mgr: Optional[Callable[[Any], None]] = None,
         log_prefix: str = "TASK",
     ) -> None:
-        """
-        初始化基础任务服务
-
-        Args:
-            multi_account_mgr: 多账户管理器
-            http_client: HTTP客户端
-            user_agent: 用户代理
-            account_failure_threshold: 账户失败阈值
-            rate_limit_cooldown_seconds: 速率限制冷却秒数
-            session_cache_ttl_seconds: 会话缓存TTL秒数
-            global_stats_provider: 全局统计提供者
-            set_multi_account_mgr: 设置多账户管理器的回调
-            log_prefix: 日志前缀
-        """
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._tasks: Dict[str, T] = {}
         self._current_task_id: Optional[str] = None
@@ -119,20 +102,19 @@ class BaseTaskService(Generic[T]):
         self.session_cache_ttl_seconds = session_cache_ttl_seconds
         self.global_stats_provider = global_stats_provider
         self.set_multi_account_mgr = set_multi_account_mgr
-        
-        self._max_completed_tasks = 10  # 最大保留10个已完成的任务历史，减小内存占用
+
+        self._max_completed_tasks = 10
+        self._max_logs_per_task = 120
+        self._max_results_per_task = 200
 
     def get_task(self, task_id: str) -> Optional[T]:
-        """获取指定任务"""
         return self._tasks.get(task_id)
 
     def get_current_task(self) -> Optional[T]:
-        """获取当前任务"""
         if self._current_task_id:
             current = self._tasks.get(self._current_task_id)
             if current:
                 return current
-        # 若当前无运行任务，返回队列中最早的 pending 任务（用于前端显示“等待中”）
         for task_id in list(self._pending_task_ids):
             task = self._tasks.get(task_id)
             if task and task.status == TaskStatus.PENDING:
@@ -140,18 +122,15 @@ class BaseTaskService(Generic[T]):
         return None
 
     def get_pending_task_ids(self) -> List[str]:
-        """返回待执行任务ID列表（调试/展示用）。"""
         return list(self._pending_task_ids)
 
     async def cancel_task(self, task_id: str, reason: str = "cancelled") -> Optional[T]:
-        """请求取消任务（支持 pending/running）。"""
         async with self._lock:
             task = self._tasks.get(task_id)
             if not task:
                 return None
 
             if task.status == TaskStatus.PENDING:
-                # 从队列移除并直接标记取消
                 try:
                     self._pending_task_ids.remove(task_id)
                 except ValueError:
@@ -167,9 +146,7 @@ class BaseTaskService(Generic[T]):
                 task.cancel_requested = True
                 task.cancel_reason = reason
                 self._append_log(task, "warning", f"cancel requested: {reason}")
-                # 尝试立即触发取消回调（例如关闭浏览器）
                 self._fire_cancel_hooks(task_id)
-                # 尝试取消当前 await（例如 run_in_executor 等待点）
                 if self._current_asyncio_task and not self._current_asyncio_task.done():
                     self._current_asyncio_task.cancel()
                 return task
@@ -177,17 +154,14 @@ class BaseTaskService(Generic[T]):
             return task
 
     async def _enqueue_task(self, task: T) -> None:
-        """将任务加入队列并启动 worker。"""
         self._pending_task_ids.append(task.id)
         if not self._worker_task or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._run_worker())
 
     async def _run_worker(self) -> None:
-        """串行执行队列任务（单线程 executor + 单 worker）。"""
         while True:
             async with self._lock:
                 next_task: Optional[T] = None
-                # 清理不存在/非pending的ID
                 while self._pending_task_ids:
                     task_id = self._pending_task_ids[0]
                     task = self._tasks.get(task_id)
@@ -209,7 +183,6 @@ class BaseTaskService(Generic[T]):
                     self._current_task_id = None
 
     async def _run_one_task(self, task: T) -> None:
-        """执行单个任务，处理取消/异常/收尾。"""
         if task.status != TaskStatus.PENDING:
             return
         if task.cancel_requested:
@@ -224,7 +197,6 @@ class BaseTaskService(Generic[T]):
             self._current_asyncio_task = asyncio.create_task(coro)
             await self._current_asyncio_task
         except asyncio.CancelledError:
-            # 外部请求取消（或关闭时）会触发
             task.cancel_requested = True
             task.status = TaskStatus.CANCELLED
             task.finished_at = time.time()
@@ -242,18 +214,15 @@ class BaseTaskService(Generic[T]):
         finally:
             self._current_asyncio_task = None
             self._clear_cancel_hooks(task.id)
-            # 任务执行结束，清理过旧的历史记录
+            self._compact_task_payload(task)
             self._cleanup_finished_tasks()
-            # 强制触发系统级物理内存回收
             asyncio.create_task(self._force_memory_release())
 
     def _add_cancel_hook(self, task_id: str, hook: Callable[[], None]) -> None:
-        """注册取消回调（线程安全）。"""
         with self._cancel_hooks_lock:
             self._cancel_hooks.setdefault(task_id, []).append(hook)
 
     def _fire_cancel_hooks(self, task_id: str) -> None:
-        """触发取消回调（尽力而为）。"""
         with self._cancel_hooks_lock:
             hooks = list(self._cancel_hooks.get(task_id) or [])
         for hook in hooks:
@@ -266,20 +235,10 @@ class BaseTaskService(Generic[T]):
         with self._cancel_hooks_lock:
             self._cancel_hooks.pop(task_id, None)
 
-    # --- 子类需要实现 ---
     def _execute_task(self, task: T) -> Awaitable[None]:
-        """子类实现：执行任务主体（需自行更新 progress/success/fail/finished_at 等）。"""
         raise NotImplementedError
 
     def _append_log(self, task: T, level: str, message: str) -> None:
-        """
-        添加日志到任务
-
-        Args:
-            task: 任务对象
-            level: 日志级别 (info, warning, error)
-            message: 日志消息
-        """
         entry = {
             "time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
             "level": level,
@@ -287,8 +246,8 @@ class BaseTaskService(Generic[T]):
         }
         with self._log_lock:
             task.logs.append(entry)
-            if len(task.logs) > 200:
-                task.logs = task.logs[-200:]
+            if len(task.logs) > self._max_logs_per_task:
+                task.logs = task.logs[-self._max_logs_per_task:]
 
         log_message = f"[{self._log_prefix}] {message}"
         if level == "warning":
@@ -298,8 +257,6 @@ class BaseTaskService(Generic[T]):
         else:
             logger.info(log_message)
 
-        # 协作式取消：一旦请求取消，阻断后续通过 log_callback 的执行路径
-        # 允许“取消请求/取消完成”相关日志正常写入
         if task.cancel_requested:
             safe_messages = (
                 "cancel requested:",
@@ -311,13 +268,45 @@ class BaseTaskService(Generic[T]):
             if not any(message.startswith(x) for x in safe_messages):
                 raise TaskCancelledError(task.cancel_reason or "cancelled")
 
-    def _apply_accounts_update(self, accounts_data: list) -> None:
-        """
-        应用账户更新
+    def _compact_result_for_history(self, result: Any) -> Dict[str, Any]:
+        """Keep only lightweight fields for task history to avoid memory growth."""
+        if not isinstance(result, dict):
+            return {"success": False, "error": str(result)[:300]}
 
-        Args:
-            accounts_data: 账户数据列表
-        """
+        compact: Dict[str, Any] = {}
+        for key in ("success", "email", "account_id", "status", "error", "reason"):
+            if key in result:
+                compact[key] = result[key]
+
+        if "config" in result and isinstance(result["config"], dict):
+            cfg = result["config"]
+            if "email" not in compact:
+                compact["email"] = cfg.get("id") or result.get("email")
+            expires_at = cfg.get("expires_at")
+            if expires_at:
+                compact["expires_at"] = expires_at
+
+        if "error" in compact and isinstance(compact["error"], str):
+            compact["error"] = compact["error"][:300]
+
+        if not compact:
+            compact = {"success": bool(result.get("success")), "detail": str(result)[:300]}
+
+        return compact
+
+    def _append_result(self, task: T, result: Any) -> None:
+        """Append compact result and cap history length."""
+        task.results.append(self._compact_result_for_history(result))
+        if len(task.results) > self._max_results_per_task:
+            task.results = task.results[-self._max_results_per_task:]
+
+    def _compact_task_payload(self, task: T) -> None:
+        if len(task.logs) > self._max_logs_per_task:
+            task.logs = task.logs[-self._max_logs_per_task:]
+        if len(task.results) > self._max_results_per_task:
+            task.results = task.results[-self._max_results_per_task:]
+
+    def _apply_accounts_update(self, accounts_data: list) -> None:
         global_stats = self.global_stats_provider() or {}
         new_mgr = update_accounts_config(
             accounts_data,
@@ -334,34 +323,31 @@ class BaseTaskService(Generic[T]):
             self.set_multi_account_mgr(new_mgr)
 
     def _cleanup_finished_tasks(self) -> None:
-        """清理已完成的任务历史（保留最近的 10 个）"""
         finished_tasks = [
-            t_id for t_id, t in self._tasks.items() 
+            t_id for t_id, t in self._tasks.items()
             if t.status in [TaskStatus.SUCCESS, TaskStatus.FAILED, TaskStatus.CANCELLED]
         ]
-        
+
         if len(finished_tasks) > self._max_completed_tasks:
-            # 按完成时间排序
             finished_tasks.sort(key=lambda tid: self._tasks[tid].finished_at or 0)
-            # 移除最旧的
             to_remove = len(finished_tasks) - self._max_completed_tasks
             for tid in finished_tasks[:to_remove]:
                 self._tasks.pop(tid, None)
                 self._clear_cancel_hooks(tid)
-            logger.info("[%s] 已清理 %d 个过期任务历史 (当前存余: %d)", 
-                        self._log_prefix, to_remove, len(self._tasks))
+            logger.info(
+                "[%s] cleaned %d expired task records (remaining=%d)",
+                self._log_prefix,
+                to_remove,
+                len(self._tasks),
+            )
 
     async def _force_memory_release(self) -> None:
-        """任务结束后触发常规垃圾回收，清理多余的对象占用"""
-        await asyncio.sleep(2)  # 等待其他异步收尾和子进程完全退出
+        """Best-effort GC after task completion."""
+        await asyncio.sleep(2)
         try:
             import gc
-            
-            # 第一重：强制收集所有分代的 Python 孤立对象
+
             gc.collect()
-            
-            # 记录清理情况
-            logger.info("[%s] 任务历史缩减及常规 GC 垃圾回收已完成", self._log_prefix)
-                    
+            logger.info("[%s] task history compacted and GC completed", self._log_prefix)
         except Exception as e:
-            logger.debug("[%s] 常规内存回收异常: %s", self._log_prefix, e)
+            logger.debug("[%s] memory cleanup error: %s", self._log_prefix, e)

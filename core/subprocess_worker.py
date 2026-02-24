@@ -13,7 +13,8 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Callable, Optional
+from collections import deque
+from typing import Callable, Deque, Optional
 
 logger = logging.getLogger("gemini.subprocess_worker")
 
@@ -73,7 +74,7 @@ def run_browser_in_subprocess(
         return {"success": False, "error": f"参数写入失败: {exc}"}
 
     # 后台线程：实时读取 stderr 日志
-    stderr_lines = []
+    stderr_lines: Deque[str] = deque(maxlen=300)
     log_thread = threading.Thread(
         target=_read_stderr_logs,
         args=(proc, log_callback, stderr_lines),
@@ -136,8 +137,7 @@ def run_browser_in_subprocess(
     # 没有找到 RESULT 行
     if proc.returncode != 0:
         # 收集 stderr 中非 LOG: 开头的行作为错误信息
-        error_lines = [l for l in stderr_lines if not l.startswith("LOG:")]
-        error_msg = "\n".join(error_lines[-10:]) if error_lines else f"exitcode={proc.returncode}"
+        error_msg = "\n".join(list(stderr_lines)[-10:]) if stderr_lines else f"exitcode={proc.returncode}"
         
         return {"success": False, "error": f"子进程异常退出: {error_msg}"}
 
@@ -147,7 +147,7 @@ def run_browser_in_subprocess(
 def _read_stderr_logs(
     proc: subprocess.Popen,
     log_callback: Callable[[str, str], None],
-    stderr_lines: list,
+    stderr_lines: Deque[str],
 ) -> None:
     """后台线程：实时读取 stderr，解析 LOG: 前缀转发给回调。"""
     try:
@@ -156,8 +156,6 @@ def _read_stderr_logs(
                 line = raw_line.decode("utf-8", errors="replace").rstrip("\n\r")
             except Exception:
                 continue
-
-            stderr_lines.append(line)
 
             if line.startswith("LOG:"):
                 # 格式: LOG:level:message
@@ -168,6 +166,8 @@ def _read_stderr_logs(
                         log_callback(level, message)
                     except Exception:
                         pass
+            else:
+                stderr_lines.append(line)
     except Exception:
         pass
 

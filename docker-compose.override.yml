@@ -1,0 +1,25 @@
+services:
+  gemini-api:
+    # image: cooooookk/gemini-business2api:latest
+    image: ghcr.io/babeloo/gemini-business2api:latest
+    container_name: gemini-business2api
+    ports:
+      - "${PORT:-7860}:${PORT:-7860}"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-7860}/admin/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # 日志限制
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

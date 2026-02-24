@@ -161,6 +161,7 @@ class BaseTaskService(Generic[T]):
                 task.status = TaskStatus.CANCELLED
                 task.finished_at = time.time()
                 self._append_log(task, "warning", f"task cancelled while pending: {reason}")
+                self._cleanup_finished_tasks()
                 return task
 
             if task.status == TaskStatus.RUNNING:
@@ -319,6 +320,7 @@ class BaseTaskService(Generic[T]):
             accounts_data: 账户数据列表
         """
         global_stats = self.global_stats_provider() or {}
+        old_mgr = self.multi_account_mgr
         new_mgr = update_accounts_config(
             accounts_data,
             self.multi_account_mgr,
@@ -330,6 +332,13 @@ class BaseTaskService(Generic[T]):
             global_stats,
         )
         self.multi_account_mgr = new_mgr
+        
+        # 关闭旧管理器的后台任务
+        if old_mgr:
+            asyncio.create_task(old_mgr.aclose())
+        # 为新配置启动后台清理任务
+        asyncio.create_task(new_mgr.start_background_cleanup())
+
         if self.set_multi_account_mgr:
             self.set_multi_account_mgr(new_mgr)
 

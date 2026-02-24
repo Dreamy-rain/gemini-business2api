@@ -74,13 +74,22 @@ def run_browser_in_subprocess(
         return {"success": False, "error": f"参数写入失败: {exc}"}
 
     # 后台线程：实时读取 stderr 日志
-    stderr_lines: Deque[str] = deque(maxlen=300)
+    stderr_lines = []
     log_thread = threading.Thread(
         target=_read_stderr_logs,
         args=(proc, log_callback, stderr_lines),
         daemon=True,
     )
     log_thread.start()
+
+    # 后台线程：实时读取 stdout，防止 Linux 下超出 64KB 管道导致死锁挂起
+    stdout_lines = []
+    out_thread = threading.Thread(
+        target=_read_stdout_worker,
+        args=(proc, stdout_lines),
+        daemon=True,
+    )
+    out_thread.start()
 
     # 等待子进程完成（带超时和取消检查）
     start_time = time.monotonic()
@@ -114,12 +123,13 @@ def run_browser_in_subprocess(
         _kill_proc(proc)
         return {"success": False, "error": f"子进程管理异常: {exc}"}
 
-    # 等待日志线程结束
+    # 等待各个 IO 线程结束
     log_thread.join(timeout=5)
+    out_thread.join(timeout=5)
 
-    # 读取 stdout 获取结果
+    # 合并 stdout 获取结果
     try:
-        stdout_data = proc.stdout.read().decode("utf-8", errors="replace")
+        stdout_data = "".join(stdout_lines)
     except Exception:
         stdout_data = ""
 
@@ -137,7 +147,8 @@ def run_browser_in_subprocess(
     # 没有找到 RESULT 行
     if proc.returncode != 0:
         # 收集 stderr 中非 LOG: 开头的行作为错误信息
-        error_msg = "\n".join(list(stderr_lines)[-10:]) if stderr_lines else f"exitcode={proc.returncode}"
+        error_lines = [l for l in stderr_lines if not l.startswith("LOG:")]
+        error_msg = "\n".join(error_lines[-10:]) if error_lines else f"exitcode={proc.returncode}"
         
         return {"success": False, "error": f"子进程异常退出: {error_msg}"}
 
@@ -147,7 +158,7 @@ def run_browser_in_subprocess(
 def _read_stderr_logs(
     proc: subprocess.Popen,
     log_callback: Callable[[str, str], None],
-    stderr_lines: Deque[str],
+    stderr_lines: list,
 ) -> None:
     """后台线程：实时读取 stderr，解析 LOG: 前缀转发给回调。"""
     try:
@@ -168,6 +179,19 @@ def _read_stderr_logs(
                         pass
             else:
                 stderr_lines.append(line)
+    except Exception:
+        pass
+
+
+def _read_stdout_worker(proc: subprocess.Popen, stdout_lines: list) -> None:
+    """后台线程：实时提取 stdout 缓冲，避免管道堵塞死锁。"""
+    try:
+        for raw_line in proc.stdout:
+            try:
+                line = raw_line.decode("utf-8", errors="replace")
+                stdout_lines.append(line)
+            except Exception:
+                continue
     except Exception:
         pass
 

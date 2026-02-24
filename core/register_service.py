@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, List, Optional
 
-from core.account import load_accounts_from_source
+from core.account import load_accounts_from_source, ACCOUNTS_CONFIG_LOCK
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.mail_providers import create_temp_mail_client
@@ -133,29 +133,30 @@ class RegisterService(BaseTaskService[RegisterTask]):
 
         if pending_account_configs:
             try:
-                accounts_data = load_accounts_from_source()
-                account_by_id = {
-                    acc.get("id"): acc
-                    for acc in accounts_data
-                    if isinstance(acc, dict) and acc.get("id")
-                }
+                with ACCOUNTS_CONFIG_LOCK:
+                    accounts_data = load_accounts_from_source()
+                    account_by_id = {
+                        acc.get("id"): acc
+                        for acc in accounts_data
+                        if isinstance(acc, dict) and acc.get("id")
+                    }
 
-                updated_count = 0
-                for cfg in pending_account_configs:
-                    cfg_id = cfg.get("id")
-                    if not cfg_id:
-                        continue
-                    existing = account_by_id.get(cfg_id)
-                    if existing is None:
-                        accounts_data.append(cfg)
-                        account_by_id[cfg_id] = cfg
-                    else:
-                        existing.update(cfg)
-                    updated_count += 1
+                    updated_count = 0
+                    for cfg in pending_account_configs:
+                        cfg_id = cfg.get("id")
+                        if not cfg_id:
+                            continue
+                        existing = account_by_id.get(cfg_id)
+                        if existing is None:
+                            accounts_data.append(cfg)
+                            account_by_id[cfg_id] = cfg
+                        else:
+                            existing.update(cfg)
+                        updated_count += 1
 
-                if updated_count > 0:
-                    self._apply_accounts_update(accounts_data)
-                    self._append_log(task, "info", f"saved register configs: {updated_count}")
+                    if updated_count > 0:
+                        self._apply_accounts_update(accounts_data)
+                        self._append_log(task, "info", f"saved register configs: {updated_count}")
             except Exception as exc:
                 task.error = f"save register config failed: {str(exc)[:200]}"
                 task.status = TaskStatus.FAILED

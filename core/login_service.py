@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from core.account import bulk_delete_accounts, load_accounts_from_source
+from core.account import bulk_delete_accounts, load_accounts_from_source, ACCOUNTS_CONFIG_LOCK
 from core.base_task_service import BaseTask, BaseTaskService, TaskCancelledError, TaskStatus
 from core.config import config
 from core.mail_providers import create_temp_mail_client
@@ -144,16 +144,17 @@ class LoginService(BaseTaskService[LoginTask]):
 
         if pending_configs:
             try:
-                accounts_data = load_accounts_from_source()
-                updated_count = 0
-                for acc in accounts_data:
-                    acc_id = acc.get("id")
-                    if acc_id in pending_configs:
-                        acc.update(pending_configs[acc_id])
-                        updated_count += 1
-                if updated_count > 0:
-                    self._apply_accounts_update(accounts_data)
-                    self._append_log(task, "info", f"saved refresh configs: {updated_count}")
+                with ACCOUNTS_CONFIG_LOCK:
+                    accounts_data = load_accounts_from_source()
+                    updated_count = 0
+                    for acc in accounts_data:
+                        acc_id = acc.get("id")
+                        if acc_id in pending_configs:
+                            acc.update(pending_configs[acc_id])
+                            updated_count += 1
+                    if updated_count > 0:
+                        self._apply_accounts_update(accounts_data)
+                        self._append_log(task, "info", f"saved refresh configs: {updated_count}")
             except Exception as exc:
                 task.error = f"save refresh config failed: {str(exc)[:200]}"
                 task.status = TaskStatus.FAILED

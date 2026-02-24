@@ -388,6 +388,8 @@ class MultiAccountManager:
         self._session_locks: Dict[str, asyncio.Lock] = {}
         self._session_locks_lock = asyncio.Lock()  # 保护锁字典的锁
         self._session_locks_max_size = 2000  # 最大锁数量
+        self._is_closed = False  # 标记实例是否已关闭，用于停止后台任务
+
 
     def _clean_expired_cache(self):
         """清理过期的缓存条目"""
@@ -417,8 +419,14 @@ class MultiAccountManager:
     async def start_background_cleanup(self):
         """启动后台缓存清理任务（每5分钟执行一次）"""
         try:
-            while True:
-                await asyncio.sleep(300)  # 5分钟
+            while not self._is_closed:
+                # 把 sleep 切分为小段，以便快速响应 close
+                for _ in range(60):
+                    if self._is_closed:
+                        break
+                    await asyncio.sleep(5)
+                if self._is_closed:
+                    break
                 async with self._cache_lock:
                     self._clean_expired_cache()
                     self._ensure_cache_size()
@@ -426,6 +434,16 @@ class MultiAccountManager:
             logger.info("[CACHE] 后台清理任务已停止")
         except Exception as e:
             logger.error(f"[CACHE] 后台清理任务异常: {e}")
+
+    async def aclose(self):
+        """释放资源，停止后台清理任务"""
+        self._is_closed = True
+        logger.info("[CACHE] 正在关闭 MultiAccountManager 并清理资源和锁...")
+        async with self._cache_lock:
+            self.global_session_cache.clear()
+        async with self._session_locks_lock:
+            self._session_locks.clear()
+        self.accounts.clear()
 
     async def set_session_cache(self, conv_key: str, account_id: str, session_id: str):
         """线程安全地设置会话缓存"""

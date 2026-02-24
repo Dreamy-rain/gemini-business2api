@@ -1203,7 +1203,10 @@ async def admin_stats(request: Request):
     for account_manager in multi_account_mgr.accounts.values():
         config = account_manager.config
         cooldown_seconds, cooldown_reason = account_manager.get_cooldown_info()
-        is_rate_limited = cooldown_seconds > 0 and cooldown_reason and "429" in cooldown_reason
+        quota_status = account_manager.get_quota_status()
+        is_global_rate_limited = cooldown_seconds > 0 and cooldown_reason == "限流冷却"
+        is_quota_rate_limited = quota_status.get("limited_count", 0) > 0
+        is_rate_limited = is_global_rate_limited or is_quota_rate_limited
         is_expired = config.is_expired()
         is_auto_disabled = (not account_manager.is_available) and (not config.disabled)
         is_failed = is_auto_disabled or is_expired or cooldown_reason == "错误禁用"
@@ -1542,7 +1545,8 @@ async def admin_enable_account(request: Request, account_id: str):
             account_mgr = multi_account_mgr.accounts[account_id]
             account_mgr.is_available = True
             account_mgr.error_count = 0
-            account_mgr.last_429_time = 0.0
+            account_mgr.last_cooldown_time = 0.0
+            account_mgr.quota_cooldowns.clear()
             logger.info(f"[CONFIG] 账户 {account_id} 错误状态已重置")
 
         return {"status": "success", "message": f"账户 {account_id} 已启用", "account_count": len(multi_account_mgr.accounts)}
@@ -1564,7 +1568,8 @@ async def admin_bulk_enable_accounts(request: Request, account_ids: list[str]):
             account_mgr = multi_account_mgr.accounts[account_id]
             account_mgr.is_available = True
             account_mgr.error_count = 0
-            account_mgr.last_429_time = 0.0
+            account_mgr.last_cooldown_time = 0.0
+            account_mgr.quota_cooldowns.clear()
     return {"status": "success", "success_count": success_count, "errors": errors}
 
 @app.put("/admin/accounts/bulk-disable")
@@ -2018,6 +2023,7 @@ async def chat_impl(
 
     # 保存模型信息到 request.state（用于 Uptime 追踪）
     request.state.model = req.model
+    request_quota_type = get_request_quota_type(req.model)
 
     # 3. 提取 ChatID（多源优先级检测：请求头 → 请求体 → 消息指纹）
     # 构建请求头字典（小写化）
@@ -2152,14 +2158,14 @@ async def chat_impl(
         if cached_session:
             # 使用已绑定的账户和缓存的 Session
             account_id = cached_session["account_id"]
-            account_manager = await multi_account_mgr.get_account(account_id, request_id)
+            account_manager = await multi_account_mgr.get_account(account_id, request_id, request_quota_type)
             google_session = cached_session["session_id"]
             is_new_conversation = False
             logger.info(f"[CHAT] [{account_id}] [req_{request_id}] 复用Session(内存缓存): {google_session[-12:]}")
         elif bound_account_id:
             # 有持久化绑定但无缓存Session
             try:
-                account_manager = await multi_account_mgr.get_account(bound_account_id, request_id)
+                account_manager = await multi_account_mgr.get_account(bound_account_id, request_id, request_quota_type)
                 
                 # 尝试复用持久化的 Session ID
                 if bound_session_id:
@@ -2185,6 +2191,17 @@ async def chat_impl(
                 
                 uptime_tracker.record_request("account_pool", True)
             except Exception as e:
+                if bound_account_id in multi_account_mgr.accounts:
+                    bound_account_manager = multi_account_mgr.accounts[bound_account_id]
+                    if isinstance(e, HTTPException):
+                        bound_account_manager.handle_http_error(
+                            e.status_code,
+                            str(e.detail) if hasattr(e, "detail") else "",
+                            request_id,
+                            request_quota_type
+                        )
+                    else:
+                        bound_account_manager.handle_non_http_error("创建会话", request_id)
                 # 绑定账号不可用，解绑并漂移到新账号
                 logger.warning(f"[CHAT] [req_{request_id}] 绑定账号 {bound_account_id} 不可用/Session无效，自动解绑: {e}")
                 await binding_mgr.remove_binding(chat_id_for_binding)
@@ -2197,9 +2214,11 @@ async def chat_impl(
             last_error = None
 
             for attempt in range(max_account_tries):
+                attempt_account = None
                 try:
-                    account_manager = await multi_account_mgr.get_account(None, request_id)
-                    google_session = await create_google_session(account_manager, http_client, USER_AGENT, request_id)
+                    attempt_account = await multi_account_mgr.get_account(None, request_id, request_quota_type)
+                    account_manager = attempt_account
+                    google_session = await create_google_session(attempt_account, http_client, USER_AGENT, request_id)
                     # 线程安全地绑定账户到此对话
                     await multi_account_mgr.set_session_cache(
                         session_cache_key,
@@ -2217,10 +2236,20 @@ async def chat_impl(
                 except Exception as e:
                     last_error = e
                     error_type = type(e).__name__
-                    account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
+                    account_id = attempt_account.config.account_id if attempt_account else "unknown"
                     logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
                     status_code = e.status_code if isinstance(e, HTTPException) else None
                     uptime_tracker.record_request("account_pool", False, status_code=status_code)
+                    if attempt_account:
+                        if isinstance(e, HTTPException):
+                            attempt_account.handle_http_error(
+                                e.status_code,
+                                str(e.detail) if hasattr(e, "detail") else "",
+                                request_id,
+                                request_quota_type
+                            )
+                        else:
+                            attempt_account.handle_non_http_error("创建会话", request_id)
                     if attempt == max_account_tries - 1:
                         logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
                         status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
@@ -2331,14 +2360,17 @@ async def chat_impl(
                     if (acc.should_retry() and
                         not acc.config.is_expired() and
                         not acc.config.disabled and
+                        acc.is_quota_available(request_quota_type) and
                         acc.config.account_id not in failed_accounts)
                 )
 
                 if available_count == 0:
                     logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用，快速失败")
                     await finalize_result("error", 503, "All accounts unavailable")
-                    if req.stream: yield f"data: {json.dumps({'error': {'message': 'All accounts unavailable'}})}\n\n"
-                    return
+                    if req.stream:
+                        yield f"data: {json.dumps({'error': {'message': 'All accounts unavailable'}})}\n\n"
+                        return
+                    raise HTTPException(status_code=503, detail="All accounts unavailable")
 
                 # 尝试切换账户
                 try:
@@ -2346,7 +2378,7 @@ async def chat_impl(
                     new_account = None
 
                     for _ in range(max_switch_tries):
-                        candidate = await multi_account_mgr.get_account(None, request_id)
+                        candidate = await multi_account_mgr.get_account(None, request_id, request_quota_type)
                         if candidate.config.account_id not in failed_accounts:
                             new_account = candidate
                             break
@@ -2377,11 +2409,23 @@ async def chat_impl(
                     
                     status_code = create_err.status_code if isinstance(create_err, HTTPException) else None
                     uptime_tracker.record_request("account_pool", False, status_code=status_code)
-                    
+                    if new_account:
+                        if isinstance(create_err, HTTPException):
+                            new_account.handle_http_error(
+                                create_err.status_code,
+                                str(create_err.detail) if hasattr(create_err, "detail") else "",
+                                request_id,
+                                request_quota_type
+                            )
+                        else:
+                            new_account.handle_non_http_error("创建会话", request_id)
+
                     status = classify_error_status(status_code, create_err)
                     await finalize_result(status, status_code, f"Account Failover Failed: {str(create_err)[:200]}")
-                    if req.stream: yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
-                    return
+                    if req.stream:
+                        yield f"data: {json.dumps({'error': {'message': 'Account Failover Failed'}})}\n\n"
+                        return
+                    raise HTTPException(status_code=status_code or 503, detail=f"Account Failover Failed: {str(create_err)[:200]}")
 
             # ------------------------------------------------------------------
             # 2. 执行请求逻辑
@@ -2458,9 +2502,15 @@ async def chat_impl(
                 uptime_tracker.record_request("account_pool", False, status_code=status_code)
 
                 # 错误处理回调
-                quota_type = get_request_quota_type(req.model)
                 if is_http_exception:
-                    account_manager.handle_http_error(status_code, str(e.detail) if hasattr(e, 'detail') else "", request_id, quota_type)
+                    if not getattr(e, "_account_http_error_handled", False):
+                        account_manager.handle_http_error(
+                            status_code,
+                            str(e.detail) if hasattr(e, "detail") else "",
+                            request_id,
+                            request_quota_type
+                        )
+                        setattr(e, "_account_http_error_handled", True)
                 else:
                     account_manager.handle_non_http_error("聊天请求", request_id)
 
@@ -2470,9 +2520,15 @@ async def chat_impl(
                 if retry_count > max_retries:
                     logger.error(f"[CHAT] [req_{request_id}] 已达到最大重试次数 ({max_retries})，请求失败")
                     status = classify_error_status(status_code, e)
-                    await finalize_result(status, status_code, error_detail)
-                    if req.stream: yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_retries}) exceeded: {e}'}})}\n\n"
-                    return
+                    final_status_code = status_code or (504 if status == "timeout" else 500)
+                    await finalize_result(status, final_status_code, error_detail)
+                    if req.stream:
+                        yield f"data: {json.dumps({'error': {'message': f'Max retries ({max_retries}) exceeded: {e}'}})}\n\n"
+                        return
+                    raise HTTPException(
+                        status_code=final_status_code,
+                        detail=f"Max retries ({max_retries}) exceeded: {error_detail}"
+                    )
 
     if req.stream:
         return StreamingResponse(response_wrapper(), media_type="text/event-stream")
@@ -2635,8 +2691,6 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
                         f"上游返回错误: {json.dumps(error_info, ensure_ascii=False)}"
                     )
                     if error_code == 429 or "RESOURCE_EXHAUSTED" in error_status:
-                        quota_type = get_request_quota_type(model_name)
-                        account_manager.handle_http_error(429, error_message[:200], request_id, quota_type)
                         raise HTTPException(status_code=429, detail=f"Upstream quota exhausted: {error_message[:200]}")
 
                 # 提取文本内容

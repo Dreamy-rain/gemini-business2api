@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# 全局账户配置读写锁，防止多线程下覆盖文件
+ACCOUNTS_CONFIG_LOCK = threading.Lock()
+
 # HTTP错误名称映射
 HTTP_ERROR_NAMES = {
     400: "参数错误",
@@ -372,6 +375,23 @@ class AccountManager:
             "is_expired": False
         }
 
+    def is_quota_available(self, quota_type: Optional[str] = None) -> bool:
+        """Check whether a quota type is currently available for this account."""
+        if not quota_type or quota_type not in QUOTA_TYPES:
+            return True
+
+        cooldown_time = self.quota_cooldowns.get(quota_type)
+        if cooldown_time is None:
+            return True
+
+        elapsed = time.time() - cooldown_time
+        if elapsed >= self.rate_limit_cooldown_seconds:
+            # Lazy cleanup for expired quota cooldown entries.
+            del self.quota_cooldowns[quota_type]
+            return True
+
+        return False
+
 
 class MultiAccountManager:
     """多账户协调器"""
@@ -488,7 +508,7 @@ class MultiAccountManager:
         self.account_list.append(config.account_id)
         logger.info(f"[MULTI] [ACCOUNT] 添加账户: {config.account_id}")
 
-    async def get_account(self, account_id: Optional[str] = None, request_id: str = "") -> AccountManager:
+    async def get_account(self, account_id: Optional[str] = None, request_id: str = "", request_quota_type: Optional[str] = None) -> AccountManager:
         """获取账户 - Round-Robin轮询"""
         req_tag = f"[req_{request_id}] " if request_id else ""
 
@@ -499,6 +519,8 @@ class MultiAccountManager:
             account = self.accounts[account_id]
             if not account.should_retry():
                 raise HTTPException(503, f"Account {account_id} temporarily unavailable")
+            if request_quota_type and not account.is_quota_available(request_quota_type):
+                raise HTTPException(503, f"Account {account_id} quota {request_quota_type} temporarily unavailable")
             return account
 
         # 筛选可用账户
@@ -506,7 +528,8 @@ class MultiAccountManager:
             acc for acc in self.accounts.values()
             if (acc.should_retry() and
                 not acc.config.is_expired() and
-                not acc.config.disabled)
+                not acc.config.disabled and
+                acc.is_quota_available(request_quota_type))
         ]
 
         if not available_accounts:
@@ -531,22 +554,26 @@ class MultiAccountManager:
 # ---------- 配置文件管理 ----------
 
 def _save_to_file(accounts_data: list):
-    """保存账户配置到本地文件"""
-    os.makedirs(os.path.dirname(ACCOUNTS_FILE) or ".", exist_ok=True)
-    with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(accounts_data, f, ensure_ascii=False, indent=2)
-    logger.info(f"[CONFIG] 配置已保存到 {ACCOUNTS_FILE}")
+    """保存账户配置到本地文件（已加锁保护）"""
+    with ACCOUNTS_CONFIG_LOCK:
+        os.makedirs(os.path.dirname(ACCOUNTS_FILE) or ".", exist_ok=True)
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(accounts_data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())  # 强制刷盘，防止高频并发读出旧数据
+        logger.info(f"[CONFIG] 配置已保存到 {ACCOUNTS_FILE}")
 
 
 def _load_from_file() -> list:
-    """从本地文件加载账户配置"""
-    if os.path.exists(ACCOUNTS_FILE):
-        try:
-            with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"[CONFIG] 文件加载失败: {str(e)}")
-    return None
+    """从本地文件加载账户配置（已加锁保护）"""
+    with ACCOUNTS_CONFIG_LOCK:
+        if os.path.exists(ACCOUNTS_FILE):
+            try:
+                with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"[CONFIG] 文件加载失败: {str(e)}")
+        return None
 
 
 def save_accounts_to_file(accounts_data: list):

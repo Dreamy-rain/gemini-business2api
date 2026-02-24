@@ -2172,10 +2172,8 @@ async def chat_impl(
                 except Exception as e:
                     last_error = e
                     error_type = type(e).__name__
-                    # 安全获取账户ID
                     account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
                     logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
-                    # 记录账号池状态（单个账户失败）
                     status_code = e.status_code if isinstance(e, HTTPException) else None
                     uptime_tracker.record_request("account_pool", False, status_code=status_code)
                     if attempt == max_account_tries - 1:
@@ -2183,25 +2181,7 @@ async def chat_impl(
                         status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
                         await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
                         raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                    # 继续尝试下一个账户
-                    # 记录账号池状态（账户可用）
-                    uptime_tracker.record_request("account_pool", True)
-                    break
-                except Exception as e:
-                    last_error = e
-                    error_type = type(e).__name__
-                    # 安全获取账户ID
-                    account_id = account_manager.config.account_id if 'account_manager' in locals() and account_manager else 'unknown'
-                    logger.error(f"[CHAT] [req_{request_id}] 账户 {account_id} 创建会话失败 (尝试 {attempt + 1}/{max_account_tries}) - {error_type}: {str(e)}")
-                    # 记录账号池状态（单个账户失败）
-                    status_code = e.status_code if isinstance(e, HTTPException) else None
-                    uptime_tracker.record_request("account_pool", False, status_code=status_code)
-                    if attempt == max_account_tries - 1:
-                        logger.error(f"[CHAT] [req_{request_id}] 所有账户均不可用")
-                        status = classify_error_status(503, last_error if isinstance(last_error, Exception) else Exception("account_pool_unavailable"))
-                        await finalize_result(status, 503, f"All accounts unavailable: {str(last_error)[:100]}")
-                        raise HTTPException(503, f"All accounts unavailable: {str(last_error)[:100]}")
-                    # 继续尝试下一个账户
+                    # 会话创建失败不触发冷却，直接切换到下一个账户重试
 
     # 消息瘦身：根据是否首次对话决定是否保留 system 提示词
     stripped_messages_dict = strip_to_last_user_message(original_messages_dict, is_first_message=is_new_conversation)
@@ -2433,7 +2413,7 @@ async def chat_impl(
                 uptime_tracker.record_request("account_pool", False, status_code=status_code)
 
                 # 错误处理回调
-                quota_type = MODEL_TO_QUOTA_TYPE.get(req.model)
+                quota_type = get_request_quota_type(req.model)
                 if is_http_exception:
                     account_manager.handle_http_error(status_code, str(e.detail) if hasattr(e, 'detail') else "", request_id, quota_type)
                 else:
@@ -2598,6 +2578,21 @@ async def stream_chat_generator(session: str, text_content: str, file_ids: List[
         try:
             async for json_obj in parse_json_array_stream_async(r.aiter_lines()):
                 json_objects.append(json_obj)  # 收集响应
+
+                # 上游有时会在流内返回 error 对象（HTTP 仍为 200）
+                error_info = json_obj.get("error")
+                if isinstance(error_info, dict):
+                    error_code = error_info.get("code", 0)
+                    error_message = str(error_info.get("message", ""))
+                    error_status = str(error_info.get("status", ""))
+                    logger.warning(
+                        f"[API] [{account_manager.config.account_id}] [req_{request_id}] "
+                        f"上游返回错误: {json.dumps(error_info, ensure_ascii=False)}"
+                    )
+                    if error_code == 429 or "RESOURCE_EXHAUSTED" in error_status:
+                        quota_type = get_request_quota_type(model_name)
+                        account_manager.handle_http_error(429, error_message[:200], request_id, quota_type)
+                        raise HTTPException(status_code=429, detail=f"Upstream quota exhausted: {error_message[:200]}")
 
                 # 提取文本内容
                 for reply in json_obj.get("streamAssistResponse", {}).get("answer", {}).get("replies", []):

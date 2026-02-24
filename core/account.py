@@ -143,19 +143,11 @@ class AccountManager:
             request_id: 请求ID（用于日志）
         """
         req_tag = f"[req_{request_id}] " if request_id else ""
-        self.last_error_time = time.time()
-        self.error_count += 1
-        if self.error_count >= self.account_failure_threshold:
-            self.is_available = False
-            logger.error(
-                f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
-                f"{error_context}连续失败{self.error_count}次，账户已永久禁用"
-            )
-        else:
-            logger.warning(
-                f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
-                f"{error_context}失败({self.error_count}/{self.account_failure_threshold})"
-            )
+        # 网络抖动/超时等临时错误不应触发冷却或禁用，直接切换账户重试。
+        logger.warning(
+            f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
+            f"{error_context}失败，将切换账户重试（不触发冷却）"
+        )
 
     def handle_http_error(self, status_code: int, error_detail: str = "", request_id: str = "", quota_type: Optional[str] = None) -> None:
         """
@@ -172,6 +164,7 @@ class AccountManager:
             - 429 + quota_type: 按配额类型冷却（对话/绘图/视频独立冷却）
             - 429 无quota_type: 全局冷却（整个账户不可用）
             - 401/403: 全局冷却（认证错误）
+            - 502/503/504: 临时上游错误，不触发冷却/禁用
             - 其他HTTP错误: 计入error_count，达到阈值后永久禁用
         """
         req_tag = f"[req_{request_id}] " if request_id else ""
@@ -213,6 +206,16 @@ class AccountManager:
             logger.warning(
                 f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
                 f"遇到{status_code}{error_type}，账户将休息{self.rate_limit_cooldown_seconds}秒后自动恢复"
+                f"{': ' + error_detail[:100] if error_detail else ''}"
+            )
+            return
+
+        # 5xx 网关/服务临时错误：只记录日志，不触发冷却或禁用
+        if status_code in (502, 503, 504):
+            error_type = HTTP_ERROR_NAMES.get(status_code, f"HTTP {status_code}")
+            logger.warning(
+                f"[ACCOUNT] [{self.config.account_id}] {req_tag}"
+                f"遇到{error_type}，将切换账户重试（不触发冷却）"
                 f"{': ' + error_detail[:100] if error_detail else ''}"
             )
             return

@@ -489,10 +489,29 @@ multi_account_mgr = load_multi_account_config(
 # ---------- 自动注册/刷新服务 ----------
 register_service = None
 login_service = None
+cache_cleanup_task: Optional[asyncio.Task] = None
+_main_event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _restart_cache_cleanup_task(new_mgr):
+    """Ensure only one cache-cleanup task exists and bind it to the latest manager."""
+    def _start_or_switch():
+        global cache_cleanup_task
+        if cache_cleanup_task and not cache_cleanup_task.done():
+            cache_cleanup_task.cancel()
+        cache_cleanup_task = asyncio.create_task(new_mgr.start_background_cleanup())
+
+    try:
+        asyncio.get_running_loop()
+        _start_or_switch()
+    except RuntimeError:
+        if _main_event_loop and _main_event_loop.is_running():
+            _main_event_loop.call_soon_threadsafe(_start_or_switch)
 
 def _set_multi_account_mgr(new_mgr):
     global multi_account_mgr
     multi_account_mgr = new_mgr
+    _restart_cache_cleanup_task(new_mgr)
     if register_service:
         register_service.multi_account_mgr = new_mgr
     if login_service:
@@ -790,7 +809,7 @@ async def auto_refresh_accounts_task():
                 logger.info("[AUTO-REFRESH] 检测到账号变化，正在自动刷新...")
 
                 # 重新加载账号配置
-                multi_account_mgr = _reload_accounts(
+                new_mgr = _reload_accounts(
                     multi_account_mgr,
                     http_client,
                     USER_AGENT,
@@ -799,6 +818,7 @@ async def auto_refresh_accounts_task():
                     SESSION_CACHE_TTL_SECONDS,
                     global_stats
                 )
+                _set_multi_account_mgr(new_mgr)
 
                 _last_known_accounts_version = db_version
                 logger.info(f"[AUTO-REFRESH] 账号刷新完成，当前账号数: {len(multi_account_mgr.accounts)}")
@@ -814,7 +834,8 @@ async def auto_refresh_accounts_task():
 @app.on_event("startup")
 async def startup_event():
     """应用启动时初始化后台任务"""
-    global global_stats
+    global global_stats, _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
 
     # 文件迁移逻辑：将根目录的旧文件迁移到 data 目录
     old_accounts = "accounts.json"
@@ -837,7 +858,7 @@ async def startup_event():
     logger.info(f"[SYSTEM] 统计数据已加载: {global_stats['total_requests']} 次请求, {global_stats['total_visitors']} 位访客")
 
     # 启动缓存清理任务
-    asyncio.create_task(multi_account_mgr.start_background_cleanup())
+    _restart_cache_cleanup_task(multi_account_mgr)
     logger.info("[SYSTEM] 后台缓存清理任务已启动（间隔: 5分钟）")
 
     # 启动自动刷新账号任务（仅数据库模式有效）

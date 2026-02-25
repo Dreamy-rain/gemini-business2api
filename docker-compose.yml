@@ -1,6 +1,15 @@
 services:
   gemini-api:
-    build: .
+    build:
+      context: .
+      args:
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.aliyun.com/debian}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.aliyun.com/debian-security}
+        APT_RETRIES: ${APT_RETRIES:-3}
+        APT_TIMEOUT: ${APT_TIMEOUT:-10}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_RETRIES: ${PIP_RETRIES:-5}
+        PIP_TIMEOUT: ${PIP_TIMEOUT:-60}
     image: cooooookk/gemini-business2api:latest
     container_name: gemini-business2api
     ports:

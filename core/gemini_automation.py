@@ -299,7 +299,7 @@ class GeminiAutomation:
         self._log("info", "📬 开始轮询邮箱获取验证码...")
         
         max_retries = 2
-        poll_timeout = 20
+        poll_timeout = 7
         code = None
 
         # 初始轮询
@@ -398,8 +398,11 @@ class GeminiAutomation:
 
         # Step 11: 检查是否需要设置用户名
         if "cid" not in page.url:
-            if self._handle_username_setup(page):
-                time.sleep(5)  # 增加等待时间
+            if self._handle_username_setup(page, is_new_account=True):
+                self._log("info", "✅ 已处理完用户名设置或参数已生成")
+                time.sleep(2)
+            else:
+                self._log("warning", "⚠️ 处理用户名设置阶段可能存在异常")
 
         # Step 12: 等待 URL 参数生成（csesidx 和 cid）
         self._log("info", "waiting for URL parameters")
@@ -596,7 +599,7 @@ class GeminiAutomation:
             time.sleep(1)
         return False
 
-    def _handle_username_setup(self, page) -> bool:
+    def _handle_username_setup(self, page, is_new_account: bool = False) -> bool:
         """处理用户名设置页面"""
         current_url = page.url
 
@@ -620,6 +623,12 @@ class GeminiAutomation:
                 continue
 
         if not username_input:
+            # 即使没找到输入框，如果是新账号注册，也要等一下参数生成
+            if is_new_account:
+                self._log("info", "⏳ 新账号注册中，正在等待参数生成...")
+                if not self._wait_for_cid(page, timeout=30):
+                    return False
+                return True
             return False
 
         suffix = "".join(random.choices(string.ascii_letters + string.digits, k=3))
@@ -638,47 +647,63 @@ class GeminiAutomation:
                 username_input.input(username)
                 time.sleep(0.3)
 
-            buttons = page.eles("tag:button")
-            submit_btn = None
-            for btn in buttons:
-                text = (btn.text or "").strip().lower()
-                if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
-                    submit_btn = btn
-                    break
+            # 上游优化点：敲击回车提交，避开多变的按钮选择器
+            self._log("info", "⏎ 敲击回车提交用户名...")
+            username_input.input("\n")
 
-            if submit_btn:
-                submit_btn.click()
+            if is_new_account:
+                # 注册专用：等待 45 秒，失败则刷新再等 15 秒
+                self._log("info", "⏳ 等待注册后 cid 生成 (最长 45s)...")
+                if not self._wait_for_cid(page, timeout=45):
+                    self._log("warning", "⚠️ 等待超时，尝试刷新页面...")
+                    page.refresh()
+                    if not self._wait_for_cid(page, timeout=15):
+                        self._log("error", "❌ 刷新后仍未检测到 cid")
+                        return False
             else:
-                username_input.input("\n")
+                if not self._wait_for_cid(page, timeout=15):
+                    self._log("warning", "⚠️ 提交用户名后未检测到 cid 参数")
+                    return False
 
-            time.sleep(5)
             return True
-        except Exception:
+        except Exception as e:
+            self._log("error", f"❌ 用户名设置异常: {e}")
             return False
 
     def _extract_config(self, page, email: str) -> dict:
-        """提取配置"""
+        """提取配置 (增加了 Cookie 轮询机制)"""
         try:
             if "cid/" not in page.url:
                 page.get("https://business.gemini.google/", timeout=self.timeout)
                 time.sleep(3)
 
+            # 轮询获取关键 Cookie (某些环境加载过程较慢)
+            self._log("info", "🍪 正在轮询提取 Auth Cookies...")
+            ses, host, ses_obj = None, None, None
+            for i in range(10): 
+                cookies = page.cookies()
+                ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
+                host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
+                ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
+                
+                if ses and host:
+                    self._log("info", f"✅ 成功提取 Cookies (第 {i+1} 秒)")
+                    break
+                time.sleep(1)
+            
+            if not ses or not host:
+                return {"success": False, "error": "auth cookies (__Secure-C_SES or __Host-C_OSES) missing"}
+
             url = page.url
             if "cid/" not in url:
-                return {"success": False, "error": "cid not found"}
+                return {"success": False, "error": "cid not found in final URL"}
 
             config_id = url.split("cid/")[1].split("?")[0].split("/")[0]
             csesidx = url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
 
-            cookies = page.cookies()
-            ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
-            host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
-
-            ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
-            # 使用北京时区，确保时间计算正确（Cookie expiry 是 UTC 时间戳）
+            # 使用北京时区，确保时间计算正确
             beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
-                # 将 UTC 时间戳转为北京时间，再减去12小时作为刷新窗口
                 cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
                 expires_at = (cookie_expire_beijing - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
             else:
@@ -694,7 +719,7 @@ class GeminiAutomation:
             }
             return {"success": True, "config": config}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": f"extraction failed: {str(e)}"}
 
     def _save_screenshot(self, page, name: str) -> None:
         """保存截图"""

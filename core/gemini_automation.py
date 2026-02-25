@@ -6,12 +6,14 @@ import json
 import random
 import string
 import time
+import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, unquote
 
 from DrissionPage import ChromiumPage, ChromiumOptions
 from core.base_task_service import TaskCancelledError
+from core.proxy_utils import parse_proxy_setting
 
 
 # 常量
@@ -54,6 +56,7 @@ class GeminiAutomation:
         self._page = None
         self._user_data_dir = None
         self._last_send_error = ""
+        self._proxy_auth_extension_dir = None
 
     def stop(self) -> None:
         """外部请求停止：尽力关闭浏览器实例。"""
@@ -87,6 +90,7 @@ class GeminiAutomation:
                     pass
             self._page = None
             self._cleanup_user_data(user_data_dir)
+            self._cleanup_proxy_auth_extension()
             self._user_data_dir = None
 
     def _create_page(self) -> ChromiumPage:
@@ -110,15 +114,23 @@ class GeminiAutomation:
         options.set_argument("--lang=zh-CN")
         options.set_pref("intl.accept_languages", "zh-CN,zh")
 
-        if self.proxy:
-            options.set_argument(f"--proxy-server={self.proxy}")
+        proxy_server, proxy_auth = self._parse_browser_proxy(self.proxy)
+        if proxy_server:
+            options.set_argument(f"--proxy-server={proxy_server}")
+            if proxy_auth:
+                ext_dir = self._create_proxy_auth_extension(proxy_auth[0], proxy_auth[1])
+                if ext_dir:
+                    self._proxy_auth_extension_dir = ext_dir
+                    options.set_argument(f"--load-extension={ext_dir}")
+                    self._log("info", "🔐 检测到代理认证，已启用浏览器代理认证扩展")
 
         if self.headless:
             # 使用新版无头模式，更接近真实浏览器
             options.set_argument("--headless=new")
             options.set_argument("--disable-gpu")
             options.set_argument("--no-first-run")
-            options.set_argument("--disable-extensions")
+            if not proxy_auth:
+                options.set_argument("--disable-extensions")
             # 反检测参数
             options.set_argument("--disable-infobars")
             options.set_argument("--enable-features=NetworkService,NetworkServiceInProcess")
@@ -877,6 +889,84 @@ class GeminiAutomation:
             import shutil
             if os.path.exists(user_data_dir):
                 shutil.rmtree(user_data_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    def _parse_browser_proxy(self, proxy_setting: str) -> tuple[str, Optional[tuple[str, str]]]:
+        """解析浏览器代理设置，提取代理地址和认证凭据。"""
+        proxy_url, _ = parse_proxy_setting(proxy_setting or "")
+        if not proxy_url:
+            return "", None
+
+        parsed = urlparse(proxy_url)
+        if not parsed.hostname:
+            return proxy_url, None
+
+        scheme = parsed.scheme or "http"
+        host = parsed.hostname
+        port = f":{parsed.port}" if parsed.port else ""
+        proxy_server = f"{scheme}://{host}{port}"
+
+        if parsed.username is not None and parsed.password is not None:
+            username = unquote(parsed.username)
+            password = unquote(parsed.password)
+            return proxy_server, (username, password)
+
+        return proxy_server, None
+
+    def _create_proxy_auth_extension(self, username: str, password: str) -> Optional[str]:
+        """创建临时扩展，用于处理 407 代理认证。"""
+        try:
+            ext_dir = tempfile.mkdtemp(prefix="gb2api_proxy_auth_")
+
+            manifest = {
+                "version": "1.0.0",
+                "manifest_version": 2,
+                "name": "Gemini Proxy Auth",
+                "permissions": [
+                    "webRequest",
+                    "webRequestBlocking",
+                    "<all_urls>",
+                ],
+                "background": {
+                    "scripts": ["background.js"],
+                },
+            }
+
+            background_js = (
+                "chrome.webRequest.onAuthRequired.addListener(\n"
+                "  function(details) {\n"
+                "    return {authCredentials: {username: "
+                + json.dumps(username)
+                + ", password: "
+                + json.dumps(password)
+                + "}};\n"
+                "  },\n"
+                "  {urls: ['<all_urls>']},\n"
+                "  ['blocking']\n"
+                ");\n"
+            )
+
+            with open(os.path.join(ext_dir, "manifest.json"), "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False)
+            with open(os.path.join(ext_dir, "background.js"), "w", encoding="utf-8") as f:
+                f.write(background_js)
+
+            return ext_dir
+        except Exception as exc:
+            self._log("warning", f"⚠️ 创建代理认证扩展失败: {exc}")
+            return None
+
+    def _cleanup_proxy_auth_extension(self) -> None:
+        """清理临时代理认证扩展目录。"""
+        ext_dir = self._proxy_auth_extension_dir
+        self._proxy_auth_extension_dir = None
+        if not ext_dir:
+            return
+        try:
+            import shutil
+            if os.path.exists(ext_dir):
+                shutil.rmtree(ext_dir, ignore_errors=True)
         except Exception:
             pass
 

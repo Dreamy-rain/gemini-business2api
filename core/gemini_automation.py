@@ -703,20 +703,14 @@ class GeminiAutomation:
                 username_input.input(username)
                 time.sleep(0.3)
 
-            buttons = page.eles("tag:button")
-            submit_btn = None
-            for btn in buttons:
-                text = (btn.text or "").strip().lower()
-                if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
-                    submit_btn = btn
-                    break
+            # 直接回车提交
+            username_input.input("\n")
 
-            if submit_btn:
-                submit_btn.click()
-            else:
-                username_input.input("\n")
+            # 等待 URL 生成 cid 参数
+            if not self._wait_for_cid(page, timeout=30):
+                self._log("warning", "⚠️ 用户名提交后未检测到 cid 参数")
+                return False
 
-            time.sleep(5)
             return True
         except Exception:
             return False

@@ -1487,7 +1487,11 @@ async def admin_get_settings(request: Request):
             "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
             "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds,
             "scheduled_refresh_enabled": config.retry.scheduled_refresh_enabled,
-            "scheduled_refresh_interval_minutes": config.retry.scheduled_refresh_interval_minutes
+            "scheduled_refresh_interval_minutes": config.retry.scheduled_refresh_interval_minutes,
+            "scheduled_refresh_cron": config.retry.scheduled_refresh_cron,
+            "refresh_batch_size": config.retry.refresh_batch_size,
+            "refresh_batch_interval_minutes": config.retry.refresh_batch_interval_minutes,
+            "refresh_cooldown_hours": config.retry.refresh_cooldown_hours,
         },
         "quota_limits": {
             "enabled": config.quota_limits.enabled,

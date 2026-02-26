@@ -57,6 +57,10 @@ class LoginService(BaseTaskService[LoginTask]):
             log_prefix="REFRESH",
         )
         self._is_polling = False
+        # 防重复：记录每个账号最后一次成功刷新的时间戳
+        self._refresh_timestamps: Dict[str, float] = {}
+        # cron 触发记录：避免同一时间点当天重复触发
+        self._triggered_today: set = set()
 
     def _get_running_task(self) -> Optional[LoginTask]:
         """获取正在运行或等待中的任务"""
@@ -148,6 +152,8 @@ class LoginService(BaseTaskService[LoginTask]):
 
             if result.get("success"):
                 task.success_count += 1
+                # 记录刷新成功时间（防重复层 1）
+                self._refresh_timestamps[account_id] = time.time()
                 self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
                 self._append_log(task, "info", f"🎉 刷新成功: {account_id}")
                 self._append_log(task, "info", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -360,7 +366,18 @@ class LoginService(BaseTaskService[LoginTask]):
             except Exception:
                 continue
 
-            if remaining <= config.basic.refresh_window_hours:
+            if remaining > config.basic.refresh_window_hours:
+                continue
+
+            # 冷却检查（防重复层 1）：跳过最近刚刷新过的账号
+            cooldown_seconds = config.retry.refresh_cooldown_hours * 3600
+            if account_id in self._refresh_timestamps:
+                elapsed = time.time() - self._refresh_timestamps[account_id]
+                if elapsed < cooldown_seconds:
+                    logger.debug(f"[LOGIN] skip {account_id}: refreshed {elapsed/3600:.1f}h ago, cooldown {config.retry.refresh_cooldown_hours}h")
+                    continue
+
+            if True:  # 通过所有检查
                 expiring.append(account_id)
 
         return expiring
@@ -380,28 +397,134 @@ class LoginService(BaseTaskService[LoginTask]):
             logger.warning("[LOGIN] refresh enqueue failed: %s", exc)
             return None
 
+    @staticmethod
+    def _parse_cron(cron_str: str) -> dict:
+        """解析 cron 表达式。
+        支持两种格式:
+          - '08:00,20:00' → {'mode': 'daily', 'times': ['08:00', '20:00']}
+          - '*/120'       → {'mode': 'interval', 'minutes': 120}
+        """
+        cron_str = cron_str.strip()
+        if cron_str.startswith("*/"):
+            try:
+                minutes = int(cron_str[2:])
+                return {"mode": "interval", "minutes": max(minutes, 5)}
+            except ValueError:
+                return {"mode": "interval", "minutes": 120}
+        else:
+            times = [t.strip() for t in cron_str.split(",") if t.strip()]
+            valid = []
+            for t in times:
+                parts = t.split(":")
+                if len(parts) == 2:
+                    try:
+                        h, m = int(parts[0]), int(parts[1])
+                        if 0 <= h <= 23 and 0 <= m <= 59:
+                            valid.append(f"{h:02d}:{m:02d}")
+                    except ValueError:
+                        pass
+            return {"mode": "daily", "times": valid or ["08:00", "20:00"]}
+
+    async def _wait_for_next_trigger(self) -> None:
+        """等待下一个触发时间点。
+        - interval 模式：等 N 分钟
+        - daily 模式：等到下一个匹配的 HH:MM，每个时间点每天只触发一次
+        """
+        cron_str = config.retry.scheduled_refresh_cron
+        # 向后兼容：如果旧字段有值且新字段是默认值，转换为 interval 模式
+        if (not cron_str or cron_str == "08:00,20:00") and config.retry.scheduled_refresh_interval_minutes > 0:
+            cron_str = f"*/{config.retry.scheduled_refresh_interval_minutes}"
+
+        cron = self._parse_cron(cron_str)
+
+        if cron["mode"] == "interval":
+            minutes = cron["minutes"]
+            logger.info(f"[LOGIN] 间隔模式：{minutes} 分钟后下一次检查")
+            await asyncio.sleep(minutes * 60)
+            return
+
+        # daily 模式：每秒检查一次当前时间是否命中
+        beijing_tz = timezone(timedelta(hours=8))
+        while self._is_polling:
+            now = datetime.now(beijing_tz)
+            current_time = now.strftime("%H:%M")
+            today_str = now.strftime("%Y-%m-%d")
+
+            # 新的一天，清空触发记录
+            old_keys = [k for k in self._triggered_today if not k.startswith(today_str)]
+            for k in old_keys:
+                self._triggered_today.discard(k)
+
+            for t in cron["times"]:
+                trigger_key = f"{today_str}_{t}"
+                if current_time == t and trigger_key not in self._triggered_today:
+                    self._triggered_today.add(trigger_key)
+                    logger.info(f"[LOGIN] 定时触发: {t}")
+                    return
+
+            await asyncio.sleep(30)  # 每 30 秒检查一次
+
+    async def _wait_task_complete(self, task: LoginTask) -> None:
+        """等待任务完成（防重复层 3：串行等待）"""
+        while task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            await asyncio.sleep(5)
+
     async def start_polling(self) -> None:
         if self._is_polling:
             logger.warning("[LOGIN] polling already running")
             return
 
         self._is_polling = True
-        logger.info("[LOGIN] refresh polling started")
+        logger.info("[LOGIN] 智能刷新调度器已启动")
         try:
             while self._is_polling:
-                # 检查配置是否启用定时刷新
+                # 检查是否启用
                 if not config.retry.scheduled_refresh_enabled:
-                    logger.debug("[LOGIN] scheduled refresh disabled, skipping check")
+                    logger.debug("[LOGIN] scheduled refresh disabled")
                     await asyncio.sleep(CONFIG_CHECK_INTERVAL_SECONDS)
                     continue
 
-                # 执行刷新检查
-                await self.check_and_refresh()
+                # 等待下一个触发时间点
+                await self._wait_for_next_trigger()
+                if not self._is_polling:
+                    break
 
-                # 使用配置的间隔时间
-                interval_seconds = config.retry.scheduled_refresh_interval_minutes * 60
-                logger.debug(f"[LOGIN] next check in {config.retry.scheduled_refresh_interval_minutes} minutes")
-                await asyncio.sleep(interval_seconds)
+                # 获取所有待刷新账号（已含冷却过滤）
+                expiring = self._get_expiring_accounts()
+                if not expiring:
+                    logger.info("[LOGIN] 本轮无需刷新的账号")
+                    continue
+
+                batch_size = config.retry.refresh_batch_size
+                total_batches = (len(expiring) + batch_size - 1) // batch_size
+                logger.info(f"[LOGIN] 待刷新 {len(expiring)} 个账号，分 {total_batches} 批（每批 {batch_size} 个）")
+
+                # 分批执行
+                for i in range(0, len(expiring), batch_size):
+                    if not self._is_polling:
+                        break
+
+                    batch = expiring[i:i + batch_size]
+                    batch_num = i // batch_size + 1
+                    logger.info(f"[LOGIN] 第 {batch_num}/{total_batches} 批: {batch}")
+
+                    try:
+                        task = await self.start_login(batch)
+                        # 等待这批完成（防重复层 3）
+                        await self._wait_task_complete(task)
+                        logger.info(f"[LOGIN] 第 {batch_num} 批完成 (成功: {task.success_count}, 失败: {task.fail_count})")
+                    except Exception as exc:
+                        logger.warning(f"[LOGIN] 第 {batch_num} 批异常: {exc}")
+
+                    # 批次间等待（最后一批不等）
+                    remaining = expiring[i + batch_size:]
+                    if remaining and self._is_polling:
+                        interval = config.retry.refresh_batch_interval_minutes * 60
+                        logger.info(f"[LOGIN] 等待 {config.retry.refresh_batch_interval_minutes} 分钟后开始下一批...")
+                        await asyncio.sleep(interval)
+
+                logger.info("[LOGIN] 本轮刷新完成")
+
         except asyncio.CancelledError:
             logger.info("[LOGIN] polling stopped")
         except Exception as exc:

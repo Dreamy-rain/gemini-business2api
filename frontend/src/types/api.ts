@@ -112,6 +112,10 @@ export interface Settings {
     auto_refresh_accounts_seconds: number
     scheduled_refresh_enabled?: boolean
     scheduled_refresh_interval_minutes?: number
+    scheduled_refresh_cron?: string
+    refresh_batch_size?: number
+    refresh_batch_interval_minutes?: number
+    refresh_cooldown_hours?: number
   }
   public_display: {
     logo_url?: string

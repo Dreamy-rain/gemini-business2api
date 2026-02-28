@@ -169,6 +169,93 @@ class RefreshService:
             return data
         return []
 
+    # ---- expired account deletion ----
+
+    def _get_expired_account_ids(self) -> List[str]:
+        """Get list of account IDs whose trial has ended (trial_end expired)."""
+        accounts = self._load_accounts()
+        expired = []
+        beijing_tz = timezone(timedelta(hours=8))
+        now = datetime.now(beijing_tz)
+
+        for account in accounts:
+            account_id = account.get("id")
+            if not account_id:
+                continue
+            if account.get("disabled"):
+                continue
+
+            trial_end = account.get("trial_end")
+            if not trial_end:
+                continue
+
+            try:
+                # trial_end format: "2026-03-25"
+                end_date = datetime.strptime(trial_end, "%Y-%m-%d").date()
+                today = now.date()
+            except Exception:
+                continue
+
+            # Trial has ended
+            if end_date < today:
+                expired.append(account_id)
+
+        return expired
+
+    def _delete_expired_accounts(self) -> int:
+        """Delete expired accounts from database. Returns count deleted."""
+        expired_ids = self._get_expired_account_ids()
+        if not expired_ids:
+            return 0
+
+        logger.info(f"[REFRESH] found {len(expired_ids)} expired accounts to delete: {expired_ids}")
+        deleted = storage.delete_accounts_sync(expired_ids)
+        if deleted > 0:
+            logger.info(f"[REFRESH] deleted {deleted} expired accounts")
+            # Clean up refresh timestamps for deleted accounts
+            for aid in expired_ids:
+                self._refresh_timestamps.pop(aid, None)
+        return deleted
+
+    # ---- auto registration ----
+
+    def _auto_register_if_needed(self) -> None:
+        """Check active account count and register new accounts if below minimum."""
+        min_count = config.retry.min_account_count
+        if min_count <= 0:
+            return
+
+        active_count = storage.count_active_accounts_sync()
+        if active_count >= min_count:
+            logger.info(f"[REFRESH] active accounts ({active_count}) >= minimum ({min_count}), no registration needed")
+            return
+
+        need = min_count - active_count
+        logger.info(f"[REFRESH] active accounts ({active_count}) < minimum ({min_count}), registering {need} new accounts")
+
+        # Lazy import to avoid circular dependency
+        from worker.register_service import register_one
+
+        for i in range(need):
+            logger.info(f"[REGISTER] registering account {i + 1}/{need}...")
+            try:
+                result = register_one()
+            except Exception as exc:
+                logger.error(f"[REGISTER] account {i + 1}/{need} failed with exception: {exc}")
+                result = {"success": False, "error": str(exc)}
+
+            if result.get("success"):
+                email = result.get("email", "unknown")
+                logger.info(f"[REGISTER] account {i + 1}/{need} registered successfully: {email}")
+            else:
+                error = result.get("error", "unknown error")
+                logger.error(f"[REGISTER] account {i + 1}/{need} failed: {error}")
+
+            # Wait between registrations to avoid rate limiting
+            if i < need - 1:
+                logger.info("[REGISTER] waiting 10 seconds before next registration...")
+                time.sleep(10)
+
     # ---- expiry detection ----
 
     def _get_expiring_accounts(self) -> List[str]:
@@ -542,39 +629,52 @@ class RefreshService:
                 if not self._is_polling:
                     break
 
-                # Get all expiring accounts (already cooldown-filtered)
+                # Step 1: Delete expired accounts if enabled
+                if config.retry.delete_expired_accounts:
+                    try:
+                        self._delete_expired_accounts()
+                    except Exception as exc:
+                        logger.warning(f"[REFRESH] expired account deletion failed: {exc}")
+
+                # Step 2: Get all expiring accounts and refresh them
                 expiring = self._get_expiring_accounts()
                 if not expiring:
                     logger.info("[REFRESH] no accounts need refresh this round")
-                    continue
+                else:
+                    batch_size = config.retry.refresh_batch_size
+                    total_batches = (len(expiring) + batch_size - 1) // batch_size
+                    logger.info(f"[REFRESH] {len(expiring)} accounts to refresh, {total_batches} batches (batch size {batch_size})")
 
-                batch_size = config.retry.refresh_batch_size
-                total_batches = (len(expiring) + batch_size - 1) // batch_size
-                logger.info(f"[REFRESH] {len(expiring)} accounts to refresh, {total_batches} batches (batch size {batch_size})")
+                    # Execute in batches
+                    for i in range(0, len(expiring), batch_size):
+                        if not self._is_polling:
+                            break
 
-                # Execute in batches
-                for i in range(0, len(expiring), batch_size):
-                    if not self._is_polling:
-                        break
+                        batch = expiring[i:i + batch_size]
+                        batch_num = i // batch_size + 1
+                        logger.info(f"[REFRESH] batch {batch_num}/{total_batches}: {batch}")
 
-                    batch = expiring[i:i + batch_size]
-                    batch_num = i // batch_size + 1
-                    logger.info(f"[REFRESH] batch {batch_num}/{total_batches}: {batch}")
+                        try:
+                            task = await self._run_single_batch(batch)
+                            logger.info(f"[REFRESH] batch {batch_num} done (success: {task.success_count}, fail: {task.fail_count})")
+                        except Exception as exc:
+                            logger.warning(f"[REFRESH] batch {batch_num} error: {exc}")
 
+                        # Inter-batch wait (skip for last batch)
+                        remaining = expiring[i + batch_size:]
+                        if remaining and self._is_polling:
+                            interval = config.retry.refresh_batch_interval_minutes * 60
+                            logger.info(f"[REFRESH] waiting {config.retry.refresh_batch_interval_minutes} minutes before next batch...")
+                            await asyncio.sleep(interval)
+
+                    logger.info("[REFRESH] refresh round complete")
+
+                # Step 3: Auto-register new accounts if below minimum
+                if config.retry.auto_register_enabled:
                     try:
-                        task = await self._run_single_batch(batch)
-                        logger.info(f"[REFRESH] batch {batch_num} done (success: {task.success_count}, fail: {task.fail_count})")
+                        self._auto_register_if_needed()
                     except Exception as exc:
-                        logger.warning(f"[REFRESH] batch {batch_num} error: {exc}")
-
-                    # Inter-batch wait (skip for last batch)
-                    remaining = expiring[i + batch_size:]
-                    if remaining and self._is_polling:
-                        interval = config.retry.refresh_batch_interval_minutes * 60
-                        logger.info(f"[REFRESH] waiting {config.retry.refresh_batch_interval_minutes} minutes before next batch...")
-                        await asyncio.sleep(interval)
-
-                logger.info("[REFRESH] refresh round complete")
+                        logger.warning(f"[REFRESH] auto registration failed: {exc}")
 
         except asyncio.CancelledError:
             logger.info("[REFRESH] polling stopped")

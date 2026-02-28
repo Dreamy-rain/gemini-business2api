@@ -9,6 +9,8 @@
 - 定时轮询数据库，检测 cookie 即将过期的账户
 - 使用 Chromium 浏览器自动化完成 Gemini Business 登录
 - 支持多种邮箱验证码提供商（DuckMail、Moemail、Freemail、GPTMail、Microsoft OAuth）
+- **自动删除过期账户**：试用期（`trial_end`）到期后自动清理数据库中的账户记录
+- **自动注册补充账户**：活跃账户数低于阈值时自动注册新账户
 - 环境变量独立控制，可覆盖数据库中的配置
 - 支持 PostgreSQL 和 SQLite 两种数据库后端
 - 内置 HTTP 健康检查端口
@@ -24,8 +26,9 @@
 │   ├── main.py                # 入口：轮询循环 + 健康检查
 │   ├── config.py              # 配置管理（数据库 + 环境变量覆盖）
 │   ├── storage.py             # 数据库抽象（PostgreSQL / SQLite）
-│   ├── refresh_service.py     # 刷新编排：过期检测 + 任务执行
-│   ├── gemini_automation.py   # 浏览器自动化（DrissionPage/Chromium）
+│   ├── refresh_service.py     # 刷新编排：过期检测 + 过期删除 + 自动注册 + 任务执行
+│   ├── register_service.py    # 账号注册服务（自动注册新账号）
+│   ├── gemini_automation.py   # 浏览器自动化（DrissionPage/Chromium，支持刷新和注册）
 │   ├── mail_utils.py          # 验证码提取
 │   ├── proxy_utils.py         # 代理解析
 │   ├── child_reaper.py        # 僵尸进程清理
@@ -150,6 +153,11 @@ Worker 每个轮询周期都会从数据库重新读取配置（热更新），�
 | `REFRESH_WINDOW_HOURS` | 过期窗口，小时（0-24），在此窗口内的账户将被刷新 | 未设置（使用数据库值） |
 | `BROWSER_HEADLESS` | 浏览器无头模式 | 未设置（使用数据库值） |
 | `PROXY_FOR_AUTH` | 认证代理地址 | 未设置（使用数据库值） |
+| `DELETE_EXPIRED_ACCOUNTS` | 自动删除试用期（`trial_end`）已到期的账户 | 未设置（使用数据库值） |
+| `AUTO_REGISTER_ENABLED` | 账户不足时自动注册新账户 | 未设置（使用数据库值） |
+| `MIN_ACCOUNT_COUNT` | 最低活跃账户数量，低于此值触发自动注册（0 = 禁用） | 未设置（使用数据库值） |
+| `REGISTER_DOMAIN` | 注册账号使用的邮箱域名（DuckMail 专用） | 未设置（使用数据库值） |
+| `REGISTER_DEFAULT_COUNT` | 单次注册账号数量（1-20） | 未设置（使用数据库值） |
 
 **典型独立部署配置**：
 
@@ -159,6 +167,9 @@ FORCE_REFRESH_ENABLED=true
 REFRESH_INTERVAL_MINUTES=30
 BROWSER_HEADLESS=true
 HEALTH_PORT=8080
+DELETE_EXPIRED_ACCOUNTS=true
+AUTO_REGISTER_ENABLED=true
+MIN_ACCOUNT_COUNT=5
 ```
 
 这样 Worker 不依赖主服务面板来控制刷新开关，完全通过环境变量独立运行。
@@ -174,6 +185,15 @@ HEALTH_PORT=8080
        ▼                    ▼                     ▼
   重新加载配置          读取账户列表           登录 + 获取凭证
   (热更新)            检查 expires_at          更新数据库
+       │
+       ▼
+  ┌──────────────┐     ┌──────────────┐
+  │  过期清理      │────▶│  自动注册      │
+  │  (可选)       │     │  (可选)       │
+  └──────────────┘     └──────────────┘
+       │                     │
+       ▼                     ▼
+  删除试用期到期账户     注册新账户补充
 ```
 
 1. **轮询循环**：按配置的间隔（默认 30 分钟）周期性检查
@@ -181,6 +201,8 @@ HEALTH_PORT=8080
 3. **浏览器自动化**：启动 Chromium，模拟登录 Gemini Business，提取新的 cookie
 4. **邮箱验证码**：如果登录需要验证码，自动通过配置的邮箱提供商获取
 5. **保存结果**：将新的凭证和过期时间写回数据库
+6. **过期清理**（可选）：删除试用期（`trial_end`）已到期的账户记录
+7. **自动注册**（可选）：当活跃账户数低于 `MIN_ACCOUNT_COUNT` 时，自动注册新账户补充
 
 ## 健康检查
 

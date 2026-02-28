@@ -1,9 +1,10 @@
 """
-Gemini自动化登录模块（用于账号刷新）
+Gemini自动化登录模块（支持账号刷新和新账号注册）
 """
 import os
 import json
 import random
+import re
 import string
 import time
 from datetime import datetime, timedelta, timezone
@@ -16,7 +17,6 @@ from worker.refresh_service import TaskCancelledError
 
 # 常量
 AUTH_HOME_URL = "https://auth.business.gemini.google/"
-DEFAULT_XSRF_TOKEN = "KdLRzKwwBTD5wo8nUollAbY6cW0"
 
 # Linux 下常见的 Chromium 路径
 CHROMIUM_PATHS = [
@@ -24,6 +24,22 @@ CHROMIUM_PATHS = [
     "/usr/bin/chromium-browser",
     "/usr/bin/google-chrome",
     "/usr/bin/google-chrome-stable",
+]
+
+# 注册时随机使用的真实英文姓名（避免明显的机器人特征）
+REGISTER_NAMES = [
+    "James Smith", "John Johnson", "Robert Williams", "Michael Brown", "William Jones",
+    "David Garcia", "Mary Miller", "Patricia Davis", "Jennifer Rodriguez", "Linda Martinez",
+    "Barbara Anderson", "Susan Thomas", "Jessica Jackson", "Sarah White", "Karen Harris",
+    "Lisa Martin", "Nancy Thompson", "Betty Garcia", "Margaret Martinez", "Sandra Robinson",
+    "Ashley Clark", "Dorothy Rodriguez", "Emma Lewis", "Olivia Lee", "Ava Walker",
+    "Emily Hall", "Abigail Allen", "Madison Young", "Elizabeth Hernandez", "Charlotte King",
+]
+
+# 常见桌面分辨率（避免固定 1280x800 成为指纹）
+COMMON_VIEWPORTS = [
+    (1366, 768), (1440, 900), (1536, 864), (1280, 720),
+    (1920, 1080), (1600, 900), (1280, 800), (1360, 768),
 ]
 
 
@@ -41,7 +57,7 @@ def _data_file_path(name: str) -> str:
 
 
 class GeminiAutomation:
-    """Gemini自动化登录"""
+    """Gemini自动化登录（支持刷新和注册）"""
 
     def __init__(
         self,
@@ -69,7 +85,7 @@ class GeminiAutomation:
             except Exception:
                 pass
 
-    def login_and_extract(self, email: str, mail_client) -> dict:
+    def login_and_extract(self, email: str, mail_client, is_new_account: bool = False) -> dict:
         """执行登录并提取配置"""
         page = None
         user_data_dir = None
@@ -78,7 +94,7 @@ class GeminiAutomation:
             user_data_dir = getattr(page, 'user_data_dir', None)
             self._page = page
             self._user_data_dir = user_data_dir
-            return self._run_flow(page, email, mail_client)
+            return self._run_flow(page, email, mail_client, is_new_account=is_new_account)
         except TaskCancelledError:
             raise
         except Exception as exc:
@@ -103,13 +119,23 @@ class GeminiAutomation:
         if chromium_path:
             options.set_browser_path(chromium_path)
 
-        options.set_argument("--incognito")
+        # 不使用 --incognito：Google 能检测隐私模式
         options.set_argument("--no-sandbox")
         options.set_argument("--disable-dev-shm-usage")
         options.set_argument("--disable-setuid-sandbox")
         options.set_argument("--disable-blink-features=AutomationControlled")
-        options.set_argument("--window-size=1280,800")
+
+        # 随机窗口尺寸（避免固定分辨率成为指纹）
+        vw, vh = random.choice(COMMON_VIEWPORTS)
+        options.set_argument(f"--window-size={vw},{vh}")
         options.set_user_agent(self.user_agent)
+
+        # 防止 WebRTC 泄露真实 IP
+        options.set_argument("--disable-webrtc")
+        options.set_argument("--enforce-webrtc-ip-handling-policy")
+        options.set_pref("webrtc.ip_handling_policy", "disable_non_proxied_udp")
+        options.set_pref("webrtc.multiple_routes_enabled", False)
+        options.set_pref("webrtc.nonproxied_udp_enabled", False)
 
         # 语言设置（确保使用中文界面）
         options.set_argument("--lang=zh-CN")
@@ -132,65 +158,191 @@ class GeminiAutomation:
         page = ChromiumPage(options)
         page.set.timeouts(self.timeout)
 
-        # 反检测：注入脚本隐藏自动化特征
-        if self.headless:
-            try:
-                page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source="""
-                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-                    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
-                    window.chrome = {runtime: {}};
+        # 反检测：始终注入（不限 headless）
+        try:
+            page.run_cdp("Page.addScriptToEvaluateOnNewDocument", source="""
+                // 隐藏 webdriver 标志
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
-                    // 额外的反检测措施
-                    Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 1});
-                    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
-                    Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+                // 伪造 plugins（返回真实 PluginArray 结构而非数字数组）
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const arr = [{
+                            name: 'Chrome PDF Plugin',
+                            description: 'Portable Document Format',
+                            filename: 'internal-pdf-viewer',
+                            length: 1,
+                            0: {type: 'application/x-google-chrome-pdf', suffixes: 'pdf', description: 'Portable Document Format'}
+                        }, {
+                            name: 'Chrome PDF Viewer',
+                            description: '',
+                            filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
+                            length: 1,
+                            0: {type: 'application/pdf', suffixes: 'pdf', description: ''}
+                        }, {
+                            name: 'Native Client',
+                            description: '',
+                            filename: 'internal-nacl-plugin',
+                            length: 2,
+                            0: {type: 'application/x-nacl', suffixes: '', description: 'Native Client Executable'},
+                            1: {type: 'application/x-pnacl', suffixes: '', description: 'Portable Native Client Executable'}
+                        }];
+                        arr.item = i => arr[i] || null;
+                        arr.namedItem = n => arr.find(p => p.name === n) || null;
+                        arr.refresh = () => {};
+                        return arr;
+                    }
+                });
 
-                    // 隐藏 headless 特征
-                    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
-                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN', 'zh', 'en']});
+                window.chrome = {runtime: {}, loadTimes: () => ({}), csi: () => ({})};
 
-                    // 模拟真实的 permissions
-                    const originalQuery = window.navigator.permissions.query;
-                    window.navigator.permissions.query = (parameters) => (
-                        parameters.name === 'notifications' ?
-                            Promise.resolve({state: Notification.permission}) :
-                            originalQuery(parameters)
-                    );
-                """)
-            except Exception:
-                pass
+                // 硬件与平台信息
+                Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+
+                // permissions 伪造
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({state: Notification.permission}) :
+                        originalQuery(parameters)
+                );
+
+                // Canvas 指纹噪声
+                const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function(type) {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        const imgData = ctx.getImageData(0, 0, this.width, this.height);
+                        for (let i = 0; i < imgData.data.length; i += 4) {
+                            imgData.data[i] = imgData.data[i] + (Math.random() * 2 - 1) | 0;
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                    }
+                    return origToDataURL.apply(this, arguments);
+                };
+
+                // WebGL 指纹伪造
+                const getParam = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(param) {
+                    if (param === 37445) return 'Google Inc. (NVIDIA)';
+                    if (param === 37446) return 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1060, OpenGL 4.5)';
+                    return getParam.apply(this, arguments);
+                };
+
+                // WebRTC IP 泄露防护（JS 层）
+                if (typeof RTCPeerConnection !== 'undefined') {
+                    const origRTC = RTCPeerConnection;
+                    window.RTCPeerConnection = function(...args) {
+                        if (args[0] && args[0].iceServers) {
+                            args[0].iceServers = [];
+                        }
+                        return new origRTC(...args);
+                    };
+                    window.RTCPeerConnection.prototype = origRTC.prototype;
+                }
+
+                // navigator.connection 伪造
+                if (!navigator.connection) {
+                    Object.defineProperty(navigator, 'connection', {
+                        get: () => ({
+                            effectiveType: '4g',
+                            rtt: 50,
+                            downlink: 10,
+                            saveData: false,
+                            type: 'wifi',
+                            addEventListener: () => {},
+                            removeEventListener: () => {},
+                        })
+                    });
+                }
+
+                // Battery API 伪造
+                if (navigator.getBattery) {
+                    navigator.getBattery = () => Promise.resolve({
+                        charging: true,
+                        chargingTime: 0,
+                        dischargingTime: Infinity,
+                        level: 1.0,
+                        addEventListener: () => {},
+                        removeEventListener: () => {},
+                    });
+                }
+            """)
+        except Exception:
+            pass
+
+        # 设置 Accept-Language HTTP 请求头
+        try:
+            page.run_cdp("Network.setExtraHTTPHeaders", headers={
+                "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7"
+            })
+        except Exception:
+            pass
+
+        # WebRTC IP 泄露防护（CDP 层）
+        try:
+            page.run_cdp("WebRTC.enable")
+        except Exception:
+            pass
 
         return page
 
-    def _run_flow(self, page, email: str, mail_client) -> dict:
-        """执行登录流程"""
+    def _extract_xsrf_token(self, page) -> str:
+        """从页面中提取真实的 XSRF Token（避免硬编码被标黑）"""
+        try:
+            html = page.html or ""
+            # 尝试从 meta 标签提取
+            m = re.search(r'name=["\']xsrf-token["\']\s+content=["\']([^"\']+-)["\']', html, re.IGNORECASE)
+            if m:
+                self._log("info", "🔑 从 meta 标签提取到 XSRF token")
+                return m.group(1)
+            # 尝试从隐藏 input 提取
+            m = re.search(r'name=["\']xsrfToken["\']\s+value=["\']([^"\']+-)["\']', html)
+            if m:
+                self._log("info", "🔑 从 input 提取到 XSRF token")
+                return m.group(1)
+            # 尝试从 JS 变量提取
+            m = re.search(r'xsrfToken["\']?\s*[=:]\s*["\']([A-Za-z0-9_-]{20,})["\']', html)
+            if m:
+                self._log("info", "🔑 从 JS 提取到 XSRF token")
+                return m.group(1)
+            # 尝试从 URL 参数提取
+            m = re.search(r'xsrfToken=([A-Za-z0-9_-]{20,})', html)
+            if m:
+                self._log("info", "🔑 从 URL 参数提取到 XSRF token")
+                return m.group(1)
+        except Exception as e:
+            self._log("warning", f"⚠️ XSRF token 提取异常: {e}")
+        self._log("warning", "⚠️ 未能从页面提取 XSRF token，使用备用值")
+        return "KdLRzKwwBTD5wo8nUollAbY6cW0"
 
-        # 记录任务开始时间，用于邮件时间过滤（全流程固定，不随重发更新）
-        from datetime import datetime
+    def _run_flow(self, page, email: str, mail_client, is_new_account: bool = False) -> dict:
+        """执行登录流程（is_new_account=True 时启用注册专用的增强用户名处理）"""
+
+        # 记录任务开始时间，用于邮件时间过滤
         task_start_time = datetime.now()
 
-        # Step 1: 导航到首页并设置 Cookie
+        # Step 1: 导航到首页，提取动态 XSRF Token
         self._log("info", f"🌐 打开登录页面: {email}")
 
         page.get(AUTH_HOME_URL, timeout=self.timeout)
-        time.sleep(2)
+        time.sleep(random.uniform(2, 4))
 
-        # 设置两个关键 Cookie
+        # 从页面动态提取 XSRF token
+        xsrf_token = self._extract_xsrf_token(page)
+
+        # 设置 XSRF Cookie
         try:
-            self._log("info", "🍪 设置认证 Cookies...")
+            self._log("info", "🍪 设置 XSRF Cookie...")
             page.set.cookies({
                 "name": "__Host-AP_SignInXsrf",
-                "value": DEFAULT_XSRF_TOKEN,
+                "value": xsrf_token,
                 "url": AUTH_HOME_URL,
-                "path": "/",
-                "secure": True,
-            })
-            # 添加 reCAPTCHA Cookie
-            page.set.cookies({
-                "name": "_GRECAPTCHA",
-                "value": "09ABCL...",
-                "url": "https://google.com",
                 "path": "/",
                 "secure": True,
             })
@@ -198,21 +350,24 @@ class GeminiAutomation:
             self._log("warning", f"⚠️ Cookie 设置失败: {e}")
 
         login_hint = quote(email, safe="")
-        login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={DEFAULT_XSRF_TOKEN}"
+        login_url = f"https://auth.business.gemini.google/login/email?continueUrl=https%3A%2F%2Fbusiness.gemini.google%2F&loginHint={login_hint}&xsrfToken={xsrf_token}"
 
-        # 提前启动网络监听，捕获默认发送
+        # 启动网络监听（只监听 batchexecute，减少干扰）
         try:
             page.listen.start(
-                targets=["batchexecute", "browserinfo", "verify-oob-code"],
+                targets=["batchexecute"],
                 is_regex=False,
-                method=("GET", "POST"),
-                res_type=("XHR", "FETCH", "DOCUMENT"),
+                method=("POST",),
+                res_type=("XHR", "FETCH"),
             )
         except Exception:
             pass
 
         page.get(login_url, timeout=self.timeout)
-        time.sleep(5)
+        time.sleep(random.uniform(3, 5))
+
+        # 模拟真实用户行为：页面加载后随机滚动
+        self._random_scroll(page)
 
         # Step 2: 检查当前页面状态
         current_url = page.url
@@ -223,9 +378,10 @@ class GeminiAutomation:
             self._log("info", "✅ 已登录，提取配置")
             return self._extract_config(page, email)
 
-        # Step 3: 点击发送验证码按钮（最多5次，每次间隔10秒）
+        # Step 3: 点击发送验证码按钮（最多3轮，指数退避间隔）
         self._log("info", "📧 发送验证码...")
-        max_send_rounds = 5
+        max_send_rounds = 3
+        send_round_delays = [15, 30, 60]
         send_round = 0
         while True:
             send_round += 1
@@ -235,8 +391,9 @@ class GeminiAutomation:
                 self._log("error", "❌ 验证码发送失败（可能触发风控），建议更换代理IP")
                 self._save_screenshot(page, "send_code_button_failed")
                 return {"success": False, "error": "send code failed after retries"}
-            self._log("warning", f"⚠️ 发送失败，10秒后重试 ({send_round}/{max_send_rounds})")
-            time.sleep(10)
+            delay = send_round_delays[min(send_round - 1, len(send_round_delays) - 1)]
+            self._log("warning", f"⚠️ 发送失败，{delay}秒后重试 ({send_round}/{max_send_rounds})")
+            time.sleep(delay)
 
         # Step 4: 等待验证码输入框出现
         code_input = self._wait_for_code_input(page)
@@ -250,11 +407,11 @@ class GeminiAutomation:
         code = mail_client.poll_for_code(timeout=15, interval=5, since_time=task_start_time)
 
         if not code:
-            self._log("warning", "⚠️ 验证码超时，15秒后重新发送...")
-            time.sleep(15)
+            self._log("warning", "⚠️ 验证码超时，等待后重新发送...")
+            time.sleep(random.uniform(12, 18))
             # 尝试点击重新发送按钮
             if self._click_resend_code_button(page):
-                # 再次轮询验证码（3次，每次5秒间隔）
+                # 再次轮询验证码
                 code = mail_client.poll_for_code(timeout=15, interval=5, since_time=task_start_time)
                 if not code:
                     self._log("error", "❌ 重新发送后仍未收到验证码")
@@ -280,15 +437,36 @@ class GeminiAutomation:
         if not self._simulate_human_input(code_input, code):
             self._log("warning", "⚠️ 模拟输入失败，降级为直接输入")
             code_input.input(code, clear=True)
-            time.sleep(0.5)
+            time.sleep(random.uniform(0.4, 0.8))
 
-        # 直接使用回车提交，不再查找按钮
+        # 提交验证码：先回车，再找验证按钮兜底
         self._log("info", "⏎ 提交验证码")
         code_input.input("\n")
+        time.sleep(random.uniform(1, 2))
+        # 如果回车没触发，找验证按钮点击
+        if "verify-oob-code" in page.url:
+            verify_btn = self._find_verify_button(page)
+            if verify_btn:
+                try:
+                    verify_btn.click()
+                    self._log("info", "✅ 已点击验证按钮（兜底）")
+                except Exception:
+                    pass
 
-        # Step 7: 等待页面自动重定向（提交验证码后 Google 会自动跳转）
+        # [注册专用] 验证码提交后立刻轮询姓名输入框
+        if is_new_account:
+            self._log("info", "📝 [注册] 验证码已提交，立即等待姓名输入页面...")
+            if self._handle_username_setup(page, is_new_account=True):
+                self._log("info", "✅ 姓名填写完成，等待工作台 URL...")
+                if self._wait_for_business_params(page, timeout=45):
+                    self._log("info", "🎊 注册成功，提取配置...")
+                    return self._extract_config(page, email)
+            # 姓名步骤失败或未出现，继续走通用流程兜底
+            self._log("info", "⚠️ 姓名步骤未完成，走通用流程兜底...")
+
+        # Step 7: 等待页面自动重定向
         self._log("info", "⏳ 等待验证后跳转...")
-        time.sleep(12)
+        time.sleep(random.uniform(10, 15))
 
         # 记录当前 URL 状态
         current_url = page.url
@@ -313,17 +491,17 @@ class GeminiAutomation:
         # Step 10: 如果不在正确的页面，尝试导航
         if "business.gemini.google" not in current_url:
             page.get("https://business.gemini.google/", timeout=self.timeout)
-            time.sleep(5)
+            time.sleep(random.uniform(4, 7))
 
-        # Step 11: 检查是否需要设置用户名
-        if "cid" not in page.url:
+        # Step 11: 检查是否需要设置用户名（仅登录刷新走此路径，注册已在早期处理）
+        if not is_new_account and "cid" not in page.url:
             if self._handle_username_setup(page):
-                time.sleep(5)
+                time.sleep(random.uniform(4, 7))
 
         # Step 12: 等待 URL 参数生成（csesidx 和 cid）
         if not self._wait_for_business_params(page):
             page.refresh()
-            time.sleep(5)
+            time.sleep(random.uniform(4, 7))
             if not self._wait_for_business_params(page):
                 self._log("error", "❌ URL 参数生成失败")
                 self._save_screenshot(page, "params_missing")
@@ -335,9 +513,10 @@ class GeminiAutomation:
 
     def _click_send_code_button(self, page) -> bool:
         """点击发送验证码按钮（如果需要）"""
-        time.sleep(2)
-        max_send_attempts = 5
-        resend_delay_seconds = 10
+        time.sleep(random.uniform(1.5, 3))
+        max_send_attempts = 3
+        # 指数退避延迟序列（秒）
+        retry_delays = [15, 30, 60]
 
         # 方法1: 直接通过ID查找
         direct_btn = page.ele("#sign-in-with-email", timeout=5)
@@ -345,15 +524,16 @@ class GeminiAutomation:
             for attempt in range(1, max_send_attempts + 1):
                 try:
                     self._last_send_error = ""
-                    direct_btn.click()
+                    self._human_click(page, direct_btn)
                     if self._verify_code_send_by_network(page) or self._verify_code_send_status(page):
                         self._stop_listen(page)
                         return True
+                    delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
                     if self._last_send_error == "captcha_check_failed":
                         self._log("error", f"❌ 触发风控，建议更换代理IP ({attempt}/{max_send_attempts})")
                     else:
-                        self._log("warning", f"⚠️ 发送失败，{resend_delay_seconds}秒后重试 ({attempt}/{max_send_attempts})")
-                    time.sleep(resend_delay_seconds)
+                        self._log("warning", f"⚠️ 发送失败，{delay}秒后重试 ({attempt}/{max_send_attempts})")
+                    time.sleep(delay)
                 except Exception as e:
                     self._log("warning", f"⚠️ 点击失败: {e}")
             self._stop_listen(page)
@@ -369,15 +549,16 @@ class GeminiAutomation:
                     for attempt in range(1, max_send_attempts + 1):
                         try:
                             self._last_send_error = ""
-                            btn.click()
+                            self._human_click(page, btn)
                             if self._verify_code_send_by_network(page) or self._verify_code_send_status(page):
                                 self._stop_listen(page)
                                 return True
+                            delay = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
                             if self._last_send_error == "captcha_check_failed":
                                 self._log("error", f"❌ 触发风控，建议更换代理IP ({attempt}/{max_send_attempts})")
                             else:
-                                self._log("warning", f"⚠️ 发送失败，{resend_delay_seconds}秒后重试 ({attempt}/{max_send_attempts})")
-                            time.sleep(resend_delay_seconds)
+                                self._log("warning", f"⚠️ 发送失败，{delay}秒后重试 ({attempt}/{max_send_attempts})")
+                            time.sleep(delay)
                         except Exception as e:
                             self._log("warning", f"⚠️ 点击失败: {e}")
                     self._stop_listen(page)
@@ -391,7 +572,7 @@ class GeminiAutomation:
             self._stop_listen(page)
             self._log("info", "✅ 已在验证码输入页面")
 
-            # 直接点击重新发送按钮（不管之前是否发送过）
+            # 直接点击重新发送按钮
             if self._click_resend_code_button(page):
                 self._log("info", "✅ 已点击重新发送按钮")
                 return True
@@ -477,7 +658,7 @@ class GeminiAutomation:
 
     def _verify_code_send_status(self, page) -> bool:
         """检测页面提示判断是否发送成功"""
-        time.sleep(2)
+        time.sleep(random.uniform(1.5, 3))
         try:
             success_keywords = ["验证码已发送", "code sent", "email sent", "check your email", "已发送"]
             error_keywords = [
@@ -581,19 +762,50 @@ class GeminiAutomation:
         return None
 
     def _simulate_human_input(self, element, text: str) -> bool:
-        """模拟人类输入（逐字符输入，带随机延迟）"""
+        """模拟人类输入（逐字符输入，带非均匀延迟）"""
         try:
+            # 先点击输入框获取焦点
             element.click()
-            time.sleep(random.uniform(0.1, 0.3))
-
-            for char in text:
-                element.input(char)
-                time.sleep(random.uniform(0.05, 0.15))
-
             time.sleep(random.uniform(0.2, 0.5))
+
+            # 逐字符输入，模拟真实打字节奏
+            for i, char in enumerate(text):
+                element.input(char)
+                # 基础延迟 80-180ms（正常打字速度）
+                delay = random.uniform(0.08, 0.18)
+                # 每3-5个字符偶尔有更长的停顿
+                if i > 0 and random.random() < 0.2:
+                    delay += random.uniform(0.2, 0.5)
+                time.sleep(delay)
+
+            # 输入完成后停顿（模拟核对）
+            time.sleep(random.uniform(0.3, 0.8))
             return True
         except Exception:
             return False
+
+    def _human_click(self, page, element) -> None:
+        """模拟人类点击：先移动鼠标到元素附近，再点击"""
+        try:
+            page.actions.move_to(element)
+            time.sleep(random.uniform(0.1, 0.3))
+            page.actions.click()
+        except Exception:
+            # 降级为直接点击
+            element.click()
+
+    def _random_scroll(self, page) -> None:
+        """模拟真实用户的页面滚动行为"""
+        try:
+            scroll_amount = random.randint(50, 200)
+            page.run_js(f"window.scrollBy(0, {scroll_amount})")
+            time.sleep(random.uniform(0.3, 0.8))
+            # 有时候滚回去一点
+            if random.random() < 0.3:
+                page.run_js(f"window.scrollBy(0, -{random.randint(20, 80)})")
+                time.sleep(random.uniform(0.2, 0.5))
+        except Exception:
+            pass
 
     def _find_verify_button(self, page):
         """查找验证按钮（排除重新发送按钮）"""
@@ -609,7 +821,7 @@ class GeminiAutomation:
 
     def _click_resend_code_button(self, page) -> bool:
         """点击重新发送验证码按钮"""
-        time.sleep(2)
+        time.sleep(random.uniform(1.5, 3))
 
         try:
             buttons = page.eles("tag:button")
@@ -617,9 +829,9 @@ class GeminiAutomation:
                 text = (btn.text or "").strip().lower()
                 if text and ("重新" in text or "resend" in text):
                     try:
-                        self._log("info", f"🔄 点击重新发送按钮")
-                        btn.click()
-                        time.sleep(2)
+                        self._log("info", "🔄 点击重新发送按钮")
+                        self._human_click(page, btn)
+                        time.sleep(random.uniform(1.5, 3))
                         return True
                     except Exception:
                         pass
@@ -633,8 +845,8 @@ class GeminiAutomation:
         if "/admin/create" in page.url:
             agree_btn = page.ele("css:button.agree-button", timeout=5)
             if agree_btn:
-                agree_btn.click()
-                time.sleep(2)
+                self._human_click(page, agree_btn)
+                time.sleep(random.uniform(2, 4))
 
     def _wait_for_cid(self, page, timeout: int = 10) -> bool:
         """等待URL包含cid"""
@@ -653,69 +865,108 @@ class GeminiAutomation:
             time.sleep(1)
         return False
 
-    def _handle_username_setup(self, page) -> bool:
-        """处理用户名设置页面"""
+    def _handle_username_setup(self, page, is_new_account: bool = False) -> bool:
+        """处理用户名设置页面（is_new_account=True 时启用按钮兜底和延长超时）"""
         current_url = page.url
 
         if "auth.business.gemini.google/login" in current_url:
             return False
 
+        # 精准选择器
         selectors = [
-            "css:input[type='text']",
+            "css:input[formcontrolname='fullName']",
+            "css:input#mat-input-0",
+            "css:input[placeholder='全名']",
+            "css:input[placeholder='Full name']",
             "css:input[name='displayName']",
             "css:input[aria-label*='用户名' i]",
             "css:input[aria-label*='display name' i]",
+            "css:input[type='text']",
         ]
 
+        # 轮询等待输入框出现（最多30秒）
         username_input = None
-        for selector in selectors:
-            try:
-                username_input = page.ele(selector, timeout=2)
-                if username_input:
-                    break
-            except Exception:
-                continue
+        self._log("info", "⏳ 等待用户名输入框出现（最多30秒）...")
+        for _ in range(30):
+            for selector in selectors:
+                try:
+                    el = page.ele(selector, timeout=1)
+                    if el:
+                        username_input = el
+                        self._log("info", f"✅ 找到用户名输入框: {selector}")
+                        break
+                except Exception:
+                    continue
+            if username_input:
+                break
+            time.sleep(1)
 
         if not username_input:
+            self._log("warning", "⚠️ 30秒内未找到用户名输入框，跳过此步骤")
             return False
 
-        suffix = "".join(random.choices(string.ascii_letters + string.digits, k=3))
-        username = f"Test{suffix}"
+        name = random.choice(REGISTER_NAMES)
+        self._log("info", f"✏️ 输入姓名: {name}")
 
         try:
+            # 清空输入框
             username_input.click()
-            time.sleep(0.2)
+            time.sleep(random.uniform(0.2, 0.5))
             username_input.clear()
-            time.sleep(0.1)
+            time.sleep(random.uniform(0.1, 0.3))
 
-            if not self._simulate_human_input(username_input, username):
-                username_input.input(username)
+            # 尝试模拟人类输入，失败则降级到直接注入
+            if not self._simulate_human_input(username_input, name):
+                username_input.input(name)
                 time.sleep(0.3)
 
-            buttons = page.eles("tag:button")
-            submit_btn = None
-            for btn in buttons:
-                text = (btn.text or "").strip().lower()
-                if any(kw in text for kw in ["确认", "提交", "继续", "submit", "continue", "confirm", "save", "保存", "下一步", "next"]):
-                    submit_btn = btn
-                    break
+            # 回车提交
+            username_input.input("\n")
 
-            if submit_btn:
-                submit_btn.click()
+            if is_new_account:
+                # 注册专用：回车后等待1.5秒，若未跳转则用按钮兜底
+                time.sleep(random.uniform(1.5, 3))
+                if "cid" not in page.url:
+                    self._log("info", "⌨️ 回车未跳转，尝试点击提交按钮...")
+                    try:
+                        for btn in page.eles("tag:button"):
+                            try:
+                                if btn.is_displayed() and btn.is_enabled():
+                                    btn.click()
+                                    self._log("info", "✅ 已点击提交按钮（兜底）")
+                                    time.sleep(1)
+                                    break
+                            except Exception:
+                                continue
+                    except Exception as e:
+                        self._log("warning", f"⚠️ 按钮兜底失败: {e}")
+
+                # 注册专用：等待45秒，失败则刷新再等15秒
+                if not self._wait_for_cid(page, timeout=45):
+                    self._log("warning", "⚠️ 用户名提交后未检测到 cid 参数，尝试刷新...")
+                    page.refresh()
+                    time.sleep(random.uniform(2, 4))
+                    if not self._wait_for_cid(page, timeout=15):
+                        self._log("error", "❌ 刷新后仍未检测到 cid 参数")
+                        self._save_screenshot(page, "step7_after_verify")
+                        return False
             else:
-                username_input.input("\n")
+                # 登录刷新：原有30秒逻辑
+                if not self._wait_for_cid(page, timeout=30):
+                    self._log("warning", "⚠️ 用户名提交后未检测到 cid 参数")
+                    return False
 
-            time.sleep(5)
             return True
-        except Exception:
+        except Exception as e:
+            self._log("warning", f"⚠️ 用户名设置异常: {e}")
             return False
 
     def _extract_config(self, page, email: str) -> dict:
-        """提取配置"""
+        """提取配置（轮询等待 cookie 到位）"""
         try:
             if "cid/" not in page.url:
                 page.get("https://business.gemini.google/", timeout=self.timeout)
-                time.sleep(3)
+                time.sleep(random.uniform(2, 4))
 
             url = page.url
             if "cid/" not in url:
@@ -724,12 +975,23 @@ class GeminiAutomation:
             config_id = url.split("cid/")[1].split("?")[0].split("/")[0]
             csesidx = url.split("csesidx=")[1].split("&")[0] if "csesidx=" in url else ""
 
-            cookies = page.cookies()
-            ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
-            host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
+            # 轮询等待关键 cookie 到位（最多10秒）
+            ses = None
+            host = None
+            ses_obj = None
+            for _ in range(10):
+                cookies = page.cookies()
+                ses = next((c["value"] for c in cookies if c["name"] == "__Secure-C_SES"), None)
+                host = next((c["value"] for c in cookies if c["name"] == "__Host-C_OSES"), None)
+                ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
+                if ses and host:
+                    break
+                time.sleep(1)
 
-            ses_obj = next((c for c in cookies if c["name"] == "__Secure-C_SES"), None)
-            # 使用北京时区，确保时间计算正确（Cookie expiry 是 UTC 时间戳）
+            if not ses or not host:
+                self._log("warning", f"⚠️ Cookie 不完整 (ses={'有' if ses else '无'}, host={'有' if host else '无'})")
+
+            # 使用北京时区
             beijing_tz = timezone(timedelta(hours=8))
             if ses_obj and "expiry" in ses_obj:
                 cookie_expire_beijing = datetime.fromtimestamp(ses_obj["expiry"], tz=beijing_tz)
@@ -756,8 +1018,7 @@ class GeminiAutomation:
             return {"success": False, "error": str(e)}
 
     def _extract_trial_end(self, page, csesidx: str, config_id: str) -> Optional[str]:
-        """从页面中提取试用期到期日期，不跳转到可能 400 的深层路径"""
-        import re
+        """从页面中提取试用期到期日期"""
         try:
             self._log("info", "📅 获取试用期信息...")
 
@@ -768,7 +1029,7 @@ class GeminiAutomation:
 
             def _search_page_source(source: str) -> Optional[str]:
                 """在页面源码中搜索试用期信息"""
-                # 格式1: "daysLeft":29 (JSON数据)
+                # 格式1: "daysLeft":29
                 m = re.search(r'"daysLeft"\s*:\s*(\d+)', source)
                 if m:
                     return _days_to_end_date(int(m.group(1)))
@@ -776,7 +1037,7 @@ class GeminiAutomation:
                 m = re.search(r'"trialDaysRemaining"\s*:\s*(\d+)', source)
                 if m:
                     return _days_to_end_date(int(m.group(1)))
-                # 格式3: 日期数组 "[2026,3,25]" 形式 (batchexecute格式)
+                # 格式3: 日期数组 "[2026,3,25]" 形式
                 m = re.search(r'\[(\d{4}),(\d{1,2}),(\d{1,2})\].*?\[(\d{4}),(\d{1,2}),(\d{1,2})\]', source)
                 if m:
                     try:
@@ -795,7 +1056,7 @@ class GeminiAutomation:
                     return _days_to_end_date(int(m.group(1)))
                 return None
 
-            # ——— 方式1: 当前页面（刚登录完，不需要跳转）———
+            # ——— 方式1: 当前页面 ———
             try:
                 source = page.html
                 result = _search_page_source(source or "")
@@ -804,11 +1065,11 @@ class GeminiAutomation:
             except Exception:
                 pass
 
-            # ——— 方式2: 跳转到 /settings———
+            # ——— 方式2: 跳转到 /settings ———
             try:
                 settings_url = f"https://business.gemini.google/cid/{config_id}/settings?csesidx={csesidx}"
                 page.get(settings_url, timeout=self.timeout)
-                time.sleep(2)
+                time.sleep(random.uniform(1.5, 3))
                 source = page.html
                 result = _search_page_source(source or "")
                 if result:
@@ -816,11 +1077,11 @@ class GeminiAutomation:
             except Exception:
                 pass
 
-            # ——— 方式3: 跳转到主页（最保险）———
+            # ——— 方式3: 跳转到主页 ———
             try:
                 main_url = f"https://business.gemini.google/cid/{config_id}?csesidx={csesidx}"
                 page.get(main_url, timeout=self.timeout)
-                time.sleep(2)
+                time.sleep(random.uniform(1.5, 3))
                 source = page.html
                 result = _search_page_source(source or "")
                 if result:
@@ -867,6 +1128,7 @@ class GeminiAutomation:
 
     @staticmethod
     def _get_ua() -> str:
-        """生成随机User-Agent"""
-        v = random.choice(["120.0.0.0", "121.0.0.0", "122.0.0.0"])
+        """生成随机User-Agent（使用当前主流 Chrome 版本）"""
+        major = random.choice([132, 133, 134, 135])
+        v = f"{major}.0.{random.randint(6800, 6950)}.{random.randint(50, 150)}"
         return f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v} Safari/537.36"

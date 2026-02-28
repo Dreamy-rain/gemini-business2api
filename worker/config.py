@@ -57,6 +57,8 @@ class BasicConfig(BaseModel):
     gptmail_domain: str = Field(default="", description="GPTMail 邮箱域名")
     browser_headless: bool = Field(default=False, description="浏览器无头模式")
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
+    register_domain: str = Field(default="", description="注册账号使用的邮箱域名（DuckMail专用）")
+    register_default_count: int = Field(default=1, ge=1, le=20, description="默认注册账号数量")
 
 
 class RetryConfig(BaseModel):
@@ -67,6 +69,9 @@ class RetryConfig(BaseModel):
     refresh_batch_interval_minutes: int = Field(default=30, ge=5, le=120, description="批次间等待时间(分钟)")
     refresh_cooldown_hours: float = Field(default=12.0, ge=1, le=48, description="同一账号刷新冷却期(小时)")
     scheduled_refresh_interval_minutes: int = Field(default=0, ge=0, le=720, description="(旧字段，已废弃) 定时刷新检测间隔")
+    delete_expired_accounts: bool = Field(default=False, description="是否自动删除过期账号")
+    auto_register_enabled: bool = Field(default=False, description="是否启用账号不足时自动注册")
+    min_account_count: int = Field(default=0, ge=0, le=100, description="最低账号数量，低于此值时自动注册补充")
 
 
 class WorkerConfig(BaseModel):
@@ -118,6 +123,8 @@ class ConfigManager:
             gptmail_domain=str(basic_data.get("gptmail_domain") or "").strip(),
             browser_headless=_parse_bool(basic_data.get("browser_headless"), False),
             refresh_window_hours=int(basic_data.get("refresh_window_hours", 1)),
+            register_domain=str(basic_data.get("register_domain") or "").strip(),
+            register_default_count=max(1, int(basic_data.get("register_default_count", 1))),
         )
 
         try:
@@ -167,6 +174,41 @@ class ConfigManager:
         if env_proxy is not None:
             self._config.basic.proxy_for_auth = env_proxy.strip()
             logger.info("[CONFIG] env override: PROXY_FOR_AUTH=%s", "***" if env_proxy.strip() else "(empty)")
+
+        env_delete_expired = os.getenv("DELETE_EXPIRED_ACCOUNTS")
+        if env_delete_expired is not None:
+            val = _parse_bool(env_delete_expired, self._config.retry.delete_expired_accounts)
+            self._config.retry.delete_expired_accounts = val
+            logger.info("[CONFIG] env override: DELETE_EXPIRED_ACCOUNTS=%s", val)
+
+        env_auto_register = os.getenv("AUTO_REGISTER_ENABLED")
+        if env_auto_register is not None:
+            val = _parse_bool(env_auto_register, self._config.retry.auto_register_enabled)
+            self._config.retry.auto_register_enabled = val
+            logger.info("[CONFIG] env override: AUTO_REGISTER_ENABLED=%s", val)
+
+        env_min_count = os.getenv("MIN_ACCOUNT_COUNT")
+        if env_min_count is not None:
+            try:
+                val = max(0, min(100, int(env_min_count)))
+                self._config.retry.min_account_count = val
+                logger.info("[CONFIG] env override: MIN_ACCOUNT_COUNT=%d", val)
+            except ValueError:
+                logger.warning("[CONFIG] invalid MIN_ACCOUNT_COUNT=%r, ignored", env_min_count)
+
+        env_register_domain = os.getenv("REGISTER_DOMAIN")
+        if env_register_domain is not None:
+            self._config.basic.register_domain = env_register_domain.strip()
+            logger.info("[CONFIG] env override: REGISTER_DOMAIN=%s", env_register_domain.strip() or "(empty)")
+
+        env_register_count = os.getenv("REGISTER_DEFAULT_COUNT")
+        if env_register_count is not None:
+            try:
+                val = max(1, min(20, int(env_register_count)))
+                self._config.basic.register_default_count = val
+                logger.info("[CONFIG] env override: REGISTER_DEFAULT_COUNT=%d", val)
+            except ValueError:
+                logger.warning("[CONFIG] invalid REGISTER_DEFAULT_COUNT=%r, ignored", env_register_count)
 
     def _load_from_db(self) -> dict:
         """Load config from database (allows empty config)."""

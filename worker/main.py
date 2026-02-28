@@ -94,6 +94,12 @@ async def main() -> None:
         config.basic.browser_headless,
         config.basic.refresh_window_hours,
     )
+    logger.info(
+        "[INIT] account management — delete_expired=%s, auto_register=%s, min_count=%d",
+        config.retry.delete_expired_accounts,
+        config.retry.auto_register_enabled,
+        config.retry.min_account_count,
+    )
     # Log which env overrides are active
     env_overrides = []
     if os.getenv("FORCE_REFRESH_ENABLED") is not None:
@@ -106,6 +112,16 @@ async def main() -> None:
         env_overrides.append(f"BROWSER_HEADLESS={os.getenv('BROWSER_HEADLESS')}")
     if os.getenv("PROXY_FOR_AUTH") is not None:
         env_overrides.append("PROXY_FOR_AUTH=***")
+    if os.getenv("DELETE_EXPIRED_ACCOUNTS") is not None:
+        env_overrides.append(f"DELETE_EXPIRED_ACCOUNTS={os.getenv('DELETE_EXPIRED_ACCOUNTS')}")
+    if os.getenv("AUTO_REGISTER_ENABLED") is not None:
+        env_overrides.append(f"AUTO_REGISTER_ENABLED={os.getenv('AUTO_REGISTER_ENABLED')}")
+    if os.getenv("MIN_ACCOUNT_COUNT") is not None:
+        env_overrides.append(f"MIN_ACCOUNT_COUNT={os.getenv('MIN_ACCOUNT_COUNT')}")
+    if os.getenv("REGISTER_DOMAIN") is not None:
+        env_overrides.append(f"REGISTER_DOMAIN={os.getenv('REGISTER_DOMAIN')}")
+    if os.getenv("REGISTER_DEFAULT_COUNT") is not None:
+        env_overrides.append(f"REGISTER_DEFAULT_COUNT={os.getenv('REGISTER_DEFAULT_COUNT')}")
     if env_overrides:
         logger.info("[INIT] env overrides active: %s", ", ".join(env_overrides))
     else:

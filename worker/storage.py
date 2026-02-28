@@ -439,6 +439,136 @@ def update_account_data_sync(account_id: str, data: dict) -> bool:
     return _run_in_db_loop(_update_account_data(account_id, data))
 
 
+# ==================== Delete account ====================
+
+async def _delete_account(account_id: str) -> bool:
+    backend = _get_backend()
+    if backend == "postgres":
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM accounts WHERE account_id = $1",
+                account_id,
+            )
+        return result.startswith("DELETE") and not result.endswith("0")
+    if backend == "sqlite":
+        conn = _get_sqlite_conn()
+        with _sqlite_lock, conn:
+            cur = conn.execute(
+                "DELETE FROM accounts WHERE account_id = ?",
+                (account_id,),
+            )
+        return cur.rowcount > 0
+    return False
+
+
+async def delete_accounts(account_ids: list) -> int:
+    """Delete multiple accounts by IDs. Returns number deleted."""
+    if not account_ids:
+        return 0
+    deleted = 0
+    for account_id in account_ids:
+        try:
+            if await _delete_account(account_id):
+                deleted += 1
+        except Exception as e:
+            logger.error(f"[STORAGE] Delete account {account_id} failed: {e}")
+    if deleted:
+        logger.info(f"[STORAGE] Deleted {deleted}/{len(account_ids)} accounts")
+    return deleted
+
+
+def delete_accounts_sync(account_ids: list) -> int:
+    """Sync wrapper for delete_accounts."""
+    return _run_in_db_loop(delete_accounts(account_ids))
+
+
+# ==================== Add account ====================
+
+async def _get_max_position() -> int:
+    backend = _get_backend()
+    if backend == "postgres":
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT COALESCE(MAX(position), 0) AS max_pos FROM accounts")
+        return row["max_pos"] if row else 0
+    if backend == "sqlite":
+        conn = _get_sqlite_conn()
+        with _sqlite_lock:
+            row = conn.execute("SELECT COALESCE(MAX(position), 0) AS max_pos FROM accounts").fetchone()
+        return row["max_pos"] if row else 0
+    return 0
+
+
+async def add_account(account_data: dict) -> bool:
+    """Add a new account to the database."""
+    if not is_database_enabled():
+        return False
+    account_id = account_data.get("id")
+    if not account_id:
+        return False
+    try:
+        max_pos = await _get_max_position()
+        position = max_pos + 1
+        payload = json.dumps(account_data, ensure_ascii=False)
+        backend = _get_backend()
+        if backend == "postgres":
+            pool = await _get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO accounts (account_id, position, data, updated_at)
+                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                    ON CONFLICT (account_id) DO UPDATE SET
+                        data = EXCLUDED.data,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    account_id,
+                    position,
+                    payload,
+                )
+            logger.info(f"[STORAGE] Added account {account_id} at position {position}")
+            return True
+        if backend == "sqlite":
+            conn = _get_sqlite_conn()
+            with _sqlite_lock, conn:
+                conn.execute(
+                    """
+                    INSERT INTO accounts (account_id, position, data, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(account_id) DO UPDATE SET
+                        data = excluded.data,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (account_id, position, payload),
+                )
+            logger.info(f"[STORAGE] Added account {account_id} at position {position}")
+            return True
+    except Exception as e:
+        logger.error(f"[STORAGE] Add account failed: {e}")
+    return False
+
+
+def add_account_sync(account_data: dict) -> bool:
+    """Sync wrapper for add_account."""
+    return _run_in_db_loop(add_account(account_data))
+
+
+# ==================== Count accounts ====================
+
+async def count_active_accounts() -> int:
+    """Count non-disabled accounts."""
+    accounts = await _load_accounts_from_table()
+    if not accounts:
+        return 0
+    return sum(1 for acc in accounts if not acc.get("disabled"))
+
+
+def count_active_accounts_sync() -> int:
+    """Sync wrapper for count_active_accounts."""
+    return _run_in_db_loop(count_active_accounts())
+
+
 # ==================== Settings storage ====================
 
 async def _load_kv(table_name: str, key: str) -> Optional[dict]:

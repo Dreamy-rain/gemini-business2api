@@ -495,6 +495,14 @@ class RefreshService:
                 self._append_log(task, "error", f"❌ 失败原因: {error}")
                 self._append_log(task, "error", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
+                # 403 域名封禁 → 自动禁用账户
+                if '403' in error:
+                    try:
+                        storage.disable_account_sync(account_id, reason="403 Access Restricted")
+                        self._append_log(task, "warning", f"🚫 已自动禁用账户: {account_id} (403 域名封禁)")
+                    except Exception as e:
+                        logger.warning(f"[REFRESH] 自动禁用失败: {account_id}: {e}")
+
         if task.cancel_requested:
             task.status = TaskStatus.CANCELLED
         else:

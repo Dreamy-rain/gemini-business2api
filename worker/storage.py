@@ -569,6 +569,26 @@ def count_active_accounts_sync() -> int:
     return _run_in_db_loop(count_active_accounts())
 
 
+async def disable_account(account_id: str, reason: str = "") -> bool:
+    """Disable an account by setting disabled=True in its data."""
+    try:
+        data = await _get_account_data(account_id)
+        if data is None:
+            return False
+        data["disabled"] = True
+        if reason:
+            data["disabled_reason"] = reason
+        return await _update_account_data(account_id, data)
+    except Exception as e:
+        logger.error(f"[STORAGE] Disable account {account_id} failed: {e}")
+    return False
+
+
+def disable_account_sync(account_id: str, reason: str = "") -> bool:
+    """Sync wrapper for disable_account."""
+    return _run_in_db_loop(disable_account(account_id, reason))
+
+
 # ==================== Settings storage ====================
 
 async def _load_kv(table_name: str, key: str) -> Optional[dict]:

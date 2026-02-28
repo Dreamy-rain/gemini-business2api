@@ -302,7 +302,7 @@ class GeminiAutomation:
                 self._log("info", "🔑 从 meta 标签提取到 XSRF token")
                 return m.group(1)
             # 尝试从隐藏 input 提取
-            m = re.search(r'name=["\']xsrfToken["\']\s+value=["\']([^"\']+-)["\']', html)
+            m = re.search(r'name=["\']xsrfToken["\'][^>]*value=["\']([A-Za-z0-9_-]{20,})["\']', html)
             if m:
                 self._log("info", "🔑 从 input 提取到 XSRF token")
                 return m.group(1)
@@ -319,7 +319,7 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ XSRF token 提取异常: {e}")
         self._log("warning", "⚠️ 未能从页面提取 XSRF token，使用备用值")
-        return "KdLRzKwwBTD5wo8nUollAbY6cW0"
+        return "GXO_B0wnNhs6UQJZMcrSbTsbEEs"
 
     def _run_flow(self, page, email: str, mail_client, is_new_account: bool = False) -> dict:
         """执行登录流程（is_new_account=True 时启用注册专用的增强用户名处理）"""
@@ -377,6 +377,11 @@ class GeminiAutomation:
         if has_business_params:
             self._log("info", "✅ 已登录，提取配置")
             return self._extract_config(page, email)
+
+        # 检测 403 Access Restricted（刷新/登录时账户可能已被封禁）
+        access_error = self._check_access_restricted(page, email)
+        if access_error:
+            return access_error
 
         # Step 3: 点击发送验证码按钮（最多3轮，指数退避间隔）
         self._log("info", "📧 发送验证码...")
@@ -1094,6 +1099,48 @@ class GeminiAutomation:
         except Exception as e:
             self._log("warning", f"⚠️ 获取试用期失败: {e}")
             return None
+
+    def _check_access_restricted(self, page, email: str = "") -> dict | None:
+        """检测 403 Access Restricted 页面，返回错误 dict 或 None"""
+        domain = email.split("@")[1] if "@" in email else "unknown"
+        error_msg = f"403 域名封禁 ({domain})"
+
+        # 方法1: 搜索 h1 标签
+        try:
+            h1 = page.ele("tag:h1", timeout=2)
+            h1_text = h1.text if h1 else ""
+            if h1_text and "Access Restricted" in h1_text:
+                self._log("error", "⛔ 403 Access Restricted: email banned by Google")
+                self._log("error", f"⛔ 403 访问受限，域名 {domain} 可能已被 Google 封禁")
+                self._save_screenshot(page, "access_restricted_403")
+                return {"success": False, "error": error_msg}
+        except Exception:
+            pass
+
+        # 方法2: body 文本
+        try:
+            body = page.ele("tag:body", timeout=2)
+            body_text = (body.text or "")[:500] if body else ""
+            if "Access Restricted" in body_text:
+                self._log("error", "⛔ 403 Access Restricted: email banned by Google")
+                self._log("error", f"⛔ 403 访问受限，域名 {domain} 可能已被 Google 封禁")
+                self._save_screenshot(page, "access_restricted_403")
+                return {"success": False, "error": error_msg}
+        except Exception:
+            pass
+
+        # 方法3: page.html 源码
+        try:
+            html = (page.html or "")[:2000]
+            if "Access Restricted" in html:
+                self._log("error", "⛔ 403 Access Restricted: email banned by Google")
+                self._log("error", f"⛔ 403 访问受限，域名 {domain} 可能已被 Google 封禁")
+                self._save_screenshot(page, "access_restricted_403")
+                return {"success": False, "error": error_msg}
+        except Exception:
+            pass
+
+        return None
 
     def _save_screenshot(self, page, name: str) -> None:
         """保存截图"""

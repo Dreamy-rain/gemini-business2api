@@ -101,6 +101,7 @@ export interface Settings {
     refresh_window_hours?: number
     register_default_count?: number
     register_domain?: string
+    image_expire_hours?: number
   }
   retry: {
     max_account_switch_tries: number

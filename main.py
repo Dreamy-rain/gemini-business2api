@@ -823,6 +823,14 @@ async def startup_event():
         asyncio.create_task(save_cooldown_states_task())
         logger.info("[SYSTEM] 冷却状态定期保存任务已启动（间隔: 5分钟）")
 
+    # 启动媒体文件过期清理任务
+    asyncio.create_task(cleanup_expired_media_task())
+    expire_hours = config.basic.image_expire_hours
+    if expire_hours < 0:
+        logger.info("[SYSTEM] 媒体文件过期清理已跳过（设置为永不删除）")
+    else:
+        logger.info(f"[SYSTEM] 媒体文件过期清理任务已启动（过期时间: {expire_hours}小时，检查间隔: 30分钟）")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -855,6 +863,181 @@ async def cleanup_database_task():
             logger.info(f"[DATABASE] 清理了 {deleted_count} 条过期数据（保留30天）")
         except Exception as e:
             logger.error(f"[DATABASE] 清理数据失败: {e}")
+
+# ---------- 图片画廊 API ----------
+
+def _scan_media_files() -> list:
+    """扫描 data/images 和 data/videos 目录中的所有媒体文件"""
+    beijing_tz = timezone(timedelta(hours=8))
+    now = time.time()
+    expire_hours = config.basic.image_expire_hours
+    files = []
+
+    for directory, url_prefix, media_type in [
+        (IMAGE_DIR, "images", "image"),
+        (VIDEO_DIR, "videos", "video"),
+    ]:
+        if not os.path.isdir(directory):
+            continue
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+            if not os.path.isfile(filepath):
+                continue
+            try:
+                stat = os.stat(filepath)
+                mtime = stat.st_mtime
+                size = stat.st_size
+                created_at = datetime.fromtimestamp(mtime, tz=beijing_tz).strftime("%Y-%m-%d %H:%M:%S")
+                # 计算剩余有效时间
+                if expire_hours > 0:
+                    expires_in_seconds = (mtime + expire_hours * 3600) - now
+                    expired = expires_in_seconds <= 0
+                else:
+                    expires_in_seconds = -1  # 永不过期
+                    expired = False
+
+                ext = os.path.splitext(filename)[1].lower()
+                file_type = "video" if ext in (".mp4", ".webm", ".mov") else media_type
+
+                files.append({
+                    "filename": filename,
+                    "url": f"/{url_prefix}/{filename}",
+                    "size": size,
+                    "created_at": created_at,
+                    "mtime": mtime,
+                    "type": file_type,
+                    "expired": expired,
+                    "expires_in_seconds": int(expires_in_seconds) if expire_hours > 0 else None,
+                })
+            except Exception:
+                continue
+
+    # 按创建时间倒序
+    files.sort(key=lambda x: x["mtime"], reverse=True)
+    return files
+
+
+@app.get("/admin/gallery")
+@require_login()
+async def admin_get_gallery(request: Request):
+    """获取图片画廊列表"""
+    files = await asyncio.to_thread(_scan_media_files)
+    total_size = sum(f["size"] for f in files)
+
+    return {
+        "files": files,
+        "total": len(files),
+        "total_size": total_size,
+        "expire_hours": config.basic.image_expire_hours,
+    }
+
+
+@app.delete("/admin/gallery/{filename:path}")
+@require_login()
+async def admin_delete_gallery_file(request: Request, filename: str):
+    """删除画廊中的单个文件"""
+    # 安全校验：防止路径穿越
+    safe_name = os.path.basename(filename)
+    if safe_name != filename or ".." in filename:
+        raise HTTPException(400, "非法文件名")
+
+    # 在 images 和 videos 目录中查找
+    for directory in [IMAGE_DIR, VIDEO_DIR]:
+        filepath = os.path.join(directory, safe_name)
+        if os.path.isfile(filepath):
+            try:
+                os.remove(filepath)
+                logger.info(f"[GALLERY] 已删除文件: {safe_name}")
+                return {"success": True, "message": f"已删除 {safe_name}"}
+            except Exception as e:
+                raise HTTPException(500, f"删除失败: {str(e)}")
+
+    raise HTTPException(404, "文件不存在")
+
+
+@app.post("/admin/gallery/cleanup")
+@require_login()
+async def admin_cleanup_expired(request: Request):
+    """立即清理过期媒体文件"""
+    expire_hours = config.basic.image_expire_hours
+    if expire_hours < 0:
+        return {"success": True, "deleted": 0, "deleted_images": 0, "deleted_videos": 0, "message": "当前设置为永不删除"}
+
+    now = time.time()
+    deleted_images = 0
+    deleted_videos = 0
+    video_exts = (".mp4", ".webm", ".mov")
+
+    for directory, is_video_dir in [(IMAGE_DIR, False), (VIDEO_DIR, True)]:
+        if not os.path.isdir(directory):
+            continue
+        for filename in os.listdir(directory):
+            filepath = os.path.join(directory, filename)
+            if not os.path.isfile(filepath):
+                continue
+            try:
+                mtime = os.path.getmtime(filepath)
+                age_hours = (now - mtime) / 3600
+                if age_hours > expire_hours:
+                    os.remove(filepath)
+                    ext = os.path.splitext(filename)[1].lower()
+                    if is_video_dir or ext in video_exts:
+                        deleted_videos += 1
+                    else:
+                        deleted_images += 1
+            except Exception:
+                continue
+
+    deleted_count = deleted_images + deleted_videos
+    if deleted_count > 0:
+        logger.info(f"[GALLERY] 手动清理了 {deleted_count} 个过期媒体文件（图片: {deleted_images}, 视频: {deleted_videos}）")
+
+    return {
+        "success": True,
+        "deleted": deleted_count,
+        "deleted_images": deleted_images,
+        "deleted_videos": deleted_videos,
+        "message": f"已清理 {deleted_count} 个过期文件" if deleted_count > 0 else "没有过期文件需要清理",
+    }
+
+
+async def cleanup_expired_media_task():
+    """定期清理过期的图片和视频文件"""
+    while True:
+        try:
+            await asyncio.sleep(30 * 60)  # 每 30 分钟检查一次
+
+            expire_hours = config.basic.image_expire_hours
+            if expire_hours < 0:
+                # -1 表示永不删除
+                continue
+
+            now = time.time()
+            deleted_count = 0
+
+            for directory in [IMAGE_DIR, VIDEO_DIR]:
+                if not os.path.isdir(directory):
+                    continue
+                for filename in os.listdir(directory):
+                    filepath = os.path.join(directory, filename)
+                    if not os.path.isfile(filepath):
+                        continue
+                    try:
+                        mtime = os.path.getmtime(filepath)
+                        age_hours = (now - mtime) / 3600
+                        if age_hours > expire_hours:
+                            os.remove(filepath)
+                            deleted_count += 1
+                    except Exception:
+                        continue
+
+            if deleted_count > 0:
+                logger.info(f"[GALLERY] 清理了 {deleted_count} 个过期媒体文件（过期时间: {expire_hours}小时）")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[GALLERY] 清理过期文件失败: {e}")
 
 # ---------- 日志脱敏函数 ----------
 def get_sanitized_logs(limit: int = 100) -> list:
@@ -1470,6 +1653,7 @@ async def admin_get_settings(request: Request):
             "refresh_window_hours": config.basic.refresh_window_hours,
             "register_default_count": config.basic.register_default_count,
             "register_domain": config.basic.register_domain,
+            "image_expire_hours": config.basic.image_expire_hours,
         },
         "image_generation": {
             "enabled": config.image_generation.enabled,
@@ -1542,6 +1726,7 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)
         basic.setdefault("register_default_count", config.basic.register_default_count)
         basic.setdefault("register_domain", config.basic.register_domain)
+        basic.setdefault("image_expire_hours", config.basic.image_expire_hours)
         if not isinstance(basic.get("register_domain"), str):
             basic["register_domain"] = ""
         basic.pop("duckmail_proxy", None)

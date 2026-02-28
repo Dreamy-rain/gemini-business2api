@@ -69,6 +69,7 @@ class BasicConfig(BaseModel):
     refresh_window_hours: int = Field(default=1, ge=0, le=24, description="过期刷新窗口（小时）")
     register_default_count: int = Field(default=1, ge=1, description="默认注册数量")
     register_domain: str = Field(default="", description="DuckMail 域名（推荐）")
+    image_expire_hours: int = Field(default=12, ge=-1, le=720, description="图片/视频过期时间（小时），-1为永不删除")
 
 
 class ImageGenerationConfig(BaseModel):
@@ -234,6 +235,7 @@ class ConfigManager:
             refresh_window_hours=int(refresh_window_raw),
             register_default_count=int(register_default_raw),
             register_domain=str(register_domain_raw or "").strip(),
+            image_expire_hours=int(basic_data.get("image_expire_hours", 12)),
         )
 
         # 4. 加载其他配置（从数据库，带容错处理）

@@ -640,35 +640,34 @@ class RefreshService:
                 expiring = self._get_expiring_accounts()
                 if not expiring:
                     logger.info("[REFRESH] no accounts need refresh this round")
-                    continue
+                else:
+                    batch_size = config.retry.refresh_batch_size
+                    total_batches = (len(expiring) + batch_size - 1) // batch_size
+                    logger.info(f"[REFRESH] {len(expiring)} accounts to refresh, {total_batches} batches (batch size {batch_size})")
 
-                batch_size = config.retry.refresh_batch_size
-                total_batches = (len(expiring) + batch_size - 1) // batch_size
-                logger.info(f"[REFRESH] {len(expiring)} accounts to refresh, {total_batches} batches (batch size {batch_size})")
+                    # Execute in batches
+                    for i in range(0, len(expiring), batch_size):
+                        if not self._is_polling:
+                            break
 
-                # Execute in batches
-                for i in range(0, len(expiring), batch_size):
-                    if not self._is_polling:
-                        break
+                        batch = expiring[i:i + batch_size]
+                        batch_num = i // batch_size + 1
+                        logger.info(f"[REFRESH] batch {batch_num}/{total_batches}: {batch}")
 
-                    batch = expiring[i:i + batch_size]
-                    batch_num = i // batch_size + 1
-                    logger.info(f"[REFRESH] batch {batch_num}/{total_batches}: {batch}")
+                        try:
+                            task = await self._run_single_batch(batch)
+                            logger.info(f"[REFRESH] batch {batch_num} done (success: {task.success_count}, fail: {task.fail_count})")
+                        except Exception as exc:
+                            logger.warning(f"[REFRESH] batch {batch_num} error: {exc}")
 
-                    try:
-                        task = await self._run_single_batch(batch)
-                        logger.info(f"[REFRESH] batch {batch_num} done (success: {task.success_count}, fail: {task.fail_count})")
-                    except Exception as exc:
-                        logger.warning(f"[REFRESH] batch {batch_num} error: {exc}")
+                        # Inter-batch wait (skip for last batch)
+                        remaining = expiring[i + batch_size:]
+                        if remaining and self._is_polling:
+                            interval = config.retry.refresh_batch_interval_minutes * 60
+                            logger.info(f"[REFRESH] waiting {config.retry.refresh_batch_interval_minutes} minutes before next batch...")
+                            await asyncio.sleep(interval)
 
-                    # Inter-batch wait (skip for last batch)
-                    remaining = expiring[i + batch_size:]
-                    if remaining and self._is_polling:
-                        interval = config.retry.refresh_batch_interval_minutes * 60
-                        logger.info(f"[REFRESH] waiting {config.retry.refresh_batch_interval_minutes} minutes before next batch...")
-                        await asyncio.sleep(interval)
-
-                logger.info("[REFRESH] refresh round complete")
+                    logger.info("[REFRESH] refresh round complete")
 
                 # Step 3: Auto-register new accounts if below minimum
                 if config.retry.auto_register_enabled:

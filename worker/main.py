@@ -1,7 +1,7 @@
 """
 gemini-refresh-worker entry point.
 
-- Loads environment variables, initializes database
+- Loads environment variables, initializes storage backend
 - Installs child_reaper (cleans up Chromium zombie processes)
 - Starts the async polling loop (RefreshService.start_polling)
 - Optionally starts a minimal HTTP health check server
@@ -84,7 +84,7 @@ async def main() -> None:
         sys.exit(1)
     logger.info("[INIT] storage backend: %s", storage.get_storage_mode())
 
-    # Initialize config (reads from DB)
+    # Initialize config (reads from storage backend)
     # This import triggers ConfigManager.__init__ which calls storage
     from worker.config import config
     logger.info(
@@ -130,6 +130,10 @@ async def main() -> None:
         env_overrides.append(f"REMOTE_PROJECT_VERIFY_SSL={os.getenv('REMOTE_PROJECT_VERIFY_SSL')}")
     if os.getenv("REMOTE_PROJECT_TIMEOUT_SECONDS") is not None:
         env_overrides.append(f"REMOTE_PROJECT_TIMEOUT_SECONDS={os.getenv('REMOTE_PROJECT_TIMEOUT_SECONDS')}")
+    if os.getenv("REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH") is not None:
+        env_overrides.append(
+            f"REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH={os.getenv('REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH')}"
+        )
     if env_overrides:
         logger.info("[INIT] env overrides active: %s", ", ".join(env_overrides))
     else:

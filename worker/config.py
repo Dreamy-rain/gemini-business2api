@@ -2,7 +2,7 @@
 Simplified configuration for the refresh worker.
 
 Only includes refresh-related fields from BasicConfig and RetryConfig.
-Loads from database via storage.load_settings_sync().
+Loads from storage backend via storage.load_settings_sync().
 """
 
 import os
@@ -90,10 +90,11 @@ class ConfigManager:
         self.load()
 
     def load(self):
-        """Load config from database."""
+        """Load config from storage backend."""
         yaml_data = self._load_from_db()
 
         basic_data = yaml_data.get("basic", {})
+        storage_mode = storage.get_storage_mode()
 
         # Compat: migrate old proxy field
         old_proxy = basic_data.get("proxy", "")
@@ -127,6 +128,19 @@ class ConfigManager:
             register_default_count=max(1, int(basic_data.get("register_default_count", 1))),
         )
 
+        # Remote mode safe default:
+        # Do not blindly reuse remote project's proxy_for_auth on local worker,
+        # because remote-side localhost proxies (e.g. 127.0.0.1:7890) are usually
+        # unreachable from this machine and can cause "cannot access Google".
+        use_remote_proxy = _parse_bool(os.getenv("REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH"), False)
+        if storage_mode == "remote" and os.getenv("PROXY_FOR_AUTH") is None and not use_remote_proxy:
+            if basic_config.proxy_for_auth:
+                logger.warning(
+                    "[CONFIG] remote mode: ignoring remote proxy_for_auth=%s; set local PROXY_FOR_AUTH to enable proxy",
+                    basic_config.proxy_for_auth,
+                )
+            basic_config.proxy_for_auth = ""
+
         try:
             retry_config = RetryConfig(**yaml_data.get("retry", {}))
         except Exception as e:
@@ -135,7 +149,7 @@ class ConfigManager:
 
         self._config = WorkerConfig(basic=basic_config, retry=retry_config)
 
-        # Apply environment variable overrides (take precedence over DB values)
+        # Apply environment variable overrides (take precedence over storage values)
         self._apply_env_overrides()
 
     def _apply_env_overrides(self) -> None:
@@ -231,10 +245,10 @@ class ConfigManager:
                 raise RuntimeError(f"Database load failed: {e}")
 
         logger.error("[ERROR] Database not enabled")
-        raise RuntimeError("DATABASE_URL not configured, worker cannot start")
+        raise RuntimeError("DATABASE_URL or REMOTE_PROJECT_BASE_URL not configured, worker cannot start")
 
     def reload(self):
-        """Hot-reload config from database."""
+        """Hot-reload config from storage backend."""
         self.load()
 
     @property

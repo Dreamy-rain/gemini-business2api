@@ -1,11 +1,5 @@
 """
 Interactive CLI for gemini-refresh-worker.
-
-Use cases:
-- Local interactive operation (Chinese menu)
-- Manual one-shot refresh
-- Remote project connectivity check
-- Simple .env wizard for remote mode
 """
 
 from __future__ import annotations
@@ -18,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Dict, Tuple
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -93,6 +88,8 @@ def show_current_config() -> None:
     print(f"REMOTE_PROJECT_PASSWORD: {_mask_secret(os.getenv('REMOTE_PROJECT_PASSWORD', '').strip())}")
     print(f"FORCE_REFRESH_ENABLED: {os.getenv('FORCE_REFRESH_ENABLED', '(not set)')}")
     print(f"REFRESH_INTERVAL_MINUTES: {os.getenv('REFRESH_INTERVAL_MINUTES', '(not set)')}")
+    print(f"PROXY_FOR_AUTH: {os.getenv('PROXY_FOR_AUTH', '(not set)')}")
+    print(f"REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH: {os.getenv('REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH', '(not set)')}")
     print(f"HEALTH_PORT: {os.getenv('HEALTH_PORT', '(not set)')}")
     print("-" * 60)
     try:
@@ -106,6 +103,7 @@ def show_current_config() -> None:
         print(f"scheduled_refresh_interval_minutes(legacy): {config.retry.scheduled_refresh_interval_minutes}")
         print(f"refresh_window_hours: {config.basic.refresh_window_hours}")
         print(f"browser_headless: {config.basic.browser_headless}")
+        print(f"proxy_for_auth(runtime): {config.basic.proxy_for_auth or '(empty)'}")
         print(f"auto_register_enabled: {config.retry.auto_register_enabled}")
         print(f"min_account_count: {config.retry.min_account_count}")
     except Exception as exc:
@@ -141,6 +139,60 @@ def test_remote_connection() -> None:
     except Exception as exc:
         print("结果: 失败")
         print(f"错误: {exc}")
+
+
+def _probe_http(url: str, proxy: str = "", timeout: int = 12) -> Tuple[bool, str]:
+    proxies = None
+    if proxy:
+        proxies = {"http": proxy, "https": proxy}
+    try:
+        resp = requests.get(url, timeout=timeout, allow_redirects=False, proxies=proxies)
+        return True, f"HTTP {resp.status_code}"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def diagnose_google_access() -> None:
+    from worker import storage
+    from worker.config import config
+    from worker.proxy_utils import parse_proxy_setting
+
+    _print_header("Google 连通性与代理诊断")
+
+    storage_mode = storage.get_storage_mode()
+    raw_proxy = config.basic.proxy_for_auth or ""
+    proxy_url, no_proxy = parse_proxy_setting(raw_proxy)
+    env_proxy = os.getenv("PROXY_FOR_AUTH")
+
+    print(f"storage_mode: {storage_mode}")
+    print(f"proxy_for_auth(运行时): {proxy_url or '(empty)'}")
+    print(f"no_proxy: {no_proxy or '(empty)'}")
+    print(f"PROXY_FOR_AUTH env: {env_proxy if env_proxy is not None else '(not set)'}")
+    print("-" * 60)
+
+    urls = [
+        "https://www.google.com/",
+        "https://auth.business.gemini.google/",
+        "https://business.gemini.google/",
+    ]
+
+    print("直连检查:")
+    for url in urls:
+        ok, detail = _probe_http(url, proxy="")
+        print(f"- {url} -> {'OK' if ok else 'FAIL'} ({detail})")
+
+    if proxy_url:
+        print("\n代理检查:")
+        for url in urls:
+            ok, detail = _probe_http(url, proxy=proxy_url)
+            print(f"- {url} -> {'OK' if ok else 'FAIL'} ({detail})")
+    else:
+        print("\n代理检查: 跳过（当前未启用 PROXY_FOR_AUTH）")
+
+    if storage_mode == "remote" and env_proxy is None:
+        print("\n提示:")
+        print("- 远程模式默认不继承远程站点的 proxy_for_auth，避免把远程 localhost 代理误用到本机。")
+        print("- 如果你本机需要代理访问 Google，请在本地 .env 设置 PROXY_FOR_AUTH（例如 socks5h://127.0.0.1:7890）。")
 
 
 async def run_once_refresh() -> dict:
@@ -206,6 +258,8 @@ def run_env_wizard() -> None:
     current_timeout = os.getenv("REMOTE_PROJECT_TIMEOUT_SECONDS", "30").strip() or "30"
     current_force = os.getenv("FORCE_REFRESH_ENABLED", "true").strip().lower() or "true"
     current_interval = os.getenv("REFRESH_INTERVAL_MINUTES", "30").strip() or "30"
+    current_proxy = os.getenv("PROXY_FOR_AUTH", "").strip()
+    current_use_remote_proxy = os.getenv("REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH", "false").strip().lower() or "false"
 
     print("直接回车可保留当前值。")
     base_url = input(f"REMOTE_PROJECT_BASE_URL [{current_url}]: ").strip() or current_url
@@ -217,6 +271,10 @@ def run_env_wizard() -> None:
     timeout = input(f"REMOTE_PROJECT_TIMEOUT_SECONDS [{current_timeout}]: ").strip() or current_timeout
     force_enabled = input(f"FORCE_REFRESH_ENABLED [{current_force}]: ").strip() or current_force
     interval = input(f"REFRESH_INTERVAL_MINUTES [{current_interval}]: ").strip() or current_interval
+    proxy_for_auth = input(f"PROXY_FOR_AUTH(本机代理，可留空) [{current_proxy}]: ").strip() or current_proxy
+    use_remote_proxy = input(
+        f"REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH(默认false) [{current_use_remote_proxy}]: "
+    ).strip() or current_use_remote_proxy
 
     if not base_url:
         print("未填写 REMOTE_PROJECT_BASE_URL，已取消。")
@@ -232,6 +290,8 @@ def run_env_wizard() -> None:
         "REMOTE_PROJECT_TIMEOUT_SECONDS": timeout,
         "FORCE_REFRESH_ENABLED": force_enabled,
         "REFRESH_INTERVAL_MINUTES": interval,
+        "PROXY_FOR_AUTH": proxy_for_auth,
+        "REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH": use_remote_proxy,
     }
 
     path = _save_env_updates(updates)
@@ -241,12 +301,13 @@ def run_env_wizard() -> None:
 
 def interactive_menu() -> None:
     while True:
-        _print_header("refresh-worker 中文交互菜单")
+        _print_header("Refresh Worker 交互菜单")
         print("1. 查看当前配置")
         print("2. 测试远程连接")
-        print("3. 立即刷新一次")
-        print("4. 启动守护轮询（前台）")
-        print("5. 远程模式配置向导（写入 .env）")
+        print("3. Google 连通性与代理诊断")
+        print("4. 立即刷新一次")
+        print("5. 启动守护轮询（前台）")
+        print("6. 远程模式配置向导（写入 .env）")
         print("0. 退出")
         choice = input("\n请选择: ").strip()
 
@@ -257,12 +318,15 @@ def interactive_menu() -> None:
             test_remote_connection()
             input("\n按回车继续...")
         elif choice == "3":
-            run_once_command()
+            diagnose_google_access()
             input("\n按回车继续...")
         elif choice == "4":
-            run_polling_command()
+            run_once_command()
             input("\n按回车继续...")
         elif choice == "5":
+            run_polling_command()
+            input("\n按回车继续...")
+        elif choice == "6":
             run_env_wizard()
             input("\n按回车继续...")
         elif choice == "0":
@@ -276,11 +340,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="gemini-refresh-worker CLI")
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("menu", help="启动中文交互菜单")
+    sub.add_parser("menu", help="启动交互菜单")
     sub.add_parser("once", help="立即执行一次刷新")
     sub.add_parser("poll", help="启动守护轮询（前台）")
-    sub.add_parser("doctor", help="测试远程连接并打印配置")
+    sub.add_parser("doctor", help="打印配置 + 远程连接 + Google诊断")
     sub.add_parser("wizard", help="远程模式配置向导（写入 .env）")
+    sub.add_parser("google", help="仅执行 Google 连通性与代理诊断")
     return parser
 
 
@@ -299,8 +364,11 @@ def main() -> None:
     elif cmd == "doctor":
         show_current_config()
         test_remote_connection()
+        diagnose_google_access()
     elif cmd == "wizard":
         run_env_wizard()
+    elif cmd == "google":
+        diagnose_google_access()
     else:
         parser.print_help()
 

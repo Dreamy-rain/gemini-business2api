@@ -307,6 +307,9 @@ class RefreshService:
                     continue
             elif mail_provider == "gptmail":
                 pass
+            elif mail_provider == "cfmail":
+                if not (mail_password or account.get("mail_jwt_token")):
+                    continue
             else:
                 continue
 
@@ -357,6 +360,8 @@ class RefreshService:
                 mail_provider = "duckmail"
 
         mail_password = account.get("mail_password") or account.get("email_password")
+        if mail_provider == "cfmail" and not mail_password:
+            mail_password = account.get("mail_jwt_token")
         mail_client_id = account.get("mail_client_id")
         mail_refresh_token = account.get("mail_refresh_token")
         mail_tenant = account.get("mail_tenant") or "consumers"
@@ -381,9 +386,14 @@ class RefreshService:
                 log_callback=log_cb,
             )
             client.set_credentials(mail_address)
-        elif mail_provider in ("duckmail", "moemail", "freemail", "gptmail"):
+        elif mail_provider in ("duckmail", "moemail", "freemail", "gptmail", "cfmail"):
             if mail_provider not in ("freemail", "gptmail") and not mail_password:
-                error_message = "邮箱密码缺失" if mail_provider == "duckmail" else "mail password (email_id) missing"
+                if mail_provider == "duckmail":
+                    error_message = "邮箱密码缺失"
+                elif mail_provider == "cfmail":
+                    error_message = "mail password (jwt token) missing"
+                else:
+                    error_message = "mail password (email_id) missing"
                 return {"success": False, "email": account_id, "error": error_message}
             if mail_provider == "freemail" and not account.get("mail_jwt_token") and not config.basic.freemail_jwt_token:
                 return {"success": False, "email": account_id, "error": "Freemail JWT Token not configured"}

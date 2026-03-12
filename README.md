@@ -108,7 +108,7 @@ python -m worker.cli once
 # 交互选择 provider / 数量 / 域名
 python -m worker.cli
 
-# 命令行直接注册 20 个（示例：duckmail）
+# 命令行直接注册 20 个（示例：duckmail / cfmail）
 python -m worker.cli register --count 20 --provider duckmail
 ```
 
@@ -155,6 +155,10 @@ Language switch is also available in interactive menu, default is Chinese.
 | `REMOTE_PROJECT_VERIFY_SSL` | 是否校验远程 HTTPS 证书 | Verify remote HTTPS certificate |
 | `REMOTE_PROJECT_TIMEOUT_SECONDS` | 远程 API 超时时间（秒） | Remote API timeout in seconds |
 | `REMOTE_PROJECT_USE_REMOTE_PROXY_FOR_AUTH` | 是否继承远程 `proxy_for_auth`（默认 `false`） | Whether to inherit remote `proxy_for_auth` (default `false`) |
+| `CFMAIL_BASE_URL` | CFMail 服务地址（可选） | CFMail service base URL (optional) |
+| `CFMAIL_API_KEY` | CFMail 管理密钥（可选） | CFMail admin key (optional) |
+| `CFMAIL_VERIFY_SSL` | CFMail SSL 校验（可选，默认 true） | CFMail SSL verify (optional, default true) |
+| `CFMAIL_DOMAIN` | CFMail 默认注册域名（可选） | CFMail default register domain (optional) |
 
 ### 刷新覆盖变量 / Refresh override variables
 
@@ -184,7 +188,7 @@ Browser mode recommendations:
 | `DELETE_EXPIRED_ACCOUNTS` | 自动删除凭证过期账号 | Auto-delete accounts with expired credentials |
 | `AUTO_REGISTER_ENABLED` | 自动补充注册账号 | Auto-register new accounts when needed |
 | `MIN_ACCOUNT_COUNT` | 最低活跃账号数量阈值 | Minimum active account threshold |
-| `TEMP_MAIL_PROVIDER` | 本地默认临时邮箱提供商（推荐 `duckmail`） | Local default temp mail provider (recommended `duckmail`) |
+| `TEMP_MAIL_PROVIDER` | 本地默认临时邮箱提供商（`duckmail`/`moemail`/`freemail`/`gptmail`/`cfmail`） | Local default temp mail provider (`duckmail`/`moemail`/`freemail`/`gptmail`/`cfmail`) |
 | `REGISTER_DOMAIN` | 注册邮箱域名（DuckMail） | Registration email domain (DuckMail) |
 | `REGISTER_DEFAULT_COUNT` | 单批注册数量（>=1，默认 20） | Accounts to register per batch (>=1, default 20) |
 

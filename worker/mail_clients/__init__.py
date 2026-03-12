@@ -2,6 +2,7 @@ from typing import Callable, Optional
 
 from worker.config import config
 from worker.proxy_utils import extract_host, no_proxy_matches, parse_proxy_setting
+from worker.mail_clients.cfmail_client import CloudflareMailClient
 from worker.mail_clients.duckmail_client import DuckMailClient
 from worker.mail_clients.freemail_client import FreemailClient
 from worker.mail_clients.gptmail_client import GPTMailClient
@@ -65,6 +66,19 @@ def create_temp_mail_client(
             proxy=proxy,
             verify_ssl=verify_ssl if verify_ssl is not None else config.basic.gptmail_verify_ssl,
             domain=domain or config.basic.gptmail_domain,
+            log_callback=log_cb,
+        )
+
+    if provider == "cfmail":
+        effective_base_url = base_url or config.basic.cfmail_base_url
+        if no_proxy_matches(extract_host(effective_base_url), no_proxy):
+            proxy = ""
+        return CloudflareMailClient(
+            base_url=effective_base_url,
+            proxy=proxy,
+            api_key=api_key or config.basic.cfmail_api_key,
+            domain=domain or config.basic.cfmail_domain,
+            verify_ssl=verify_ssl if verify_ssl is not None else config.basic.cfmail_verify_ssl,
             log_callback=log_cb,
         )
 

@@ -23,7 +23,7 @@ LANG_EN = "en"
 CLI_LANG_ENV_KEY = "CLI_LANG"
 DEFAULT_BROWSER_MODE = "normal"
 VALID_BROWSER_MODES = {"normal", "silent", "headless"}
-VALID_MAIL_PROVIDERS = ("moemail", "duckmail", "freemail", "gptmail")
+VALID_MAIL_PROVIDERS = ("moemail", "duckmail", "freemail", "gptmail", "cfmail")
 DEFAULT_LANG = LANG_ZH
 CURRENT_LANG = DEFAULT_LANG
 
@@ -279,6 +279,12 @@ def show_current_config() -> None:
             "default register domain (DuckMail only)",
         )
         _print_config_item(
+            "cfmail_domain",
+            config.basic.cfmail_domain or "(empty)",
+            "默认注册域名（CFMail 专用）",
+            "default register domain (CFMail only)",
+        )
+        _print_config_item(
             "register_default_count",
             config.basic.register_default_count,
             "默认注册数量",
@@ -454,6 +460,7 @@ def _ask_mail_provider(default_provider: str) -> str:
     print("2. moemail")
     print("3. freemail")
     print("4. gptmail")
+    print("5. cfmail")
     print(f"0. {_t('使用默认', 'Use default')}: {default_provider}")
     choice = input(f"\n{_t('请选择', 'Choose')}: ").strip()
     mapping = {
@@ -461,6 +468,7 @@ def _ask_mail_provider(default_provider: str) -> str:
         "2": "moemail",
         "3": "freemail",
         "4": "gptmail",
+        "5": "cfmail",
     }
     if choice == "0" or choice == "":
         return default_provider
@@ -499,6 +507,7 @@ def run_register_command(
     default_provider = _normalize_mail_provider(config.basic.temp_mail_provider, "duckmail")
     default_count = max(1, int(config.basic.register_default_count or 20))
     default_domain = (config.basic.register_domain or "").strip()
+    default_cfmail_domain = (config.basic.cfmail_domain or "").strip()
 
     provider = _normalize_mail_provider(mail_provider, default_provider)
     register_count = max(1, int(count or default_count))
@@ -511,19 +520,22 @@ def run_register_command(
             default_count,
             1,
         )
-        if provider == "duckmail":
+        if provider in ("duckmail", "cfmail"):
             entered_domain = input(
-                f"{_t('DuckMail 注册域名（回车使用默认）', 'DuckMail register domain (Enter to keep default)')} "
-                f"[{default_domain or '(empty)'}]: "
+                f"{_t('注册域名（回车使用默认）', 'Register domain (Enter to keep default)')} "
+                f"[{(default_domain if provider == 'duckmail' else default_cfmail_domain) or '(empty)'}]: "
             ).strip()
-            domain_value = entered_domain if entered_domain else default_domain
+            if provider == "duckmail":
+                domain_value = entered_domain if entered_domain else default_domain
+            else:
+                domain_value = entered_domain if entered_domain else default_cfmail_domain
         else:
             domain_value = ""
 
         print("-" * 60)
         print(f"{_t('提供商', 'Provider')}: {provider}")
         print(f"{_t('注册数量', 'Count')}: {register_count}")
-        if provider == "duckmail":
+        if provider in ("duckmail", "cfmail"):
             print(f"{_t('注册域名', 'Domain')}: {domain_value or '(empty)'}")
         confirm = input(_t("确认开始注册？(Y/n): ", "Start registration now? (Y/n): ")).strip().lower()
         if confirm in {"n", "no"}:
@@ -549,11 +561,11 @@ def run_register_command(
             print(
                 f"\n[{i + 1}/{register_count}] "
                 f"{_t('开始注册', 'Start registering')} "
-                f"(provider={provider}{', domain=' + domain_value if provider == 'duckmail' and domain_value else ''})"
+                f"(provider={provider}{', domain=' + domain_value if provider in ('duckmail', 'cfmail') and domain_value else ''})"
             )
             try:
                 result = register_one(
-                    domain=(domain_value if provider == "duckmail" and domain_value else None),
+                    domain=(domain_value if provider in ("duckmail", "cfmail") and domain_value else None),
                     mail_provider=provider,
                 )
             except KeyboardInterrupt:
@@ -598,6 +610,8 @@ def run_register_command(
             updates = {"TEMP_MAIL_PROVIDER": provider}
             if provider == "duckmail":
                 updates["REGISTER_DOMAIN"] = domain_value
+            elif provider == "cfmail":
+                updates["CFMAIL_DOMAIN"] = domain_value
             updates["REGISTER_DEFAULT_COUNT"] = str(register_count)
             path = _save_env_updates(updates)
             load_dotenv(path, override=True)
@@ -801,7 +815,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=_t("邮箱提供商", "mail provider"),
     )
-    register_parser.add_argument("--domain", default="", help=_t("注册域名（DuckMail）", "register domain (DuckMail)"))
+    register_parser.add_argument("--domain", default="", help=_t("注册域名（DuckMail/CFMail）", "register domain (DuckMail/CFMail)"))
     sub.add_parser("poll", help=_t("启动守护轮询（前台）", "Start foreground polling"))
     sub.add_parser("doctor", help=_t("打印配置 + 远程连接 + Google诊断", "Print config + remote check + Google diagnostics"))
     sub.add_parser("wizard", help=_t("远程模式配置向导（写入 .env）", "Remote mode setup wizard (write .env)"))

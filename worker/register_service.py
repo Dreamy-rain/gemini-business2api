@@ -77,6 +77,8 @@ def register_one(
     if not domain_value:
         if temp_mail_provider == "duckmail":
             domain_value = (cfg.basic.register_domain or "").strip() or None
+        elif temp_mail_provider == "cfmail":
+            domain_value = (cfg.basic.cfmail_domain or "").strip() or None
         else:
             domain_value = None
 
@@ -151,6 +153,13 @@ def register_one(
         config_data["mail_api_key"] = cfg.basic.gptmail_api_key
         config_data["mail_verify_ssl"] = cfg.basic.gptmail_verify_ssl
         config_data["mail_domain"] = cfg.basic.gptmail_domain
+    elif temp_mail_provider == "cfmail":
+        config_data["mail_password"] = getattr(client, "password", "")
+        config_data["mail_jwt_token"] = getattr(client, "password", "")
+        config_data["mail_base_url"] = cfg.basic.cfmail_base_url
+        config_data["mail_api_key"] = cfg.basic.cfmail_api_key
+        config_data["mail_verify_ssl"] = cfg.basic.cfmail_verify_ssl
+        config_data["mail_domain"] = cfg.basic.cfmail_domain
     elif temp_mail_provider == "moemail":
         config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
         config_data["mail_base_url"] = cfg.basic.moemail_base_url

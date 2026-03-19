@@ -243,7 +243,7 @@ curl http://localhost:7860/v1/chat/completions \
 
 ## 📧 Email Provider Configuration
 
-The project supports 5 temporary email providers for automatic account registration. Switch and configure them in **Admin Panel → System Settings → Temp Email Provider**.
+The project supports 6 temporary email providers for automatic account registration. Switch and configure them in **Admin Panel → System Settings → Temp Email Provider**.
 
 ### Moemail (Default)
 
@@ -287,6 +287,17 @@ Cloudflare-based temporary email service, suitable for self-hosted or lightweigh
   - Email domain (`cfmail_domain`, optional, without `@`)
 - **Import format (optional)**: `cfmail----you@example.com----jwtToken`
   - The third field is the mailbox JWT token used to fetch verification codes.
+
+### Sample Mail
+
+Lightweight self-hosted temporary email based on Cloudflare Workers + D1. No API Key required; the email domain is determined by the Worker environment variable.
+
+- **Project**: [github.com/bestK/sample-mail](https://github.com/bestK/sample-mail)
+- **Admin Panel Path**: System Settings → Temp Email Provider = `samplemail`
+- **Configuration**:
+  - Sample Mail Worker URL (`samplemail_base_url`, required)
+  - SSL verification (`samplemail_verify_ssl`, enabled by default)
+- **Note**: Domain selection and API Key are not supported. The email domain is set via the `EMAIL_DOMAIN` environment variable in your Worker.
 
 > **Tip**: All email settings are configured in the admin panel. Microsoft email login is also handled through the admin panel.
 

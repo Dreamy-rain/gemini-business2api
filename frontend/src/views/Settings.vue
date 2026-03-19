@@ -271,6 +271,23 @@
                   />
                 </template>
 
+                <!-- Sample Mail 配置 -->
+                <template v-if="localSettings.basic.temp_mail_provider === 'samplemail'">
+                  <Checkbox v-model="localSettings.basic.samplemail_verify_ssl">
+                    Sample Mail SSL 校验
+                  </Checkbox>
+                  <label class="block text-xs text-muted-foreground">Sample Mail Worker 地址</label>
+                  <input
+                    v-model="localSettings.basic.samplemail_base_url"
+                    type="text"
+                    class="w-full rounded-2xl border border-input bg-background px-3 py-2 text-sm"
+                    placeholder="https://your-sample-mail-worker.example.com"
+                  />
+                  <p class="text-xs text-muted-foreground">
+                    Sample Mail 不支持按请求指定域名或 API Key，邮箱域名由 Worker 的 EMAIL_DOMAIN 决定。
+                  </p>
+                </template>
+
                 <label class="block text-xs text-muted-foreground">默认注册数量</label>
                 <input
                   v-model.number="localSettings.basic.register_default_count"
@@ -565,6 +582,10 @@ watch(settings, (value) => {
   next.basic.cfmail_domain = typeof next.basic.cfmail_domain === 'string'
     ? next.basic.cfmail_domain
     : ''
+  next.basic.samplemail_base_url = typeof next.basic.samplemail_base_url === 'string'
+    ? next.basic.samplemail_base_url
+    : ''
+  next.basic.samplemail_verify_ssl = next.basic.samplemail_verify_ssl ?? true
   next.retry = next.retry || {}
   next.retry.auto_refresh_accounts_seconds = Number.isFinite(next.retry.auto_refresh_accounts_seconds)
     ? next.retry.auto_refresh_accounts_seconds

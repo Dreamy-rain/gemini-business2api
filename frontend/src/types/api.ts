@@ -78,7 +78,7 @@ export interface Stats {
   requests_per_hour: number
 }
 
-export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail' | 'cfmail'
+export type TempMailProvider = 'duckmail' | 'moemail' | 'freemail' | 'gptmail' | 'cfmail' | 'samplemail'
 
 export interface Settings {
   basic: {
@@ -106,6 +106,8 @@ export interface Settings {
     cfmail_api_key?: string
     cfmail_verify_ssl?: boolean
     cfmail_domain?: string
+    samplemail_base_url?: string
+    samplemail_verify_ssl?: boolean
     browser_engine?: string
     browser_mode?: 'normal' | 'silent' | 'headless'
     browser_headless?: boolean

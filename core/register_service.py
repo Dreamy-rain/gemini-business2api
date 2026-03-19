@@ -228,6 +228,12 @@ class RegisterService(BaseTaskService[RegisterTask]):
             config_data["mail_api_key"] = config.basic.cfmail_api_key
             config_data["mail_verify_ssl"] = config.basic.cfmail_verify_ssl
             config_data["mail_domain"] = config.basic.cfmail_domain
+        elif temp_mail_provider == "samplemail":
+            config_data["mail_password"] = ""
+            config_data["mail_base_url"] = config.basic.samplemail_base_url
+            config_data["mail_api_key"] = ""
+            config_data["mail_verify_ssl"] = config.basic.samplemail_verify_ssl
+            config_data["mail_domain"] = ""
         elif temp_mail_provider == "moemail":
             config_data["mail_password"] = getattr(client, "email_id", "") or getattr(client, "password", "")
             config_data["mail_base_url"] = config.basic.moemail_base_url

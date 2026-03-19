@@ -4,6 +4,7 @@ export const mailProviderOptions = [
   { label: 'Freemail', value: 'freemail' },
   { label: 'GPTMail', value: 'gptmail' },
   { label: 'Cloudflare Mail', value: 'cfmail' },
+  { label: 'Sample Mail', value: 'samplemail' },
 ] as const
 
 export type TempMailProvider = typeof mailProviderOptions[number]['value']

@@ -245,7 +245,7 @@ curl http://localhost:7860/v1/chat/completions \
 
 ## 📧 邮箱提供商配置
 
-项目支持 5 种临时邮箱，用于自动注册账号。在 **管理面板 → 系统设置 → 临时邮箱提供商** 中切换。
+项目支持 6 种临时邮箱，用于自动注册账号。在 **管理面板 → 系统设置 → 临时邮箱提供商** 中切换。
 
 ### Moemail（默认推荐）
 
@@ -289,6 +289,17 @@ curl http://localhost:7860/v1/chat/completions \
   - 邮箱域名（`cfmail_domain`，可选，不带 `@`）
 - **导入格式（可选）**：`cfmail----you@example.com----jwtToken`
   - 第三个字段是该邮箱的 JWT Token（用于拉取邮件验证码）
+
+### Sample Mail
+
+基于 Cloudflare Workers + D1 的轻量自建临时邮箱，无需 API Key，域名由 Worker 环境变量决定。
+
+- **项目地址**：[github.com/bestK/sample-mail](https://github.com/bestK/sample-mail)
+- **管理面板配置路径**：系统设置 → 临时邮箱提供商选择 `samplemail`
+- **配置项**：
+  - Sample Mail Worker 地址（`samplemail_base_url`，必填）
+  - SSL 校验（`samplemail_verify_ssl`，默认开启）
+- **说明**：不支持指定域名或 API Key，邮箱域名由 Worker 的 `EMAIL_DOMAIN` 环境变量决定。
 
 > **提示**：所有邮箱配置均在管理面板中完成，无需手动编辑配置文件。Microsoft 邮箱登录也在管理面板中操作。
 

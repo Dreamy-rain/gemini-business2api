@@ -3,7 +3,7 @@
 
 Usage:
   python scripts/seed_frontend_demo_data.py
-  python scripts/seed_frontend_demo_data.py --replace-accounts --replace-logs --replace-history
+  python scripts/seed_frontend_demo_data.py --replace-accounts --replace-logs
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ BEIJING_TZ = timezone(timedelta(hours=8))
 class SeedSummary:
     accounts_inserted: int = 0
     logs_inserted: int = 0
-    history_inserted: int = 0
 
 
 def _rand_token(prefix: str, n: int = 28) -> str:
@@ -61,17 +60,6 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS task_history (
-                id TEXT PRIMARY KEY,
-                data TEXT NOT NULL,
-                created_at REAL NOT NULL
-            )
-            """
-        )
-
-
 def _build_demo_accounts() -> list[dict]:
     now = datetime.now(BEIJING_TZ)
 
@@ -229,66 +217,6 @@ def _seed_logs(conn: sqlite3.Connection, replace: bool, count: int) -> int:
     return len(points)
 
 
-def _seed_history(conn: sqlite3.Connection, replace: bool) -> int:
-    now_ts = datetime.now(BEIJING_TZ).timestamp()
-    entries = [
-        {
-            "id": "task-register-20260323-01",
-            "type": "register",
-            "status": "success",
-            "progress": 1,
-            "total": 5,
-            "success_count": 5,
-            "fail_count": 0,
-            "created_at": now_ts - 7200,
-            "finished_at": now_ts - 6900,
-            "is_live": False,
-        },
-        {
-            "id": "task-login-20260323-01",
-            "type": "login",
-            "status": "failed",
-            "progress": 1,
-            "total": 8,
-            "success_count": 6,
-            "fail_count": 2,
-            "created_at": now_ts - 3600,
-            "finished_at": now_ts - 3300,
-            "is_live": False,
-        },
-        {
-            "id": "task-login-20260323-02",
-            "type": "login",
-            "status": "running",
-            "progress": 0.6,
-            "total": 10,
-            "success_count": 6,
-            "fail_count": 1,
-            "created_at": now_ts - 600,
-            "finished_at": None,
-            "is_live": False,
-        },
-    ]
-
-    existing = conn.execute("SELECT COUNT(*) FROM task_history").fetchone()[0]
-    if existing > 0 and not replace:
-        return 0
-
-    with conn:
-        if replace:
-            conn.execute("DELETE FROM task_history")
-        for item in entries:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO task_history (id, data, created_at)
-                VALUES (?, ?, ?)
-                """,
-                (item["id"], json.dumps(item, ensure_ascii=False), float(item["created_at"])),
-            )
-
-    return len(entries)
-
-
 def _backup_db(db_path: Path) -> Path | None:
     if not db_path.exists():
         return None
@@ -305,7 +233,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-path", default="data/data.db", help="SQLite db path")
     parser.add_argument("--replace-accounts", action="store_true", help="Replace existing accounts with demo accounts")
     parser.add_argument("--replace-logs", action="store_true", help="Replace existing request logs with demo logs")
-    parser.add_argument("--replace-history", action="store_true", help="Replace existing task history with demo history")
     parser.add_argument("--logs-count", type=int, default=2400, help="How many demo request logs to generate")
     parser.add_argument("--seed", type=int, default=20260323, help="Random seed for reproducible demo data")
     parser.add_argument("--no-backup", action="store_true", help="Skip db backup before writing")
@@ -330,7 +257,6 @@ def main() -> int:
         summary = SeedSummary()
         summary.accounts_inserted = _seed_accounts(conn, replace=args.replace_accounts)
         summary.logs_inserted = _seed_logs(conn, replace=args.replace_logs, count=args.logs_count)
-        summary.history_inserted = _seed_history(conn, replace=args.replace_history)
 
         print("[OK] Demo data seeding completed")
         print(f"   DB: {db_path.resolve()}")
@@ -338,13 +264,11 @@ def main() -> int:
             print(f"   Backup: {backup_path.resolve()}")
         print(f"   Accounts inserted: {summary.accounts_inserted}")
         print(f"   Request logs inserted: {summary.logs_inserted}")
-        print(f"   Task history inserted: {summary.history_inserted}")
 
         current_accounts = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
         current_logs = conn.execute("SELECT COUNT(*) FROM request_logs").fetchone()[0]
-        current_history = conn.execute("SELECT COUNT(*) FROM task_history").fetchone()[0]
         print("   Current totals -> "
-              f"accounts: {current_accounts}, request_logs: {current_logs}, task_history: {current_history}")
+              f"accounts: {current_accounts}, request_logs: {current_logs}")
     finally:
         conn.close()
 

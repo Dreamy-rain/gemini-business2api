@@ -170,76 +170,10 @@ global_stats = {
     "recent_conversations": []
 }
 
-# 任务历史记录（内存存储，容器重启后清空）
-task_history = deque(maxlen=100)  # 最多保留100条历史记录
-task_history_lock = Lock()
-
-
 def get_beijing_time_str(ts: Optional[float] = None) -> str:
     tz = timezone(timedelta(hours=8))
     current = datetime.fromtimestamp(ts or time.time(), tz=tz)
     return current.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def save_task_to_history(task_type: str, task_data: dict) -> None:
-    """保存任务历史记录（只存储简要信息）"""
-    with task_history_lock:
-        history_entry = _build_history_entry(task_type, task_data)
-        entry_id = history_entry.get("id")
-        if entry_id:
-            for i in range(len(task_history) - 1, -1, -1):
-                if task_history[i].get("id") == entry_id:
-                    task_history.remove(task_history[i])
-                    break
-        task_history.append(history_entry)
-        _persist_task_history()
-        logger.info(f"[HISTORY] Saved {task_type} task to history: {history_entry['id']}")
-
-
-def _build_history_entry(task_type: str, task_data: dict, is_live: bool = False) -> dict:
-    total_value = task_data.get("count") if task_type == "register" else len(task_data.get("account_ids", []))
-    return {
-        "id": task_data.get("id", ""),
-        "type": task_type,  # "register" or "login"
-        "status": task_data.get("status", ""),
-        "progress": task_data.get("progress", 0),
-        "total": total_value,
-        "success_count": task_data.get("success_count", 0),
-        "fail_count": task_data.get("fail_count", 0),
-        "created_at": task_data.get("created_at", time.time()),
-        "finished_at": task_data.get("finished_at"),
-        "is_live": is_live,
-    }
-
-
-def _persist_task_history() -> None:
-    """持久化任务历史到数据库（仅数据库模式）。"""
-    if not storage.is_database_enabled():
-        return
-    try:
-        if not task_history:
-            storage.clear_task_history_sync()
-            return
-        storage.save_task_history_entry_sync(task_history[-1])
-    except Exception as exc:
-        logger.warning(f"[HISTORY] Persist task history failed: {exc}")
-
-
-def _load_task_history() -> None:
-    """从数据库加载任务历史（仅数据库模式）。"""
-    if not storage.is_database_enabled():
-        return
-    try:
-        history = storage.load_task_history_sync(limit=100)
-        if not isinstance(history, list):
-            return
-        with task_history_lock:
-            task_history.clear()
-            for entry in history:
-                if isinstance(entry, dict):
-                    task_history.append(entry)
-    except Exception as exc:
-        logger.warning(f"[HISTORY] Load task history failed: {exc}")
 
 
 def build_recent_conversation_entry(
@@ -328,8 +262,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("gemini")
 
-_load_task_history()
-
 # ---------- Linux zombie process reaper ----------
 # DrissionPage / Chromium may spawn subprocesses that exit without being waited on,
 # which can accumulate as zombies (<defunct>) in long-running services.
@@ -351,11 +283,9 @@ logger.addHandler(memory_handler)
 TIMEOUT_SECONDS = 300
 API_KEY = config.basic.api_key
 ADMIN_KEY = config.security.admin_key
-_proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
 _proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
-PROXY_FOR_AUTH = _proxy_auth
 PROXY_FOR_CHAT = _proxy_chat
-_NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
+_NO_PROXY = ",".join(filter(None, {_no_proxy_chat}))
 if _NO_PROXY:
     os.environ["NO_PROXY"] = _NO_PROXY
 else:
@@ -463,20 +393,7 @@ http_client_chat = httpx.AsyncClient(
     )
 )
 
-# 账户操作客户端（用于注册/登录/刷新）
-http_client_auth = httpx.AsyncClient(
-    proxy=(PROXY_FOR_AUTH or None),
-    verify=False,
-    http2=False,
-    timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
-    limits=httpx.Limits(
-        max_keepalive_connections=100,
-        max_connections=200
-    )
-)
-
 # 打印代理配置日志
-logger.info(f"[PROXY] Account operations (register/login/refresh): {PROXY_FOR_AUTH if PROXY_FOR_AUTH else 'disabled'}")
 logger.info(f"[PROXY] Chat operations (JWT/session/messages): {PROXY_FOR_CHAT if PROXY_FOR_CHAT else 'disabled'}")
 
 # ---------- 工具函数 ----------
@@ -528,46 +445,7 @@ multi_account_mgr = load_multi_account_config(
     global_stats
 )
 
-# ---------- 自动注册/刷新服务 ----------
-register_service = None
-login_service = None
-
-def _set_multi_account_mgr(new_mgr):
-    global multi_account_mgr
-    multi_account_mgr = new_mgr
-    if register_service:
-        register_service.multi_account_mgr = new_mgr
-    if login_service:
-        login_service.multi_account_mgr = new_mgr
-
-def _get_global_stats():
-    return global_stats
-
-try:
-    from core.register_service import RegisterService
-    from core.login_service import LoginService
-    register_service = RegisterService(
-        multi_account_mgr,
-        http_client_auth,
-        USER_AGENT,
-        RETRY_POLICY,
-        SESSION_CACHE_TTL_SECONDS,
-        _get_global_stats,
-        _set_multi_account_mgr,
-    )
-    login_service = LoginService(
-        multi_account_mgr,
-        http_client_auth,
-        USER_AGENT,
-        RETRY_POLICY,
-        SESSION_CACHE_TTL_SECONDS,
-        _get_global_stats,
-        _set_multi_account_mgr,
-    )
-except Exception as e:
-    logger.warning("[SYSTEM] 自动注册/刷新服务不可用: %s", e)
-    register_service = None
-    login_service = None
+# Legacy register/login services were removed.
 
 # 验证必需的环境变量
 if not ADMIN_KEY:
@@ -836,16 +714,6 @@ async def startup_event():
         logger.info(f"[SYSTEM] 自动刷新账号任务已启动（间隔: {AUTO_REFRESH_ACCOUNTS_SECONDS}秒）")
     elif storage.is_database_enabled():
         logger.info("[SYSTEM] 自动刷新账号功能已禁用（配置为0）")
-
-    # 启动自动登录刷新轮询（始终启动，但默认禁用）
-    if login_service:
-        try:
-            asyncio.create_task(login_service.start_polling())
-            logger.info("[SYSTEM] 账户刷新轮询服务已启动（默认禁用，可在设置中启用）")
-        except Exception as e:
-            logger.error(f"[SYSTEM] 启动登录服务失败: {e}")
-    else:
-        logger.info("[SYSTEM] 自动登录刷新未启用或依赖不可用")
 
     # 启动冷却状态定期保存任务（每5分钟保存一次）
     if storage.is_database_enabled():
@@ -1463,98 +1331,6 @@ async def admin_update_config(request: Request, accounts_data: list = Body(...))
         logger.error(f"[CONFIG] 更新配置失败: {str(e)}")
         raise HTTPException(500, f"更新失败: {str(e)}")
 
-@app.post("/admin/register/start")
-@require_login()
-async def admin_start_register(request: Request, count: Optional[int] = Body(default=None), domain: Optional[str] = Body(default=None), mail_provider: Optional[str] = Body(default=None)):
-    if not register_service:
-        raise HTTPException(503, "register service unavailable")
-    task = await register_service.start_register(count=count, domain=domain, mail_provider=mail_provider)
-    return task.to_dict()
-
-
-@app.post("/admin/register/cancel/{task_id}")
-@require_login()
-async def admin_cancel_register_task(request: Request, task_id: str, payload: dict = Body(default=None)):
-    if not register_service:
-        raise HTTPException(503, "register service unavailable")
-    payload = payload or {}
-    reason = payload.get("reason") or "cancelled"
-    task = await register_service.cancel_task(task_id, reason=reason)
-    if not task:
-        raise HTTPException(404, "task not found")
-    return task.to_dict()
-
-@app.get("/admin/register/task/{task_id}")
-@require_login()
-async def admin_get_register_task(request: Request, task_id: str):
-    if not register_service:
-        raise HTTPException(503, "register service unavailable")
-    task = register_service.get_task(task_id)
-    if not task:
-        raise HTTPException(404, "task not found")
-    return task.to_dict()
-
-@app.get("/admin/register/current")
-@require_login()
-async def admin_get_current_register_task(request: Request):
-    if not register_service:
-        raise HTTPException(503, "register service unavailable")
-    task = register_service.get_current_task()
-    if not task:
-        return {"status": "idle"}
-    return task.to_dict()
-
-@app.post("/admin/login/start")
-@require_login()
-async def admin_start_login(request: Request, account_ids: List[str] = Body(...)):
-    if not login_service:
-        raise HTTPException(503, "login service unavailable")
-    task = await login_service.start_login(account_ids)
-    return task.to_dict()
-
-
-@app.post("/admin/login/cancel/{task_id}")
-@require_login()
-async def admin_cancel_login_task(request: Request, task_id: str, payload: dict = Body(default=None)):
-    if not login_service:
-        raise HTTPException(503, "login service unavailable")
-    payload = payload or {}
-    reason = payload.get("reason") or "cancelled"
-    task = await login_service.cancel_task(task_id, reason=reason)
-    if not task:
-        raise HTTPException(404, "task not found")
-    return task.to_dict()
-
-@app.get("/admin/login/task/{task_id}")
-@require_login()
-async def admin_get_login_task(request: Request, task_id: str):
-    if not login_service:
-        raise HTTPException(503, "login service unavailable")
-    task = login_service.get_task(task_id)
-    if not task:
-        raise HTTPException(404, "task not found")
-    return task.to_dict()
-
-@app.get("/admin/login/current")
-@require_login()
-async def admin_get_current_login_task(request: Request):
-    if not login_service:
-        raise HTTPException(503, "login service unavailable")
-    task = login_service.get_current_task()
-    if not task:
-        return {"status": "idle"}
-    return task.to_dict()
-
-@app.post("/admin/login/check")
-@require_login()
-async def admin_check_login_refresh(request: Request):
-    if not login_service:
-        raise HTTPException(503, "login service unavailable")
-    task = await login_service.check_and_refresh()
-    if not task:
-        return {"status": "idle"}
-    return task.to_dict()
-
 @app.delete("/admin/accounts/{account_id}")
 @require_login()
 async def admin_delete_account(request: Request, account_id: str):
@@ -1677,36 +1453,7 @@ async def admin_get_settings(request: Request):
         "basic": {
             "api_key": config.basic.api_key,
             "base_url": config.basic.base_url,
-            "proxy_for_auth": config.basic.proxy_for_auth,
             "proxy_for_chat": config.basic.proxy_for_chat,
-            "duckmail_base_url": config.basic.duckmail_base_url,
-            "duckmail_api_key": config.basic.duckmail_api_key,
-            "duckmail_verify_ssl": config.basic.duckmail_verify_ssl,
-            "temp_mail_provider": config.basic.temp_mail_provider,
-            "moemail_base_url": config.basic.moemail_base_url,
-            "moemail_api_key": config.basic.moemail_api_key,
-            "moemail_domain": config.basic.moemail_domain,
-            "freemail_base_url": config.basic.freemail_base_url,
-            "freemail_jwt_token": config.basic.freemail_jwt_token,
-            "freemail_verify_ssl": config.basic.freemail_verify_ssl,
-            "freemail_domain": config.basic.freemail_domain,
-            "mail_proxy_enabled": config.basic.mail_proxy_enabled,
-            "gptmail_base_url": config.basic.gptmail_base_url,
-            "gptmail_api_key": config.basic.gptmail_api_key,
-            "gptmail_verify_ssl": config.basic.gptmail_verify_ssl,
-            "gptmail_domain": config.basic.gptmail_domain,
-            "cfmail_base_url": config.basic.cfmail_base_url,
-            "cfmail_api_key": config.basic.cfmail_api_key,
-            "cfmail_verify_ssl": config.basic.cfmail_verify_ssl,
-            "cfmail_domain": config.basic.cfmail_domain,
-            "samplemail_base_url": config.basic.samplemail_base_url,
-            "samplemail_verify_ssl": config.basic.samplemail_verify_ssl,
-            "browser_engine": config.basic.browser_engine,
-            "browser_mode": config.basic.browser_mode,
-            "browser_headless": config.basic.browser_headless,
-            "refresh_window_hours": config.basic.refresh_window_hours,
-            "register_default_count": config.basic.register_default_count,
-            "register_domain": config.basic.register_domain,
             "image_expire_hours": config.basic.image_expire_hours,
         },
         "image_generation": {
@@ -1724,10 +1471,6 @@ async def admin_get_settings(request: Request):
             "videos_rate_limit_cooldown_seconds": config.retry.videos_rate_limit_cooldown_seconds,
             "session_cache_ttl_seconds": config.retry.session_cache_ttl_seconds,
             "auto_refresh_accounts_seconds": config.retry.auto_refresh_accounts_seconds,
-            "scheduled_refresh_enabled": config.retry.scheduled_refresh_enabled,
-            "scheduled_refresh_cron": config.retry.scheduled_refresh_cron,
-            "refresh_cooldown_hours": config.retry.refresh_cooldown_hours,
-            "verification_code_resend_count": config.retry.verification_code_resend_count,
         },
         "quota_limits": {
             "enabled": config.quota_limits.enabled,
@@ -1748,58 +1491,22 @@ async def admin_get_settings(request: Request):
 @require_login()
 async def admin_update_settings(request: Request, new_settings: dict = Body(...)):
     """更新系统设置"""
-    global API_KEY, PROXY_FOR_AUTH, PROXY_FOR_CHAT, BASE_URL, LOGO_URL, CHAT_URL
+    global API_KEY, PROXY_FOR_CHAT, BASE_URL, LOGO_URL, CHAT_URL
     global IMAGE_GENERATION_ENABLED, IMAGE_GENERATION_MODELS
     global MAX_ACCOUNT_SWITCH_TRIES
     global RETRY_POLICY
     global SESSION_CACHE_TTL_SECONDS, AUTO_REFRESH_ACCOUNTS_SECONDS
-    global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client, http_client_chat, http_client_auth
+    global SESSION_EXPIRE_HOURS, multi_account_mgr, http_client, http_client_chat
 
     try:
-        basic = dict(new_settings.get("basic") or {})
-        basic.setdefault("duckmail_base_url", config.basic.duckmail_base_url)
-        basic.setdefault("duckmail_api_key", config.basic.duckmail_api_key)
-        basic.setdefault("duckmail_verify_ssl", config.basic.duckmail_verify_ssl)
-        basic.setdefault("temp_mail_provider", config.basic.temp_mail_provider)
-        basic.setdefault("moemail_base_url", config.basic.moemail_base_url)
-        basic.setdefault("moemail_api_key", config.basic.moemail_api_key)
-        basic.setdefault("moemail_domain", config.basic.moemail_domain)
-        basic.setdefault("freemail_base_url", config.basic.freemail_base_url)
-        basic.setdefault("freemail_jwt_token", config.basic.freemail_jwt_token)
-        basic.setdefault("freemail_verify_ssl", config.basic.freemail_verify_ssl)
-        basic.setdefault("freemail_domain", config.basic.freemail_domain)
-        basic.setdefault("mail_proxy_enabled", config.basic.mail_proxy_enabled)
-        basic.setdefault("gptmail_base_url", config.basic.gptmail_base_url)
-        basic.setdefault("gptmail_api_key", config.basic.gptmail_api_key)
-        basic.setdefault("gptmail_verify_ssl", config.basic.gptmail_verify_ssl)
-        basic.setdefault("gptmail_domain", config.basic.gptmail_domain)
-        basic.setdefault("cfmail_base_url", config.basic.cfmail_base_url)
-        basic.setdefault("cfmail_api_key", config.basic.cfmail_api_key)
-        basic.setdefault("cfmail_verify_ssl", config.basic.cfmail_verify_ssl)
-        basic.setdefault("cfmail_domain", config.basic.cfmail_domain)
-        basic.setdefault("samplemail_base_url", config.basic.samplemail_base_url)
-        basic.setdefault("samplemail_verify_ssl", config.basic.samplemail_verify_ssl)
-        basic.setdefault("browser_engine", config.basic.browser_engine)
-        basic.setdefault("browser_mode", config.basic.browser_mode)
-        basic.setdefault("browser_headless", config.basic.browser_headless)
-        basic.setdefault("refresh_window_hours", config.basic.refresh_window_hours)
-        basic.setdefault("register_default_count", config.basic.register_default_count)
-        basic.setdefault("register_domain", config.basic.register_domain)
-        basic.setdefault("image_expire_hours", config.basic.image_expire_hours)
-        if not isinstance(basic.get("register_domain"), str):
-            basic["register_domain"] = ""
-        browser_mode_raw = basic.get("browser_mode")
-        if browser_mode_raw is not None and str(browser_mode_raw).strip():
-            browser_mode = str(browser_mode_raw).strip().lower()
-            if browser_mode not in ("normal", "silent", "headless"):
-                raise HTTPException(status_code=400, detail="browser_mode 必须是 normal / silent / headless")
-        else:
-            browser_headless = _parse_bool(basic.get("browser_headless"), config.basic.browser_headless)
-            browser_mode = "headless" if browser_headless else "normal"
-        basic["browser_mode"] = browser_mode
-        basic["browser_headless"] = browser_mode == "headless"
-
-        basic.pop("duckmail_proxy", None)
+        incoming_basic = dict(new_settings.get("basic") or {})
+        basic = {
+            "api_key": incoming_basic.get("api_key", config.basic.api_key),
+            "base_url": incoming_basic.get("base_url", config.basic.base_url),
+            "proxy_for_chat": incoming_basic.get("proxy_for_chat", config.basic.proxy_for_chat),
+            "auth_use_url_submit": config.basic.auth_use_url_submit,
+            "image_expire_hours": incoming_basic.get("image_expire_hours", config.basic.image_expire_hours),
+        }
         new_settings["basic"] = basic
 
         image_generation = dict(new_settings.get("image_generation") or {})
@@ -1816,17 +1523,16 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         video_generation["output_format"] = video_output_format
         new_settings["video_generation"] = video_generation
 
-        retry = dict(new_settings.get("retry") or {})
-        # 已弃用：分批刷新字段不再对外暴露，也不再参与保存
-        retry.pop("refresh_batch_size", None)
-        retry.pop("refresh_batch_interval_minutes", None)
-        retry.setdefault("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds)
-        retry.setdefault("scheduled_refresh_enabled", config.retry.scheduled_refresh_enabled)
-        retry.setdefault("scheduled_refresh_interval_minutes", config.retry.scheduled_refresh_interval_minutes)
-        retry.setdefault("text_rate_limit_cooldown_seconds", config.retry.text_rate_limit_cooldown_seconds)
-        retry.setdefault("images_rate_limit_cooldown_seconds", config.retry.images_rate_limit_cooldown_seconds)
-        retry.setdefault("videos_rate_limit_cooldown_seconds", config.retry.videos_rate_limit_cooldown_seconds)
-        retry.setdefault("verification_code_resend_count", config.retry.verification_code_resend_count)
+        incoming_retry = dict(new_settings.get("retry") or {})
+        retry = {
+            "max_account_switch_tries": incoming_retry.get("max_account_switch_tries", config.retry.max_account_switch_tries),
+            "rate_limit_cooldown_seconds": incoming_retry.get("rate_limit_cooldown_seconds", config.retry.rate_limit_cooldown_seconds),
+            "text_rate_limit_cooldown_seconds": incoming_retry.get("text_rate_limit_cooldown_seconds", config.retry.text_rate_limit_cooldown_seconds),
+            "images_rate_limit_cooldown_seconds": incoming_retry.get("images_rate_limit_cooldown_seconds", config.retry.images_rate_limit_cooldown_seconds),
+            "videos_rate_limit_cooldown_seconds": incoming_retry.get("videos_rate_limit_cooldown_seconds", config.retry.videos_rate_limit_cooldown_seconds),
+            "session_cache_ttl_seconds": incoming_retry.get("session_cache_ttl_seconds", config.retry.session_cache_ttl_seconds),
+            "auto_refresh_accounts_seconds": incoming_retry.get("auto_refresh_accounts_seconds", config.retry.auto_refresh_accounts_seconds),
+        }
         new_settings["retry"] = retry
 
         # 配额上限配置
@@ -1838,7 +1544,6 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         new_settings["quota_limits"] = quota_limits
 
         # 保存旧配置用于对比
-        old_proxy_for_auth = PROXY_FOR_AUTH
         old_proxy_for_chat = PROXY_FOR_CHAT
         old_retry_config = {
             "text_rate_limit_cooldown_seconds": RETRY_POLICY.cooldowns.text,
@@ -1855,11 +1560,9 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
 
         # 更新全局变量（实时生效）
         API_KEY = config.basic.api_key
-        _proxy_auth, _no_proxy_auth = parse_proxy_setting(config.basic.proxy_for_auth)
         _proxy_chat, _no_proxy_chat = parse_proxy_setting(config.basic.proxy_for_chat)
-        PROXY_FOR_AUTH = _proxy_auth
         PROXY_FOR_CHAT = _proxy_chat
-        _NO_PROXY = ",".join(filter(None, {_no_proxy_auth, _no_proxy_chat}))
+        _NO_PROXY = ",".join(filter(None, {_no_proxy_chat}))
         if _NO_PROXY:
             os.environ["NO_PROXY"] = _NO_PROXY
         else:
@@ -1876,11 +1579,10 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
         SESSION_EXPIRE_HOURS = config.session.expire_hours
 
         # 检查是否需要重建 HTTP 客户端（代理变化）
-        if old_proxy_for_auth != PROXY_FOR_AUTH or old_proxy_for_chat != PROXY_FOR_CHAT:
+        if old_proxy_for_chat != PROXY_FOR_CHAT:
             logger.info(f"[CONFIG] Proxy configuration changed, rebuilding HTTP clients")
             await http_client.aclose()
             await http_client_chat.aclose()
-            await http_client_auth.aclose()
 
             # 重新创建对话客户端
             http_client = httpx.AsyncClient(
@@ -1906,30 +1608,10 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
                 )
             )
 
-            # 重新创建账户操作客户端
-            http_client_auth = httpx.AsyncClient(
-                proxy=(PROXY_FOR_AUTH or None),
-                verify=False,
-                http2=False,
-                timeout=httpx.Timeout(TIMEOUT_SECONDS, connect=60.0),
-                limits=httpx.Limits(
-                    max_keepalive_connections=100,
-                    max_connections=200
-                )
-            )
-
-            # 打印新的代理配置
-            logger.info(f"[PROXY] Account operations (register/login/refresh): {PROXY_FOR_AUTH if PROXY_FOR_AUTH else 'disabled'}")
             logger.info(f"[PROXY] Chat operations (JWT/session/messages): {PROXY_FOR_CHAT if PROXY_FOR_CHAT else 'disabled'}")
 
             # 更新所有账户的 http_client 引用（对话用）
             multi_account_mgr.update_http_client(http_client)
-
-            # 更新注册/登录服务的 http_client 引用（账户操作用）
-            if register_service:
-                register_service.http_client = http_client_auth
-            if login_service:
-                login_service.http_client = http_client_auth
 
         # 检查是否需要更新账户管理器配置（重试策略变化）
         retry_changed = (
@@ -1945,10 +1627,6 @@ async def admin_update_settings(request: Request, new_settings: dict = Body(...)
             multi_account_mgr.cache_ttl = SESSION_CACHE_TTL_SECONDS
             for account_id, account_mgr in multi_account_mgr.accounts.items():
                 account_mgr.apply_retry_policy(RETRY_POLICY)
-            if register_service:
-                register_service.retry_policy = RETRY_POLICY
-            if login_service:
-                login_service.retry_policy = RETRY_POLICY
 
         logger.info(f"[CONFIG] 系统设置已更新并实时生效")
         return {"status": "success", "message": "设置已保存并实时生效！"}
@@ -2015,58 +1693,6 @@ async def admin_clear_logs(request: Request, confirm: str = None):
         log_buffer.clear()
     logger.info("[LOG] 日志已清空")
     return {"status": "success", "message": "已清空内存日志", "cleared_count": cleared_count}
-
-@app.get("/admin/task-history")
-@require_login()
-async def admin_get_task_history(request: Request, limit: int = 100):
-    """获取任务历史记录"""
-    _load_task_history()
-    with task_history_lock:
-        history = list(task_history)
-
-    live_entries = []
-    try:
-        if register_service:
-            current_register = register_service.get_current_task()
-            if current_register and current_register.status in ("running", "pending"):
-                live_entries.append(_build_history_entry("register", current_register.to_dict(), is_live=True))
-        if login_service:
-            current_login = login_service.get_current_task()
-            if current_login and current_login.status in ("running", "pending"):
-                live_entries.append(_build_history_entry("login", current_login.to_dict(), is_live=True))
-    except Exception as exc:
-        logger.warning(f"[HISTORY] build live entries failed: {exc}")
-
-    merged = {}
-    for entry in live_entries + history:
-        entry_id = entry.get("id") or str(uuid.uuid4())
-        if entry_id not in merged:
-            merged[entry_id] = entry
-
-    # 按创建时间倒序排序
-    history = list(merged.values())
-    history.sort(key=lambda x: x.get("created_at", 0), reverse=True)
-
-    # 限制返回数量
-    limit = min(limit, 100)
-    return {
-        "total": len(history),
-        "limit": limit,
-        "history": history[:limit]
-    }
-
-@app.delete("/admin/task-history")
-@require_login()
-async def admin_clear_task_history(request: Request, confirm: str = None):
-    """清空任务历史记录"""
-    if confirm != "yes":
-        raise HTTPException(400, "需要 confirm=yes 参数确认清空操作")
-    with task_history_lock:
-        cleared_count = len(task_history)
-        task_history.clear()
-        _persist_task_history()
-    logger.info("[HISTORY] 任务历史已清空")
-    return {"status": "success", "message": "已清空任务历史", "cleared_count": cleared_count}
 
 # ---------- Auth endpoints (API) ----------
 

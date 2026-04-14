@@ -430,23 +430,6 @@ def _init_sqlite_tables(conn: sqlite3.Connection) -> None:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS task_history (
-                id TEXT PRIMARY KEY,
-                data TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS task_history_created_at_idx
-            ON task_history(created_at DESC)
-            """
-        )
-
-
 def migrate_from_local_files_sqlite(conn: sqlite3.Connection) -> bool:
     """从本地文件迁移数据到 SQLite"""
     print("\n" + "=" * 60)

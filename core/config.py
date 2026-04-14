@@ -40,51 +40,14 @@ def _parse_bool(value, default: bool) -> bool:
     return default
 
 
-def _normalize_browser_mode(value, default: str = "normal") -> str:
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in ("normal", "silent", "headless"):
-            return lowered
-    return default
-
-
 # ==================== 配置模型定义 ====================
 
 class BasicConfig(BaseModel):
     """基础配置"""
     api_key: str = Field(default="", description="API访问密钥（留空则公开访问，多个密钥用逗号分隔）")
     base_url: str = Field(default="", description="服务器URL（留空则自动检测）")
-    proxy_for_auth: str = Field(default="", description="账户操作代理地址（注册/登录/刷新，留空则不使用代理）")
     proxy_for_chat: str = Field(default="", description="对话操作代理地址（JWT/会话/消息，留空则不使用代理）")
-    duckmail_base_url: str = Field(default="https://api.duckmail.sbs", description="DuckMail API地址")
-    duckmail_api_key: str = Field(default="", description="DuckMail API key")
-    duckmail_verify_ssl: bool = Field(default=True, description="DuckMail SSL校验")
-    temp_mail_provider: str = Field(default="duckmail", description="临时邮箱提供商: duckmail/moemail/freemail/gptmail/cfmail/samplemail")
-    moemail_base_url: str = Field(default="https://moemail.app", description="Moemail API地址")
-    moemail_api_key: str = Field(default="", description="Moemail API key")
-    moemail_domain: str = Field(default="", description="Moemail 邮箱域名（可选，留空则随机选择）")
-    freemail_base_url: str = Field(default="http://your-freemail-server.com", description="Freemail API地址")
-    freemail_jwt_token: str = Field(default="", description="Freemail JWT Token")
-    freemail_verify_ssl: bool = Field(default=True, description="Freemail SSL校验")
-    freemail_domain: str = Field(default="", description="Freemail 邮箱域名（可选，留空则随机选择）")
-    mail_proxy_enabled: bool = Field(default=False, description="是否启用临时邮箱代理（使用账户操作代理）")
-    gptmail_base_url: str = Field(default="https://mail.chatgpt.org.uk", description="GPTMail API地址")
-    gptmail_api_key: str = Field(default="gpt-test", description="GPTMail API key")
-    gptmail_verify_ssl: bool = Field(default=True, description="GPTMail SSL校验")
-    gptmail_domain: str = Field(default="", description="GPTMail 邮箱域名（可选，留空则随机选择）")
-    cfmail_base_url: str = Field(default="", description="Cloudflare Mail API地址")
-    cfmail_api_key: str = Field(default="", description="Cloudflare Mail 访问密码（x-custom-auth）")
-    cfmail_verify_ssl: bool = Field(default=True, description="Cloudflare Mail SSL校验")
-    cfmail_domain: str = Field(default="", description="Cloudflare Mail 邮箱域名（可选，留空随机）")
-    samplemail_base_url: str = Field(default="", description="Sample Mail Worker 地址")
-    samplemail_verify_ssl: bool = Field(default=True, description="Sample Mail SSL校验")
-    browser_engine: str = Field(default="dp", description="浏览器引擎")
-    browser_mode: str = Field(default="normal", description="自动化浏览器模式：normal/silent/headless")
-    browser_headless: bool = Field(default=False, description="兼容字段：自动化浏览器无头模式")
     auth_use_url_submit: bool = Field(default=True, description="登录时是否使用URL方式提交邮箱（true=URL提交，false=页面输入并点击邮箱登录）")
-    refresh_window_hours: int = Field(default=1, ge=0, le=168, description="过期刷新窗口（小时）")
-    register_default_count: int = Field(default=1, ge=1, description="默认注册数量")
-    register_domain: str = Field(default="", description="DuckMail 域名（推荐）")
     image_expire_hours: int = Field(default=12, ge=-1, le=720, description="图片/视频过期时间（小时），-1为永不删除")
 
 
@@ -119,55 +82,6 @@ class RetryConfig(BaseModel):
     videos_rate_limit_cooldown_seconds: int = Field(default=14400, ge=3600, le=86400, description="视频配额冷却（秒）")
     session_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400, description="会话缓存时间（秒，0表示禁用缓存）")
     auto_refresh_accounts_seconds: int = Field(default=60, ge=0, le=600, description="自动刷新账号间隔（秒，0禁用）")
-    # 定时刷新配置
-    scheduled_refresh_enabled: bool = Field(default=False, description="是否启用定时刷新任务")
-    scheduled_refresh_cron: str = Field(default="08:00,20:00", description="刷新时间，如 '08:00,20:00' 或 '*/120'(每120分钟)")
-    refresh_batch_size: int = Field(default=0, ge=0, le=1000, description="(已弃用) 批次刷新账号数")
-    refresh_batch_interval_minutes: int = Field(default=0, ge=0, le=1440, description="(已弃用) 批次间等待时间(分钟)")
-    refresh_cooldown_hours: float = Field(default=12.0, ge=1, le=48, description="同一账号刷新冷却期(小时)")
-    verification_code_resend_count: int = Field(default=2, ge=0, le=5, description="验证码超时后的重发次数")
-    # 向后兼容：旧配置可能只有这个字段，读取时自动转换为 */N cron 格式
-    scheduled_refresh_interval_minutes: int = Field(default=0, ge=0, le=720, description="(旧字段，已废弃) 定时刷新检测间隔")
-
-    @validator("scheduled_refresh_cron")
-    def validate_scheduled_refresh_cron(cls, v):
-        raw = str(v or "").strip()
-        if not raw:
-            raise ValueError("scheduled_refresh_cron 不能为空")
-
-        # interval 模式：*/N（分钟）
-        if raw.startswith("*/"):
-            try:
-                minutes = int(raw[2:])
-            except ValueError as exc:
-                raise ValueError("scheduled_refresh_cron 间隔模式格式错误，应为 */分钟数") from exc
-            if minutes < 5:
-                raise ValueError("scheduled_refresh_cron 间隔模式最小 5 分钟")
-            return f"*/{minutes}"
-
-        # daily 模式：HH:MM,HH:MM
-        times = [item.strip() for item in raw.split(",") if item.strip()]
-        if not times:
-            raise ValueError("scheduled_refresh_cron 每日模式至少提供一个时间点")
-
-        normalized_times: List[str] = []
-        for item in times:
-            parts = item.split(":")
-            if len(parts) != 2:
-                raise ValueError(f"scheduled_refresh_cron 时间格式错误: {item}")
-            try:
-                hour = int(parts[0])
-                minute = int(parts[1])
-            except ValueError as exc:
-                raise ValueError(f"scheduled_refresh_cron 时间格式错误: {item}") from exc
-            if not (0 <= hour <= 23 and 0 <= minute <= 59):
-                raise ValueError(f"scheduled_refresh_cron 时间超出范围: {item}")
-            normalized = f"{hour:02d}:{minute:02d}"
-            if normalized not in normalized_times:
-                normalized_times.append(normalized)
-
-        normalized_times.sort()
-        return ",".join(normalized_times)
 
 class QuotaLimitsConfig(BaseModel):
     """每日配额上限配置（基于 Google 官方限额，用于主动配额计数）"""
@@ -329,69 +243,21 @@ class ConfigManager:
 
         # 3. 加载基础配置（数据库 > 默认值）
         basic_data = yaml_data.get("basic", {})
-        refresh_window_raw = basic_data.get("refresh_window_hours", 1)
-        register_default_raw = basic_data.get("register_default_count", 1)
-        register_domain_raw = basic_data.get("register_domain", "")
-        duckmail_api_key_raw = basic_data.get("duckmail_api_key", "")
-
         # 兼容旧配置：如果存在旧的 proxy 字段，迁移到新字段
-        old_proxy = basic_data.get("proxy", "")
-        old_proxy_for_auth_bool = basic_data.get("proxy_for_auth")
-        old_proxy_for_chat_bool = basic_data.get("proxy_for_chat")
-
-        # 新配置优先，如果没有新配置则从旧配置迁移
-        proxy_for_auth = basic_data.get("proxy_for_auth", "")
-        proxy_for_chat = basic_data.get("proxy_for_chat", "")
-
-        # 如果新配置为空且存在旧配置，则迁移
-        if not proxy_for_auth and old_proxy:
-            # 如果旧配置中 proxy_for_auth 是布尔值且为 True，则使用旧的 proxy
-            if isinstance(old_proxy_for_auth_bool, bool) and old_proxy_for_auth_bool:
-                proxy_for_auth = old_proxy
-
-        if not proxy_for_chat and old_proxy:
-            # 如果旧配置中 proxy_for_chat 是布尔值且为 True，则使用旧的 proxy
-            if isinstance(old_proxy_for_chat_bool, bool) and old_proxy_for_chat_bool:
+        old_proxy = str(basic_data.get("proxy") or "").strip()
+        proxy_for_chat_raw = basic_data.get("proxy_for_chat", "")
+        if isinstance(proxy_for_chat_raw, bool):
+            proxy_for_chat = old_proxy if proxy_for_chat_raw else ""
+        else:
+            proxy_for_chat = str(proxy_for_chat_raw or "").strip()
+            if not proxy_for_chat and old_proxy and "proxy_for_chat" not in basic_data:
                 proxy_for_chat = old_proxy
-
-        legacy_headless = _parse_bool(basic_data.get("browser_headless"), False)
-        default_browser_mode = "headless" if legacy_headless else "normal"
-        browser_mode = _normalize_browser_mode(basic_data.get("browser_mode"), default_browser_mode)
 
         basic_config = BasicConfig(
             api_key=basic_data.get("api_key") or "",
             base_url=basic_data.get("base_url") or "",
-            proxy_for_auth=str(proxy_for_auth or "").strip(),
-            proxy_for_chat=str(proxy_for_chat or "").strip(),
-            duckmail_base_url=basic_data.get("duckmail_base_url") or "https://api.duckmail.sbs",
-            duckmail_api_key=str(duckmail_api_key_raw or "").strip(),
-            duckmail_verify_ssl=_parse_bool(basic_data.get("duckmail_verify_ssl"), True),
-            temp_mail_provider=basic_data.get("temp_mail_provider") or "moemail",
-            moemail_base_url=basic_data.get("moemail_base_url") or "https://moemail.nanohajimi.mom",
-            moemail_api_key=str(basic_data.get("moemail_api_key") or "").strip(),
-            moemail_domain=str(basic_data.get("moemail_domain") or "").strip(),
-            freemail_base_url=basic_data.get("freemail_base_url") or "http://your-freemail-server.com",
-            freemail_jwt_token=str(basic_data.get("freemail_jwt_token") or "").strip(),
-            freemail_verify_ssl=_parse_bool(basic_data.get("freemail_verify_ssl"), True),
-            freemail_domain=str(basic_data.get("freemail_domain") or "").strip(),
-            mail_proxy_enabled=_parse_bool(basic_data.get("mail_proxy_enabled"), False),
-            gptmail_base_url=str(basic_data.get("gptmail_base_url") or "https://mail.chatgpt.org.uk").strip(),
-            gptmail_api_key=str(basic_data.get("gptmail_api_key") or "").strip(),
-            gptmail_verify_ssl=_parse_bool(basic_data.get("gptmail_verify_ssl"), True),
-            gptmail_domain=str(basic_data.get("gptmail_domain") or "").strip(),
-            cfmail_base_url=str(basic_data.get("cfmail_base_url") or "").strip(),
-            cfmail_api_key=str(basic_data.get("cfmail_api_key") or "").strip(),
-            cfmail_verify_ssl=_parse_bool(basic_data.get("cfmail_verify_ssl"), True),
-            cfmail_domain=str(basic_data.get("cfmail_domain") or "").strip(),
-            samplemail_base_url=str(basic_data.get("samplemail_base_url") or "").strip(),
-            samplemail_verify_ssl=_parse_bool(basic_data.get("samplemail_verify_ssl"), True),
-            browser_engine=basic_data.get("browser_engine") or "dp",
-            browser_mode=browser_mode,
-            browser_headless=browser_mode == "headless",
+            proxy_for_chat=proxy_for_chat,
             auth_use_url_submit=_parse_bool(basic_data.get("auth_use_url_submit"), True),
-            refresh_window_hours=int(refresh_window_raw),
-            register_default_count=int(register_default_raw),
-            register_domain=str(register_domain_raw or "").strip(),
             image_expire_hours=int(basic_data.get("image_expire_hours", 12)),
         )
 
@@ -583,12 +449,6 @@ class ConfigManager:
         """Session密钥"""
         return self._config.security.session_secret_key
 
-    @property
-    def proxy_for_auth(self) -> str:
-        """账户操作代理地址"""
-        return self._config.basic.proxy_for_auth
-
-    @property
     def proxy_for_chat(self) -> str:
         """对话操作代理地址"""
         return self._config.basic.proxy_for_chat

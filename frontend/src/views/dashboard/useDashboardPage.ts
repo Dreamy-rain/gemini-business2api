@@ -1,13 +1,14 @@
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import { statsApi } from '@/api'
 import {
-  getLineChartTheme,
-  getPieChartTheme,
-  createLineSeries,
-  createPieDataItem,
   chartColors,
-  getModelColor,
+  createLineSeries,
+  createModelLegendConfig,
   filterValidModels,
+  createPieDataItem,
+  getLineChartTheme,
+  getModelColor,
+  getPieChartTheme,
 } from '@/lib/chartTheme'
 
 
@@ -388,7 +389,7 @@ export function useDashboardPage() {
       },
       legend: {
         ...theme.legend,
-        data: modelData.map(item => item.name),
+        ...createModelLegendConfig(modelData.map(item => item.name)),
       },
       series: [
         {
@@ -716,7 +717,7 @@ export function useDashboardPage() {
       },
       legend: {
         ...theme.legend,
-        data: modelNames,
+        ...createModelLegendConfig(modelNames),
         top: 0,
         right: 0,
         type: 'scroll',
@@ -938,7 +939,7 @@ export function useDashboardPage() {
       },
       legend: {
         ...theme.legend,
-        data: legendData,
+        ...createModelLegendConfig(legendData),
         top: 0,
         right: 0,
         type: 'scroll',

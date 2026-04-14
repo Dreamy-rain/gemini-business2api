@@ -20,14 +20,16 @@
           <div class="text-xs text-muted-foreground">
             展示最近 <span class="font-semibold text-foreground">{{ limit }}</span> 条会话日志
           </div>
-          <a
+          <Button
             v-if="chatUrl"
+            tag="a"
             :href="chatUrl"
             target="_blank"
-            class="ui-btn ui-btn-sm ui-btn-outline"
+            size="sm"
+            variant="outline"
           >
             开始对话
-          </a>
+          </Button>
           <span v-else class="text-xs text-muted-foreground">开始对话</span>
         </div>
 
@@ -95,6 +97,7 @@
 </template>
 
 <script setup lang="ts">
+import { Button } from 'nanocat-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { publicDisplayApi, publicLogsApi, publicStatsApi } from '@/api'
 import type {

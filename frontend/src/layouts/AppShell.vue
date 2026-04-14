@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="min-h-screen">
     <div class="flex min-h-screen flex-col lg:flex-row">
       <div
@@ -6,10 +6,9 @@
         class="fixed inset-0 z-30 bg-black/20 lg:hidden"
         @click="isSidebarOpen = false"
       ></div>
+
       <aside
-        class="fixed inset-y-0 left-0 z-40 w-64 -translate-x-full bg-card border-r border-border
-               transition-transform duration-200 ease-out will-change-[transform] transform-gpu flex flex-col lg:static lg:translate-x-0 lg:bg-card
-               lg:border-b-0 lg:border-r lg:sticky lg:top-0 lg:h-screen"
+        class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full transform-gpu flex-col border-r border-border bg-card transition-transform duration-200 ease-out will-change-[transform] lg:static lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:border-b-0 lg:border-r"
         :class="[
           { 'translate-x-0': isSidebarOpen, 'w-16 lg:w-16': isSidebarCollapsed },
         ]"
@@ -18,7 +17,7 @@
           class="flex h-16 items-center justify-between px-6 pt-4 lg:h-20 lg:pt-5"
           :class="isSidebarCollapsed ? 'justify-center px-0' : ''"
         >
-          <div class="flex items-center gap-2" :class="isSidebarCollapsed ? 'gap-0 justify-center w-full' : ''">
+          <div class="flex items-center gap-2" :class="isSidebarCollapsed ? 'w-full justify-center gap-0' : ''">
             <a
               href="https://github.com/Dreamy-rain/gemini-business2api"
               target="_blank"
@@ -42,7 +41,7 @@
         </div>
 
         <nav
-          class="pb-4 pt-4 lg:pt-6 flex-1 overflow-y-auto"
+          class="flex-1 overflow-y-auto pb-4 pt-4 lg:pt-6"
           :class="isSidebarCollapsed ? 'px-2' : 'px-3'"
         >
           <p
@@ -56,7 +55,7 @@
               v-for="item in menuItems"
               :key="item.path"
               :to="item.path"
-              class="group flex items-center rounded-2xl py-2 text-sm font-medium transition-colors overflow-hidden"
+              class="group flex items-center overflow-hidden rounded-2xl py-2 text-sm font-medium transition-colors"
               :class="navItemClass(item.path)"
               :title="isSidebarCollapsed ? item.label : undefined"
             >
@@ -68,7 +67,7 @@
                   <path :d="item.icon" />
                 </svg>
               </span>
-              <span v-if="!isSidebarCollapsed" class="flex-1 min-w-0 truncate">{{ item.label }}</span>
+              <span v-if="!isSidebarCollapsed" class="min-w-0 flex-1 truncate">{{ item.label }}</span>
               <span v-if="!isSidebarCollapsed" class="ml-auto text-xs opacity-0 transition-opacity group-hover:opacity-100">
                 进入
               </span>
@@ -97,15 +96,21 @@
             class="mt-4 flex items-center gap-3"
             :class="isSidebarCollapsed ? 'justify-center' : ''"
           >
-            <button
+            <Button
               v-if="!isSidebarCollapsed"
+              size="sm"
+              variant="outline"
+              block
+              root-class="justify-center rounded-2xl text-muted-foreground"
               @click="handleLogout"
-              class="ui-btn ui-btn-sm ui-btn-outline w-full justify-center rounded-2xl text-muted-foreground"
             >
               退出登录
-            </button>
-            <button
-              class="ui-btn ui-btn-icon-sm ui-btn-outline shrink-0 rounded-2xl text-muted-foreground"
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              icon-only
+              root-class="shrink-0 rounded-2xl text-muted-foreground"
               @click="isSidebarCollapsed = !isSidebarCollapsed"
               :title="isSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
             >
@@ -117,98 +122,112 @@
               >
                 <path d="M6 4h2v16H6V4zm4 4h8v2h-8V8zm0 6h8v2h-8v-2z" />
               </svg>
-            </button>
+            </Button>
           </div>
         </div>
       </aside>
 
       <main class="min-w-0 flex-1 overflow-hidden lg:ml-0">
-        <header class="min-w-0 flex flex-col gap-4 border-b border-border bg-card px-6 py-5 lg:flex-row lg:items-center lg:justify-between lg:px-10">
-          <div class="flex items-center gap-3">
-            <button
-              class="ui-btn ui-btn-icon-sm ui-btn-outline lg:hidden"
-              @click="isSidebarOpen = true"
-              aria-label="打开导航"
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor">
-                <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
-              </svg>
-            </button>
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 130 150"
-              class="logo-mark h-9 w-9 shrink-0 text-foreground"
-            >
-              <defs>
-                <filter id="head-shadow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="rgba(0, 188, 212, 0.2)"/>
-                </filter>
-              </defs>
-              <g class="logo-cat-wrapper" transform="translate(0, 12)">
-                <g transform="translate(16, 20) rotate(-10, 9, 12)">
-                  <path d="M14 0 L18 24 L0 24 Z" fill="#2c3e50" />
-                </g>
-                <g transform="translate(96, 20) rotate(10, 9, 12)">
-                  <path d="M4 0 L18 24 L0 24 Z" fill="#2c3e50" />
-                </g>
-                <g filter="url(#head-shadow)">
-                  <path d="M 32 40 L 98 40 A 12 12 0 0 1 110 52 L 110 90 A 30 30 0 0 1 80 120 L 50 120 A 30 30 0 0 1 20 90 L 20 52 A 12 12 0 0 1 32 40 Z"
-                    fill="rgba(255, 255, 255, 0.9)"
-                    stroke="#2c3e50"
-                    stroke-width="3"
-                  />
-                </g>
-                <rect class="logo-eye" x="35" y="68" width="14" height="4" rx="1" />
-                <rect class="logo-eye" x="81" y="68" width="14" height="4" rx="1" />
-              </g>
-            </svg>
-            <div class="flex min-w-0 items-center gap-2">
-              <h2 class="truncate text-xl font-semibold text-foreground lg:text-2xl">
-                {{ currentPageTitle }}
-              </h2>
-              <span
-                v-if="sidebarVersionLabel"
-                class="ui-chip shrink-0 px-2.5 py-1 text-[11px] text-muted-foreground"
+        <header class="min-w-0 border-b border-border bg-card px-6 py-5 lg:px-10">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div class="flex items-center gap-3">
+              <Button
+                size="xs"
+                variant="outline"
+                icon-only
+                root-class="lg:hidden"
+                @click="isSidebarOpen = true"
+                aria-label="打开导航"
               >
-                {{ sidebarVersionLabel }}
-              </span>
+                <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5" fill="currentColor">
+                  <path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h16v2H4v-2z" />
+                </svg>
+              </Button>
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 130 150"
+                class="logo-mark h-9 w-9 shrink-0 text-foreground"
+              >
+                <defs>
+                  <filter id="head-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="rgba(0, 188, 212, 0.2)" />
+                  </filter>
+                </defs>
+                <g class="logo-cat-wrapper" transform="translate(0, 12)">
+                  <g transform="translate(16, 20) rotate(-10, 9, 12)">
+                    <path d="M14 0 L18 24 L0 24 Z" fill="#2c3e50" />
+                  </g>
+                  <g transform="translate(96, 20) rotate(10, 9, 12)">
+                    <path d="M4 0 L18 24 L0 24 Z" fill="#2c3e50" />
+                  </g>
+                  <g filter="url(#head-shadow)">
+                    <path
+                      d="M 32 40 L 98 40 A 12 12 0 0 1 110 52 L 110 90 A 30 30 0 0 1 80 120 L 50 120 A 30 30 0 0 1 20 90 L 20 52 A 12 12 0 0 1 32 40 Z"
+                      fill="rgba(255, 255, 255, 0.9)"
+                      stroke="#2c3e50"
+                      stroke-width="3"
+                    />
+                  </g>
+                  <rect class="logo-eye" x="35" y="68" width="14" height="4" rx="1" />
+                  <rect class="logo-eye" x="81" y="68" width="14" height="4" rx="1" />
+                </g>
+              </svg>
+              <div class="flex min-w-0 items-center gap-2">
+                <h2 class="truncate text-xl font-semibold text-foreground lg:text-2xl">
+                  {{ currentPageTitle }}
+                </h2>
+                <span
+                  v-if="sidebarVersionLabel"
+                  class="ui-chip shrink-0 px-2.5 py-1 text-[11px] text-muted-foreground"
+                >
+                  {{ sidebarVersionLabel }}
+                </span>
+              </div>
             </div>
-          </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <button
-              @click="refreshPage"
-              class="ui-btn ui-btn-sm ui-btn-outline"
-              title="刷新"
-            >
-              刷新
-            </button>
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline"
-              :disabled="isCheckingUpdate"
-              @click="checkForUpdates"
-            >
-              {{ isCheckingUpdate ? '检查中...' : '检查更新' }}
-            </button>
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline"
-              @click="openApiInfo"
-            >
-              接口信息
-            </button>
-            <RouterLink
-              to="/public/uptime"
-              target="_blank"
-              class="ui-btn ui-btn-sm ui-btn-outline"
-            >
-              状态监控
-            </RouterLink>
-            <RouterLink
-              to="/public/logs"
-              target="_blank"
-              class="ui-btn ui-btn-sm ui-btn-outline"
-            >
-              公开日志
-            </RouterLink>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                @click="refreshPage"
+                title="刷新"
+              >
+                刷新
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                :disabled="isCheckingUpdate"
+                @click="checkForUpdates"
+              >
+                {{ isCheckingUpdate ? '检查中...' : '检查更新' }}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                @click="openApiInfo"
+              >
+                接口信息
+              </Button>
+              <Button
+                :tag="RouterLink"
+                to="/public/uptime"
+                target="_blank"
+                size="sm"
+                variant="outline"
+              >
+                状态监控
+              </Button>
+              <Button
+                :tag="RouterLink"
+                to="/public/logs"
+                target="_blank"
+                size="sm"
+                variant="outline"
+              >
+                公开日志
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -230,6 +249,7 @@
         </div>
       </main>
     </div>
+
     <ConfirmDialog
       :open="confirmDialog.open.value"
       :title="confirmDialog.title.value"
@@ -239,17 +259,20 @@
       @confirm="confirmDialog.confirm"
       @cancel="confirmDialog.cancel"
     />
+
     <Teleport to="body">
       <div v-if="isApiInfoOpen" class="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 px-4">
         <div class="w-full max-w-lg rounded-3xl border border-border bg-card p-6 shadow-xl">
           <div class="flex items-center justify-between">
             <p class="ui-subsection-title">API 接口</p>
-            <button
-              class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+            <Button
+              size="xs"
+              variant="outline"
+              root-class="min-w-14 justify-center text-muted-foreground"
               @click="isApiInfoOpen = false"
             >
               关闭
-            </button>
+            </Button>
           </div>
           <p class="mt-2 text-xs text-muted-foreground">根据客户端选择对应接口</p>
 
@@ -257,45 +280,69 @@
             <div>
               <p class="text-xs text-muted-foreground">基础端点</p>
               <div class="mt-1 flex items-start gap-2">
-                <p class="min-w-0 flex-1 break-all rounded-2xl border border-border bg-background px-3 py-2 font-mono text-xs">
+                <ValueSurface
+                  tag="p"
+                  mono
+                  break-mode="all"
+                  root-class="min-w-0 flex-1"
+                >
                   {{ apiBaseUrl }}
-                </p>
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-outline shrink-0 text-[11px] text-muted-foreground"
+                </ValueSurface>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  root-class="shrink-0 text-[11px] text-muted-foreground"
                   @click="copyText(apiBaseUrl)"
                 >
                   复制
-                </button>
+                </Button>
               </div>
             </div>
+
             <div>
               <p class="text-xs text-muted-foreground">SDK 接口</p>
               <div class="mt-1 flex items-start gap-2">
-                <p class="min-w-0 flex-1 break-all rounded-2xl border border-border bg-background px-3 py-2 font-mono text-xs">
+                <ValueSurface
+                  tag="p"
+                  mono
+                  break-mode="all"
+                  root-class="min-w-0 flex-1"
+                >
                   {{ apiSdkUrl }}
-                </p>
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-outline shrink-0 text-[11px] text-muted-foreground"
+                </ValueSurface>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  root-class="shrink-0 text-[11px] text-muted-foreground"
                   @click="copyText(apiSdkUrl)"
                 >
                   复制
-                </button>
+                </Button>
               </div>
             </div>
+
             <div>
               <p class="text-xs text-muted-foreground">完整接口</p>
               <div class="mt-1 flex items-start gap-2">
-                <p class="min-w-0 flex-1 break-all rounded-2xl border border-border bg-background px-3 py-2 font-mono text-xs">
+                <ValueSurface
+                  tag="p"
+                  mono
+                  break-mode="all"
+                  root-class="min-w-0 flex-1"
+                >
                   {{ apiFullUrl }}
-                </p>
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-outline shrink-0 text-[11px] text-muted-foreground"
+                </ValueSurface>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  root-class="shrink-0 text-[11px] text-muted-foreground"
                   @click="copyText(apiFullUrl)"
                 >
                   复制
-                </button>
+                </Button>
               </div>
             </div>
+
             <div>
               <p class="text-xs text-muted-foreground">支持模型</p>
               <div class="mt-1 rounded-2xl border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
@@ -310,29 +357,39 @@
                 </div>
               </div>
             </div>
+
             <div>
               <p class="text-xs text-muted-foreground">API 密钥</p>
               <div class="mt-1 flex items-start gap-2">
-                <p class="min-w-0 flex-1 rounded-2xl border border-border bg-background px-3 py-2 font-mono text-xs">
+                <ValueSurface
+                  tag="p"
+                  mono
+                  break-mode="all"
+                  root-class="min-w-0 flex-1"
+                >
                   {{ apiKeyDisplay }}
-                </p>
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-outline shrink-0 text-[11px] text-muted-foreground"
+                </ValueSurface>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  root-class="shrink-0 text-[11px] text-muted-foreground"
                   @click="copyText(apiKeyDisplay)"
                 >
                   复制
-                </button>
+                </Button>
               </div>
             </div>
           </div>
 
           <div class="mt-6 flex items-center justify-end">
-            <button
-              class="ui-btn ui-btn-xs ui-btn-primary min-w-14 justify-center"
+            <Button
+              size="xs"
+              variant="primary"
+              root-class="min-w-14 justify-center"
               @click="isApiInfoOpen = false"
             >
               知道了
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -341,14 +398,20 @@
 </template>
 
 <script setup lang="ts">
+import { Button, ConfirmDialog, ValueSurface } from 'nanocat-ui'
 import { KeepAlive, computed, onMounted, ref, watch } from 'vue'
-import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { versionApi } from '@/api'
-import { useAuthStore } from '@/stores/auth'
-import { useSettingsStore } from '@/stores/settings'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useToast } from '@/composables/useToast'
+import { useAuthStore } from '@/stores/auth'
+import { useSettingsStore } from '@/stores/settings'
+
+type ShellNavItem = {
+  path: string
+  label: string
+  icon: string
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -362,7 +425,7 @@ const isApiInfoOpen = ref(false)
 const isCheckingUpdate = ref(false)
 const currentVersionTag = ref('')
 
-const menuItems = [
+const menuItems: ShellNavItem[] = [
   {
     path: '/',
     label: '概览中心',
@@ -383,30 +446,30 @@ const menuItems = [
     label: '监控状态',
     icon: 'M3 12h4l2-4 4 8 3-6h5v2h-4l-4 8-4-8-2 4H3v-2z',
   },
-          {
-            path: '/logs',
-            label: '运行日志',
-            icon: 'M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z',
-          },
-          {
-            path: '/gallery',
-            label: '图片画廊',
-            icon: 'M22 16V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2zm-11-4 2.03 2.71L16 11l4 5H8l3-3zM2 6v14a2 2 0 0 0 2 2h14v-2H4V6H2z',
-          },
-          {
-            path: '/docs',
-            label: '文档教程',
-            icon: 'M6 3h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm8 1.5V8h3.5L14 4.5zM8 11h8v2H8v-2zm0 4h8v2H8v-2z',
-          },
-        ]
+  {
+    path: '/logs',
+    label: '运行日志',
+    icon: 'M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z',
+  },
+  {
+    path: '/gallery',
+    label: '图片画廊',
+    icon: 'M22 16V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2zm-11-4 2.03 2.71L16 11l4 5H8l3-3zM2 6v14a2 2 0 0 0 2 2h14v-2H4V6H2z',
+  },
+  {
+    path: '/docs',
+    label: '文档教程',
+    icon: 'M6 3h9l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm8 1.5V8h3.5L14 4.5zM8 11h8v2H8v-2zm0 4h8v2H8v-2z',
+  },
+]
 
 const currentPageTitle = computed(() => {
-  const item = menuItems.find(item => item.path === route.path)
+  const item = menuItems.find((menuItem) => menuItem.path === route.path)
   return item?.label || '概览中心'
 })
 
 const navItemClass = (path: string) => {
-  const baseLayout = isSidebarCollapsed.value ? 'px-2 justify-center gap-0' : 'px-3 gap-3'
+  const baseLayout = isSidebarCollapsed.value ? 'justify-center gap-0 px-2' : 'gap-3 px-3'
   const base = `transition-all ${baseLayout}`
   if (route.path === path) {
     return `${base} bg-accent text-foreground`
@@ -416,11 +479,10 @@ const navItemClass = (path: string) => {
 
 const navIconClass = (path: string) => {
   if (route.path === path) {
-    return 'bg-primary/15 text-primary border-primary/30'
+    return 'border-primary/30 bg-primary/15 text-primary'
   }
-  return 'bg-secondary text-muted-foreground group-hover:text-foreground group-hover:border-primary/20'
+  return 'bg-secondary text-muted-foreground group-hover:border-primary/20 group-hover:text-foreground'
 }
-
 
 const apiBaseUrl = computed(() => {
   const raw = settingsStore.settings?.basic?.base_url
@@ -450,6 +512,9 @@ watch(
   () => route.path,
   () => {
     isSidebarOpen.value = false
+    if (isApiInfoOpen.value) {
+      isApiInfoOpen.value = false
+    }
   }
 )
 
@@ -548,6 +613,7 @@ function scheduleRoutePrefetch() {
       () => import('@/views/Accounts.vue'),
       () => import('@/views/Settings.vue'),
       () => import('@/views/Logs.vue'),
+      () => import('@/views/Monitor.vue'),
       () => import('@/views/Gallery.vue'),
       () => import('@/views/Docs.vue'),
     ]
@@ -577,5 +643,4 @@ onMounted(() => {
   void loadCurrentVersion()
   scheduleRoutePrefetch()
 })
-
 </script>

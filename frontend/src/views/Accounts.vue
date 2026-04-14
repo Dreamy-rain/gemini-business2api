@@ -28,11 +28,13 @@
 
     <section class="ui-panel space-y-5">
       <div class="flex flex-wrap items-center gap-2.5">
-        <input
-          v-model.trim="searchQuery"
+        <Input
+          :model-value="searchQuery"
           type="text"
           placeholder="搜索账号 ID"
-          class="ui-input-sm min-w-[11rem] flex-1 md:w-80 md:flex-none"
+          block
+          root-class="min-w-[11rem] flex-1 md:w-80 md:flex-none"
+          @update:model-value="searchQuery = $event.trim()"
         />
         <div class="w-[140px] shrink-0">
           <SelectMenu v-model="statusFilter" :options="statusOptions" />
@@ -41,28 +43,36 @@
 
       <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex flex-wrap items-center gap-2.5">
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline shrink-0 whitespace-nowrap"
+          <Button
+            size="sm"
+            variant="outline"
+            root-class="shrink-0 whitespace-nowrap"
             :disabled="isLoading"
             @click="refreshAccounts"
           >
             刷新列表
-          </button>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-primary shrink-0 whitespace-nowrap"
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            root-class="shrink-0 whitespace-nowrap"
             :disabled="isRegistering || isRefreshing"
             @click="openRegisterModal"
           >
             添加账户
-          </button>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline shrink-0 whitespace-nowrap"
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            root-class="shrink-0 whitespace-nowrap"
             @click="openConfigPanel"
           >
             账户配置
-          </button>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline relative shrink-0 whitespace-nowrap"
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            root-class="relative shrink-0 whitespace-nowrap"
             @click="openTaskModal"
           >
             <span class="flex items-center gap-2">
@@ -77,7 +87,7 @@
                 </span>
               </template>
             </span>
-          </button>
+          </Button>
           <div class="w-[140px] shrink-0">
             <button
               ref="moreActionsTriggerRef"
@@ -310,35 +320,39 @@
           </div>
 
           <div class="mt-4 flex flex-wrap items-center gap-2">
-            <button
-              class="ui-btn ui-btn-xs ui-btn-outline"
+            <Button
+              size="xs"
+              variant="outline"
               @click.stop="openEdit(account.id)"
             >
               编辑
-            </button>
-            <button
+            </Button>
+            <Button
               v-if="shouldShowEnable(account)"
-              class="ui-btn ui-btn-xs ui-btn-outline"
+              size="xs"
+              variant="outline"
               @click.stop
               @click="handleEnable(account.id)"
             >
               启用
-            </button>
-            <button
+            </Button>
+            <Button
               v-else
-              class="ui-btn ui-btn-xs ui-btn-outline"
+              size="xs"
+              variant="outline"
               @click.stop
               @click="handleDisable(account.id)"
             >
               禁用
-            </button>
-            <button
-              class="ui-btn ui-btn-xs ui-btn-danger"
+            </Button>
+            <Button
+              size="xs"
+              variant="danger"
               @click.stop
               @click="handleDelete(account.id)"
             >
               删除
-            </button>
+            </Button>
           </div>
         </div>
         <div v-if="!filteredAccounts.length && !isLoading" class="rounded-2xl border border-border bg-background p-4 text-center text-xs text-muted-foreground">
@@ -429,32 +443,36 @@
               </td>
               <td class="py-4 text-right">
                 <div class="flex flex-wrap justify-end gap-2">
-                  <button
-                    class="ui-btn ui-btn-xs ui-btn-outline"
+                  <Button
+                    size="xs"
+                    variant="outline"
                     @click.stop="openEdit(account.id)"
                   >
                     编辑
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     v-if="shouldShowEnable(account)"
-                    class="ui-btn ui-btn-xs ui-btn-outline"
+                    size="xs"
+                    variant="outline"
                     @click.stop="handleEnable(account.id)"
                   >
                     启用
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     v-else
-                    class="ui-btn ui-btn-xs ui-btn-outline"
+                    size="xs"
+                    variant="outline"
                     @click.stop="handleDisable(account.id)"
                   >
                     禁用
-                  </button>
-                  <button
-                    class="ui-btn ui-btn-xs ui-btn-danger"
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="danger"
                     @click.stop="handleDelete(account.id)"
                   >
                     删除
-                  </button>
+                  </Button>
                 </div>
               </td>
             </tr>
@@ -468,21 +486,23 @@
           显示 {{ (currentPage - 1) * pageSize + 1 }}-{{ Math.min(currentPage * pageSize, filteredAccounts.length) }} / 共 {{ filteredAccounts.length }} 个账户
         </div>
         <div class="flex items-center gap-2">
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline"
+          <Button
+            size="sm"
+            variant="outline"
             :disabled="currentPage === 1"
             @click="currentPage--"
           >
             上一页
-          </button>
+          </Button>
           <span class="text-sm text-muted-foreground">{{ currentPage }} / {{ totalPages }}</span>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline"
+          <Button
+            size="sm"
+            variant="outline"
             :disabled="currentPage === totalPages"
             @click="currentPage++"
           >
             下一页
-          </button>
+          </Button>
         </div>
       </div>
     </section>
@@ -497,12 +517,14 @@
               {{ addMode === 'register' ? '创建临时邮箱账号并自动注册' : '批量导入账户配置' }}
             </p>
           </div>
-          <button
-            class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+          <Button
+            size="xs"
+            variant="outline"
+            root-class="min-w-14 justify-center text-muted-foreground"
             @click="closeRegisterModal"
           >
             关闭
-          </button>
+          </Button>
         </div>
 
         <div class="scrollbar-slim flex-1 overflow-y-auto px-6 py-4">
@@ -531,14 +553,13 @@
             <SelectMenu
               v-model="selectedMailProvider"
               :options="mailProviderOptions"
-              class="w-full"
+              width="full"
             />
             <label class="block text-xs text-muted-foreground">注册数量</label>
-            <input
-              v-model.number="registerCount"
+            <Input
+              v-model="registerCountInput"
               type="number"
-              min="1"
-              class="ui-input-sm w-full"
+              block
             />
             <p class="text-xs text-muted-foreground">
               注册前请确认邮箱已配置，<a href="https://github.com/Dreamy-rain/gemini-business2api?tab=readme-ov-file#-%E9%82%AE%E7%AE%B1%E6%8F%90%E4%BE%9B%E5%95%86%E9%85%8D%E7%BD%AE" target="_blank" class="text-primary hover:underline font-medium">查看邮箱配置文档</a>
@@ -551,13 +572,15 @@
           <div v-else class="space-y-4">
             <label class="block text-xs text-muted-foreground">批量导入（每行一个）</label>
             <div class="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
-                class="ui-btn ui-btn-xs ui-btn-outline text-muted-foreground"
+                size="xs"
+                variant="outline"
+                root-class="text-muted-foreground"
                 @click="triggerImportFile"
               >
                 上传文件
-              </button>
+              </Button>
               <span v-if="importFileName" class="text-xs text-muted-foreground">{{ importFileName }}</span>
             </div>
             <textarea
@@ -595,28 +618,32 @@
 
         <div class="border-t border-border/60 px-6 py-4">
           <div class="flex items-center justify-end gap-2">
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+            <Button
+              size="sm"
+              variant="outline"
+              root-class="text-muted-foreground"
               @click="closeRegisterModal"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button
               v-if="addMode === 'register'"
-              class="ui-btn ui-btn-sm ui-btn-primary"
+              size="sm"
+              variant="primary"
               :disabled="isRegistering"
               @click="handleRegister"
             >
               开始注册
-            </button>
-            <button
+            </Button>
+            <Button
               v-else
-              class="ui-btn ui-btn-sm ui-btn-primary"
+              size="sm"
+              variant="primary"
               :disabled="isImporting"
               @click="handleImport"
             >
               导入并保存
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -631,12 +658,14 @@
             <p class="text-sm font-medium text-foreground">任务管理</p>
             <p class="mt-1 text-xs text-muted-foreground">管理注册与刷新任务</p>
           </div>
-          <button
-            class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+          <Button
+            size="xs"
+            variant="outline"
+            root-class="min-w-14 justify-center text-muted-foreground"
             @click="closeTaskModal"
           >
             关闭
-          </button>
+          </Button>
         </div>
 
         <!-- Tab 导航 -->
@@ -688,13 +717,15 @@
                   ></span>
                   注册任务
                 </div>
-                <button
+                <Button
                   v-if="registerTask.status === 'running' || registerTask.status === 'pending'"
-                  class="ui-btn ui-btn-xs ui-btn-outline text-muted-foreground hover:border-rose-500 hover:text-rose-600"
+                  size="xs"
+                  variant="outline"
+                  root-class="text-muted-foreground hover:border-rose-500 hover:text-rose-600"
                   @click="cancelRegister(registerTask.id)"
                 >
                   中断
-                </button>
+                </Button>
               </div>
               <div class="flex flex-wrap gap-x-4 gap-y-1">
                 <span>状态：{{ formatTaskStatus(registerTask) }}</span>
@@ -713,13 +744,15 @@
                   ></span>
                   刷新任务
                 </div>
-                <button
+                <Button
                   v-if="loginTask.status === 'running' || loginTask.status === 'pending'"
-                  class="ui-btn ui-btn-xs ui-btn-outline text-muted-foreground hover:border-rose-500 hover:text-rose-600"
+                  size="xs"
+                  variant="outline"
+                  root-class="text-muted-foreground hover:border-rose-500 hover:text-rose-600"
                   @click="cancelLogin(loginTask.id)"
                 >
                   中断
-                </button>
+                </Button>
               </div>
               <div class="flex flex-wrap gap-x-4 gap-y-1">
                 <span>状态：{{ formatTaskStatus(loginTask) }}</span>
@@ -740,14 +773,15 @@
               <p class="text-[11px] text-muted-foreground">
                 {{ taskLogMode === 'summary' ? '摘要模式仅保留关键事件（开始、结束、失败、告警）。' : '详情模式显示全部日志。' }}
               </p>
-              <button
+              <Button
                 type="button"
-                class="ui-btn ui-btn-xs"
-                :class="taskLogMode === 'summary' ? 'ui-btn-primary' : 'ui-btn-outline text-muted-foreground'"
+                size="xs"
+                :variant="taskLogMode === 'summary' ? 'primary' : 'outline'"
+                :root-class="taskLogMode === 'summary' ? '' : 'text-muted-foreground'"
                 @click="toggleTaskLogMode"
               >
                 {{ taskLogMode === 'summary' ? '摘要模式' : '详情模式' }}
-              </button>
+              </Button>
             </div>
             <div
               ref="taskLogsRef"
@@ -786,13 +820,15 @@
 
           <!-- 固定底部按钮区域 -->
           <div class="flex items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+            <Button
+              size="sm"
+              variant="outline"
+              root-class="text-muted-foreground"
               :disabled="!registerLogs.length && !loginLogs.length && !registerTask && !loginTask && !automationError"
               @click="clearTaskLogs"
             >
               清空日志
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -822,10 +858,10 @@
 
                     <div class="space-y-2">
                       <label class="block text-xs text-muted-foreground">刷新时间</label>
-                      <input
+                      <Input
                         v-model="scheduledRefreshCron"
                         type="text"
-                        class="ui-input-sm w-full"
+                        block
                         placeholder="08:00,20:00"
                       />
                       <p class="text-xs text-muted-foreground">
@@ -837,23 +873,19 @@
 
                     <div class="space-y-2">
                       <label class="block text-xs text-muted-foreground">冷却时间(小时)</label>
-                      <input
-                        v-model.number="refreshCooldownHours"
+                      <Input
+                        v-model="refreshCooldownHoursInput"
                         type="number"
-                        min="1"
-                        max="48"
-                        class="ui-input-sm w-full"
+                        block
                       />
                     </div>
 
                     <div class="space-y-2">
                       <label class="block text-xs text-muted-foreground">验证码重发次数</label>
-                      <input
-                        v-model.number="verificationCodeResendCount"
+                      <Input
+                        v-model="verificationCodeResendCountInput"
                         type="number"
-                        min="0"
-                        max="5"
-                        class="ui-input-sm w-full"
+                        block
                       />
                       <p class="text-xs text-muted-foreground">
                         验证码首次等待超时后，额外尝试重发的次数（默认 2，0 表示不重发）
@@ -862,12 +894,10 @@
 
                     <div class="space-y-2">
                       <label class="block text-xs text-muted-foreground">过期刷新窗口（小时）</label>
-                      <input
-                        v-model.number="refreshWindowHours"
+                      <Input
+                        v-model="refreshWindowHoursInput"
                         type="number"
-                        min="1"
-                        max="168"
-                        class="ui-input-sm w-full"
+                        block
                       />
                       <p class="text-xs text-muted-foreground">
                         当账号距离过期小于等于该值时，会触发自动刷新
@@ -921,19 +951,22 @@
 
             <!-- 固定底部按钮区域 -->
             <div class="flex items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
-              <button
-                class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+              <Button
+                size="sm"
+                variant="outline"
+                root-class="text-muted-foreground"
                 @click="loadScheduledConfig"
               >
                 重置
-              </button>
-              <button
-                class="ui-btn ui-btn-sm ui-btn-primary"
+              </Button>
+              <Button
+                size="sm"
+                variant="primary"
                 :disabled="isSavingScheduledConfig"
                 @click="saveScheduledConfig"
               >
                 保存配置
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -988,13 +1021,15 @@
 
           <!-- 固定底部按钮区域 -->
           <div class="flex items-center justify-end gap-2 border-t border-border/60 px-6 py-4">
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+            <Button
+              size="sm"
+              variant="outline"
+              root-class="text-muted-foreground"
               :disabled="taskHistory.length === 0"
               @click="clearTaskHistory"
             >
               清空历史
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -1005,12 +1040,14 @@
       <div class="ui-overlay-panel w-full max-w-lg">
         <div class="flex items-center justify-between">
           <p class="text-sm font-medium text-foreground">编辑账号</p>
-          <button
-            class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+          <Button
+            size="xs"
+            variant="outline"
+            root-class="min-w-14 justify-center text-muted-foreground"
             @click="closeEdit"
           >
             关闭
-          </button>
+          </Button>
         </div>
 
         <div v-if="editError" class="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -1019,10 +1056,10 @@
 
         <div class="mt-4 space-y-3 text-sm">
           <label class="block text-xs text-muted-foreground">账号 ID</label>
-          <input
+          <Input
             v-model="editForm.id"
             type="text"
-            class="ui-input-sm w-full"
+            block
             disabled
           />
 
@@ -1034,48 +1071,51 @@
           ></textarea>
 
           <label class="block text-xs text-muted-foreground">csesidx</label>
-          <input
+          <Input
             v-model="editForm.csesidx"
             type="text"
-            class="ui-input-sm w-full"
+            block
           />
 
           <label class="block text-xs text-muted-foreground">config_id</label>
-          <input
+          <Input
             v-model="editForm.config_id"
             type="text"
-            class="ui-input-sm w-full"
+            block
           />
 
           <label class="block text-xs text-muted-foreground">host_c_oses</label>
-          <input
+          <Input
             v-model="editForm.host_c_oses"
             type="text"
-            class="ui-input-sm w-full"
+            block
           />
 
           <label class="block text-xs text-muted-foreground">expires_at</label>
-          <input
+          <Input
             v-model="editForm.expires_at"
             type="text"
-            class="ui-input-sm w-full"
+            block
             placeholder="2025-12-23 10:59:21"
           />
         </div>
 
         <div class="mt-6 flex items-center justify-end gap-2">
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+          <Button
+            size="sm"
+            variant="outline"
+            root-class="text-muted-foreground"
             @click="closeEdit"
           >
             取消
-          </button>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-primary"
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
             @click="saveEdit"
           >
             保存
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1087,18 +1127,21 @@
         <div class="flex items-center justify-between">
           <p class="text-sm font-medium text-foreground">账户配置（JSON）</p>
           <div class="flex items-center gap-2">
-            <button
-              class="ui-btn ui-btn-xs ui-btn-primary"
+            <Button
+              size="xs"
+              variant="primary"
               @click="toggleConfigMask"
             >
               {{ configMasked ? '显示原文' : '脱敏显示' }}
-            </button>
-            <button
-              class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              root-class="min-w-14 justify-center text-muted-foreground"
               @click="closeConfigPanel"
             >
               关闭
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -1116,19 +1159,22 @@
         </div>
 
         <div class="mt-6 flex items-center justify-end gap-2">
-          <button
-            class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+          <Button
+            size="sm"
+            variant="outline"
+            root-class="text-muted-foreground"
             @click="closeConfigPanel"
           >
             取消
-          </button>
-          <button
-            class="ui-btn ui-btn-sm ui-btn-primary"
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
             @click="saveConfigPanel"
             :disabled="configMasked"
           >
             保存
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -1141,12 +1187,14 @@
             <p class="text-sm font-medium text-foreground">导出账号配置</p>
             <p class="mt-1 text-xs text-muted-foreground">选择导出范围与格式</p>
           </div>
-          <button
-            class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center text-muted-foreground"
+          <Button
+            size="xs"
+            variant="outline"
+            root-class="min-w-14 justify-center text-muted-foreground"
             @click="closeExportModal"
           >
             关闭
-          </button>
+          </Button>
         </div>
         <div class="scrollbar-slim flex-1 overflow-y-auto px-6 py-4">
           <div class="space-y-4 text-sm">
@@ -1203,19 +1251,22 @@
         </div>
         <div class="border-t border-border/60 px-6 py-4">
           <div class="flex items-center justify-end gap-2">
-            <button
-              class="ui-btn ui-btn-sm ui-btn-outline text-muted-foreground"
+            <Button
+              size="sm"
+              variant="outline"
+              root-class="text-muted-foreground"
               @click="closeExportModal"
             >
               取消
-            </button>
-            <button
-              class="ui-btn ui-btn-sm ui-btn-primary"
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
               :disabled="exportScope === 'selected' && !selectedCount"
               @click="runExport"
             >
               开始导出
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -1235,14 +1286,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
-import SelectMenu from '@/components/ui/SelectMenu.vue'
-import Checkbox from '@/components/ui/Checkbox.vue'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import QuotaBadge from '@/components/QuotaBadge.vue'
+import {
+  Button,
+  Checkbox,
+  ConfirmDialog,
+  HelpTip,
+  Input,
+  SelectMenu,
+} from 'nanocat-ui'
+import { accountsApi, settingsApi } from '@/api'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useToast } from '@/composables/useToast'
-import HelpTip from '@/components/ui/HelpTip.vue'
-import { accountsApi, settingsApi } from '@/api'
 import { mailProviderOptions, defaultMailProvider } from '@/constants/mailProviders'
 import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
 
@@ -1258,6 +1313,24 @@ const statusFilter = ref('all')
 const selectedIds = ref<Set<string>>(new Set())
 const viewMode = ref<'table' | 'card'>((localStorage.getItem('accounts_view_mode') as 'table' | 'card') || 'table')
 watch(viewMode, (val) => localStorage.setItem('accounts_view_mode', val))
+
+const clampInteger = (value: number, min: number, max: number = Number.MAX_SAFE_INTEGER) =>
+  Math.max(min, Math.min(max, Math.round(value)))
+
+const createNumberInputBinding = (
+  getter: () => number,
+  setter: (value: number) => void,
+  normalize: (value: number) => number = (value) => value
+) => computed({
+  get: () => String(getter()),
+  set: (raw: string | number) => {
+    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim())
+    if (Number.isFinite(parsed)) {
+      setter(normalize(parsed))
+    }
+  }
+})
+
 const currentPage = ref(1)
 const pageSize = ref(50)
 const isEditOpen = ref(false)
@@ -1292,6 +1365,26 @@ const scheduledRefreshCron = ref('08:00,20:00')
 const refreshCooldownHours = ref(12)
 const verificationCodeResendCount = ref(2)
 const refreshWindowHours = ref(24)
+const registerCountInput = createNumberInputBinding(
+  () => registerCount.value,
+  (value) => { registerCount.value = value },
+  (value) => clampInteger(value, 1)
+)
+const refreshCooldownHoursInput = createNumberInputBinding(
+  () => refreshCooldownHours.value,
+  (value) => { refreshCooldownHours.value = value },
+  (value) => clampInteger(value, 1, 48)
+)
+const verificationCodeResendCountInput = createNumberInputBinding(
+  () => verificationCodeResendCount.value,
+  (value) => { verificationCodeResendCount.value = value },
+  (value) => clampInteger(value, 0, 5)
+)
+const refreshWindowHoursInput = createNumberInputBinding(
+  () => refreshWindowHours.value,
+  (value) => { refreshWindowHours.value = value },
+  (value) => clampInteger(value, 1, 168)
+)
 const browserMode = ref<'normal' | 'silent' | 'headless'>('normal')
 const isLoadingScheduledConfig = ref(false)
 const isSavingScheduledConfig = ref(false)

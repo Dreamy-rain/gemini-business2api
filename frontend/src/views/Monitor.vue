@@ -9,13 +9,15 @@
           </p>
         </div>
         <div class="flex items-center gap-2">
-          <a
+          <Button
+            tag="a"
             href="/#/public/uptime"
             target="_blank"
-            class="ui-btn ui-btn-sm ui-btn-outline"
+            size="sm"
+            variant="outline"
           >
             打开监控页
-          </a>
+          </Button>
         </div>
       </div>
 
@@ -60,6 +62,7 @@
 </template>
 
 <script setup lang="ts">
+import { Button } from 'nanocat-ui'
 import { onMounted } from 'vue'
 import { useUptimeStatus } from '@/composables/useUptimeStatus'
 

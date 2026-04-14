@@ -1,4 +1,4 @@
-﻿import { ref } from 'vue'
+import { ref } from 'vue'
 
 type ConfirmOptions = {
   title?: string
@@ -7,7 +7,6 @@ type ConfirmOptions = {
   cancelText?: string
 }
 
-// Global singleton state: all callers share the same dialog instance.
 const open = ref(false)
 const title = ref('确认操作')
 const message = ref('')

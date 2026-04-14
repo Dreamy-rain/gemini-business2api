@@ -12,12 +12,12 @@
             <label for="password" class="ui-field-label text-sm font-medium text-foreground">
               管理员密钥
             </label>
-            <input
+            <Input
               id="password"
               v-model="password"
               type="password"
-              required
-              class="ui-input-md w-full"
+              size="md"
+              block
               placeholder="请输入管理员密钥"
               :disabled="isLoading"
             />
@@ -27,13 +27,15 @@
             {{ errorMessage }}
           </div>
 
-          <button
+          <Button
             type="submit"
+            size="md"
+            variant="primary"
+            block
             :disabled="isLoading || !password"
-            class="ui-btn ui-btn-md ui-btn-primary w-full"
           >
             {{ isLoading ? '登录中...' : '登录' }}
-          </button>
+          </Button>
         </form>
 
         <div class="mt-8 flex items-center justify-center gap-4 text-xs text-muted-foreground">
@@ -61,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+import { Button, Input } from 'nanocat-ui'
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'

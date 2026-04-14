@@ -5,13 +5,15 @@
         <div class="min-w-0">
           <p class="ui-section-title">媒体画廊</p>
         </div>
-        <button
-          class="ui-btn ui-btn-xs ui-btn-primary min-w-14 justify-center"
+        <Button
+          size="xs"
+          variant="primary"
+          root-class="min-w-14 justify-center"
           :disabled="isSaving"
           @click="handleSave"
         >
           {{ isSaving ? '保存中...' : '保存设置' }}
-        </button>
+        </Button>
       </div>
 
       <div class="mt-6 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -30,19 +32,17 @@
 
         <div class="gallery-setting-row">
           <span class="text-xs text-muted-foreground">过期时间</span>
-          <input
-            v-model.number="expireHoursInput"
+          <Input
+            :model-value="expireHoursInput"
             type="number"
-            :min="-1"
-            :max="720"
-            class="ui-input-sm w-16 text-center"
-            @keyup.enter="handleSave"
+            root-class="w-16 text-center"
+            @update:model-value="expireHoursInput = Number($event)"
           />
           <span class="text-xs text-muted-foreground">小时</span>
           <HelpTip text="-1 表示永不自动删除；其余最小值为 1 小时。过期媒体可手动立即清理。" />
-          <button class="ui-btn ui-btn-sm ui-btn-outline" @click="handleCleanupExpired">
+          <Button size="sm" variant="outline" @click="handleCleanupExpired">
             清理过期
-          </button>
+          </Button>
         </div>
       </div>
     </section>
@@ -142,21 +142,25 @@
             {{ paginationSummary }}
           </div>
           <div class="flex items-center gap-2">
-            <button
-              class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center"
+            <Button
+              size="xs"
+              variant="outline"
+              root-class="min-w-14 justify-center"
               :disabled="currentPage <= 1 || isLoading"
               @click="currentPage -= 1"
             >
               上一页
-            </button>
+            </Button>
             <span class="ui-chip">{{ currentPage }} / {{ pageCount }}</span>
-            <button
-              class="ui-btn ui-btn-xs ui-btn-outline min-w-14 justify-center"
+            <Button
+              size="xs"
+              variant="outline"
+              root-class="min-w-14 justify-center"
               :disabled="currentPage >= pageCount || isLoading"
               @click="currentPage += 1"
             >
               下一页
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -214,10 +218,14 @@
 import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { galleryApi, type GalleryFile } from '@/api/gallery'
 import { settingsApi } from '@/api/settings'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import Tooltip from '@/components/ui/Tooltip.vue'
-import HelpTip from '@/components/ui/HelpTip.vue'
-import SegmentedTabs from '@/components/ui/SegmentedTabs.vue'
+import {
+  Button,
+  ConfirmDialog,
+  HelpTip,
+  Input,
+  SegmentedTabs,
+  Tooltip,
+} from 'nanocat-ui'
 import { useConfirmDialog } from '@/composables/useConfirmDialog'
 import { useToast } from '@/composables/useToast'
 

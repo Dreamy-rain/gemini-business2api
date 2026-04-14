@@ -39,64 +39,75 @@
         <div class="w-[150px] shrink-0">
           <SelectMenu v-model="filters.level" :options="levelOptions" />
         </div>
-        <input
-          v-model.trim="filters.search"
+        <Input
+          :model-value="filters.search"
           type="text"
           placeholder="搜索日志内容..."
-          class="ui-input-sm min-w-[11rem] flex-1 md:min-w-[260px]"
+          block
+          root-class="min-w-[11rem] flex-1 md:min-w-[260px]"
+          @update:model-value="filters.search = $event.trim()"
         />
-        <input
-          v-model.number="filters.limit"
+        <Input
+          :model-value="filters.limit"
           type="number"
-          min="10"
-          max="1000"
-          step="100"
-          class="ui-input-sm w-[96px] shrink-0"
+          root-class="w-[96px] shrink-0"
+          @update:model-value="filters.limit = $event === '' ? 300 : Number($event)"
         />
-        <button
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
+          size="sm"
+          variant="outline"
+          root-class="shrink-0"
           :disabled="isFetching"
           @click="fetchLogs"
         >
           刷新
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
+          size="sm"
+          variant="outline"
+          root-class="shrink-0"
           @click="exportLogs"
         >
           导出
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
+          size="sm"
+          variant="outline"
+          root-class="shrink-0"
           @click="confirmOpen = true"
         >
           清空
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
+          size="sm"
+          variant="outline"
+          root-class="shrink-0"
           @click="toggleView"
         >
           {{ rawView ? '切换结构化' : '切换原始' }}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
+          size="sm"
+          variant="outline"
+          root-class="shrink-0"
           @click="toggleDetailMode"
         >
           {{ detailMode === 'summary' ? '摘要模式' : '详情模式' }}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          class="ui-btn ui-btn-sm ui-btn-outline shrink-0"
-          :class="autoRefreshEnabled ? 'border-primary text-primary' : ''"
+          size="sm"
+          :variant="autoRefreshEnabled ? 'primary' : 'outline'"
+          root-class="shrink-0"
           @click="toggleAutoRefresh"
         >
           {{ autoRefreshEnabled ? '自动刷新 8s' : '自动刷新已关' }}
-        </button>
+        </Button>
       </div>
     </div>
 
@@ -229,9 +240,8 @@
 </template>
 
 <script setup lang="ts">
+import { Button, ConfirmDialog, Input, SelectMenu } from 'nanocat-ui'
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller'
-import SelectMenu from '@/components/ui/SelectMenu.vue'
-import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import LogEntryRow from '@/components/ai/LogEntryRow.vue'
 import RequestLayerSection from '@/components/ai/RequestLayerSection.vue'
 import RequestLogGroup from '@/components/ai/RequestLogGroup.vue'

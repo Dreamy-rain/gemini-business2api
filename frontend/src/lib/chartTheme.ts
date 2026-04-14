@@ -1,9 +1,3 @@
-/**
- * ECharts 统一主题配置
- * 基于项目的设计系统，提供一致的图表样式
- */
-
-// 主题色板
 export const chartColors = {
   primary: '#0ea5e9',
   success: '#10b981',
@@ -19,7 +13,6 @@ export const chartColors = {
   emerald: '#34d399',
 }
 
-// 模型专用色板
 export const modelColors: Record<string, string> = {
   'gemini-3.1-fast': chartColors.warning,
   'gemini-3.1-thinking': chartColors.cyan,
@@ -38,7 +31,6 @@ export const modelColors: Record<string, string> = {
   'gemini-auto': chartColors.slate,
 }
 
-// 有效模型列表
 export const validModels = [
   'gemini-3.1-fast',
   'gemini-3.1-thinking',
@@ -57,15 +49,13 @@ export const validModels = [
   'gemini-veo',
 ]
 
-// 获取模型颜色（带回退）
 export function getModelColor(model: string): string {
   return modelColors[model] || chartColors.gray
 }
 
-// 过滤有效模型
 export function filterValidModels(modelRequests: Record<string, number[]>): Record<string, number[]> {
   const filtered: Record<string, number[]> = {}
-  validModels.forEach(model => {
+  validModels.forEach((model) => {
     if (modelRequests[model]) {
       filtered[model] = modelRequests[model]
     }
@@ -73,14 +63,12 @@ export function filterValidModels(modelRequests: Record<string, number[]>): Reco
   return filtered
 }
 
-// 文本样式
 const textStyle = {
   fontFamily: 'Noto Sans SC, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif',
-  color: '#6b6b6b',      // text-muted-foreground
+  color: '#6b6b6b',
   fontSize: 11,
 }
 
-// 网格配置
 const gridConfig = {
   left: 24,
   right: 16,
@@ -89,7 +77,6 @@ const gridConfig = {
   containLabel: true,
 }
 
-// 工具提示配置
 const tooltipConfig = {
   backgroundColor: 'rgba(255, 255, 255, 0.95)',
   borderColor: '#e5e5e5',
@@ -102,7 +89,6 @@ const tooltipConfig = {
   extraCssText: 'border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);',
 }
 
-// 图例配置
 const legendConfig = {
   textStyle: {
     ...textStyle,
@@ -113,9 +99,38 @@ const legendConfig = {
   itemGap: 16,
 }
 
-/**
- * 折线图主题配置
- */
+function buildRichLegendKey(index: number) {
+  return `legend_model_${index}`
+}
+
+export function createModelLegendConfig(modelNames: string[]) {
+  const rich = Object.fromEntries(
+    modelNames.map((modelName, index) => [
+      buildRichLegendKey(index),
+      {
+        color: getModelColor(modelName),
+        fontSize: 11,
+        fontWeight: 600,
+      },
+    ])
+  )
+  const legendKeyByName = new Map(
+    modelNames.map((modelName, index) => [modelName, buildRichLegendKey(index)])
+  )
+
+  return {
+    data: modelNames,
+    formatter: (name: string) => {
+      const richKey = legendKeyByName.get(name)
+      return richKey ? `{${richKey}|${name}}` : name
+    },
+    textStyle: {
+      ...legendConfig.textStyle,
+      rich,
+    },
+  }
+}
+
 export function getLineChartTheme() {
   return {
     animation: true,
@@ -179,21 +194,18 @@ export function getLineChartTheme() {
   }
 }
 
-/**
- * 饼图主题配置
- */
 export function getPieChartTheme(isMobile = false) {
   const legendPosition = isMobile
     ? {
-      left: 'center',
-      bottom: 0,
-      orient: 'horizontal' as const,
-    }
+        left: 'center',
+        bottom: 0,
+        orient: 'horizontal' as const,
+      }
     : {
-      left: 0,
-      top: 'middle',
-      orient: 'vertical' as const,
-    }
+        left: 0,
+        top: 'middle',
+        orient: 'vertical' as const,
+      }
 
   const pieCenter = isMobile ? ['50%', '42%'] : ['60%', '50%']
   const pieRadius = isMobile ? ['35%', '55%'] : ['45%', '70%']
@@ -251,9 +263,6 @@ export function getPieChartTheme(isMobile = false) {
   }
 }
 
-/**
- * 创建折线图系列配置
- */
 export function createLineSeries(
   name: string,
   data: number[],
@@ -302,14 +311,7 @@ export function createLineSeries(
   }
 }
 
-/**
- * 创建饼图数据项配置
- */
-export function createPieDataItem(
-  name: string,
-  value: number,
-  color: string
-) {
+export function createPieDataItem(name: string, value: number, color: string) {
   return {
     name,
     value,

@@ -7,13 +7,15 @@
     <section v-else class="ui-panel">
       <div class="flex items-center justify-between">
         <p class="ui-section-title">配置面板</p>
-        <button
-          class="ui-btn ui-btn-xs ui-btn-primary min-w-14 justify-center"
+        <Button
+          size="xs"
+          variant="primary"
+          root-class="min-w-14 justify-center"
           :disabled="isSaving || !localSettings"
           @click="handleSave"
         >
           保存设置
-        </button>
+        </Button>
       </div>
 
       <div v-if="errorMessage" class="mt-4 rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -30,37 +32,37 @@
                   <label class="block">API 密钥</label>
                   <HelpTip text="支持多个密钥，用逗号分隔。例如: key1,key2,key3" />
                 </div>
-                <input
+                <Input
                   v-model="localSettings.basic.api_key"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="可选，多个密钥用逗号分隔"
                 />
                 <label class="block text-xs text-muted-foreground">基础地址</label>
-                <input
+                <Input
                   v-model="localSettings.basic.base_url"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="自动检测或手动填写"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>账户操作代理</span>
                   <HelpTip text="用于注册/登录/刷新操作的代理，留空则禁用" />
                 </div>
-                <input
+                <Input
                   v-model="localSettings.basic.proxy_for_auth"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
                 />
                 <div class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>聊天操作代理</span>
                   <HelpTip text="用于 JWT/会话/消息操作的代理，留空则禁用" />
                 </div>
-                <input
+                <Input
                   v-model="localSettings.basic.proxy_for_chat"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="http://127.0.0.1:7890 | no_proxy=localhost,127.0.0.1"
                 />
               </div>
@@ -70,25 +72,55 @@
               <p class="ui-section-kicker">重试</p>
               <div class="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <label class="col-span-2 text-xs text-muted-foreground">账户切换次数</label>
-                <input v-model.number="localSettings.retry.max_account_switch_tries" type="number" min="1" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="maxAccountSwitchTriesInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
 
                 <label class="col-span-2 text-xs text-muted-foreground">对话冷却（小时）</label>
-                <input v-model.number="textRateLimitCooldownHours" type="number" min="1" max="24" step="1" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="textRateLimitCooldownHoursInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
 
                 <label class="col-span-2 text-xs text-muted-foreground">绘图冷却（小时）</label>
-                <input v-model.number="imagesRateLimitCooldownHours" type="number" min="1" max="24" step="1" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="imagesRateLimitCooldownHoursInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
 
                 <label class="col-span-2 text-xs text-muted-foreground">视频冷却（小时）</label>
-                <input v-model.number="videosRateLimitCooldownHours" type="number" min="1" max="24" step="1" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="videosRateLimitCooldownHoursInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
 
                 <label class="col-span-2 text-xs text-muted-foreground">会话缓存秒数</label>
-                <input v-model.number="localSettings.retry.session_cache_ttl_seconds" type="number" min="0" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="sessionCacheTtlInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
 
                 <div class="col-span-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>自动刷新账号间隔（秒，0=关闭）</span>
                   <HelpTip text="仅在数据库存储启用时生效：用于检测账号配置变化并重载列表，不会刷新 Cookie。" />
                 </div>
-                <input v-model.number="localSettings.retry.auto_refresh_accounts_seconds" type="number" min="0" max="600" class="col-span-2 ui-input-sm" />
+                <Input
+                  v-model="autoRefreshAccountsSecondsInput"
+                  type="number"
+                  block
+                  root-class="col-span-2"
+                />
               </div>
             </div>
 
@@ -139,24 +171,24 @@
                     DuckMail SSL 校验
                   </Checkbox>
                   <label class="block text-xs text-muted-foreground">DuckMail API</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.duckmail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="https://api.duckmail.sbs"
                   />
                   <label class="block text-xs text-muted-foreground">DuckMail API 密钥</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.duckmail_api_key"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="dk_xxx"
                   />
                   <label class="block text-xs text-muted-foreground">DuckMail 域名（推荐）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.register_domain"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="留空则自动选择"
                   />
                 </template>
@@ -164,24 +196,24 @@
                 <!-- Moemail 配置 -->
                 <template v-if="localSettings.basic.temp_mail_provider === 'moemail'">
                   <label class="block text-xs text-muted-foreground">Moemail API</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.moemail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="https://moemail.app"
                   />
                   <label class="block text-xs text-muted-foreground">Moemail API 密钥</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.moemail_api_key"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="X-API-Key"
                   />
                   <label class="block text-xs text-muted-foreground">Moemail 域名（可选，留空随机）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.moemail_domain"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="moemail.app"
                   />
                 </template>
@@ -192,24 +224,24 @@
                     Freemail SSL 校验
                   </Checkbox>
                   <label class="block text-xs text-muted-foreground">Freemail API</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.freemail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="http://your-freemail-server.com"
                   />
                   <label class="block text-xs text-muted-foreground">Freemail JWT Token</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.freemail_jwt_token"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="eyJ..."
                   />
                   <label class="block text-xs text-muted-foreground">Freemail 域名（可选，留空随机）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.freemail_domain"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="freemail.local"
                   />
                 </template>
@@ -220,24 +252,24 @@
                     GPTMail SSL 校验
                   </Checkbox>
                   <label class="block text-xs text-muted-foreground">GPTMail API</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.gptmail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="https://mail.chatgpt.org.uk"
                   />
                   <label class="block text-xs text-muted-foreground">GPTMail API Key</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.gptmail_api_key"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="X-API-Key"
                   />
                   <label class="block text-xs text-muted-foreground">GPTMail 邮箱域名（可选，不带@）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.gptmail_domain"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="留空则随机选择"
                   />
                 </template>
@@ -248,24 +280,24 @@
                     Cloudflare Mail SSL 校验
                   </Checkbox>
                   <label class="block text-xs text-muted-foreground">Cloudflare Mail API 地址</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.cfmail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="https://your-cfmail-instance.example.com"
                   />
                   <label class="block text-xs text-muted-foreground">访问密码（x-custom-auth，无密码留空）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.cfmail_api_key"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="留空则不使用密码"
                   />
                   <label class="block text-xs text-muted-foreground">邮箱域名（可选，不带@）</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.cfmail_domain"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="留空则随机选择"
                   />
                 </template>
@@ -276,10 +308,10 @@
                     Sample Mail SSL 校验
                   </Checkbox>
                   <label class="block text-xs text-muted-foreground">Sample Mail Worker 地址</label>
-                  <input
+                  <Input
                     v-model="localSettings.basic.samplemail_base_url"
                     type="text"
-                    class="ui-input-sm w-full"
+                    block
                     placeholder="https://your-sample-mail-worker.example.com"
                   />
                   <p class="text-xs text-muted-foreground">
@@ -288,11 +320,10 @@
                 </template>
 
                 <label class="block text-xs text-muted-foreground">默认注册数量</label>
-                <input
-                  v-model.number="localSettings.basic.register_default_count"
+                <Input
+                  v-model="registerDefaultCountInput"
                   type="number"
-                  min="1"
-                  class="ui-input-sm w-full"
+                  block
                 />
               </div>
             </div>
@@ -350,30 +381,24 @@
                   启用主动配额计数
                 </Checkbox>
                 <label class="block text-xs text-muted-foreground">对话每日上限</label>
-                <input
-                  v-model.number="localSettings.quota_limits.text_daily_limit"
+                <Input
+                  v-model="quotaTextDailyLimitInput"
                   type="number"
-                  min="0"
-                  max="9999"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="120"
                 />
                 <label class="block text-xs text-muted-foreground">绘图每日上限</label>
-                <input
-                  v-model.number="localSettings.quota_limits.images_daily_limit"
+                <Input
+                  v-model="quotaImagesDailyLimitInput"
                   type="number"
-                  min="0"
-                  max="9999"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="2"
                 />
                 <label class="block text-xs text-muted-foreground">视频每日上限</label>
-                <input
-                  v-model.number="localSettings.quota_limits.videos_daily_limit"
+                <Input
+                  v-model="quotaVideosDailyLimitInput"
                   type="number"
-                  min="0"
-                  max="9999"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="1"
                 />
                 <p class="text-xs text-muted-foreground">每日北京时间 16:00 重置（对齐 Google 太平洋时间午夜）</p>
@@ -384,25 +409,24 @@
               <p class="ui-section-kicker">公开展示</p>
               <div class="mt-4 space-y-3">
                 <label class="block text-xs text-muted-foreground">Logo 地址</label>
-                <input
+                <Input
                   v-model="localSettings.public_display.logo_url"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="logo 地址"
                 />
                 <label class="block text-xs text-muted-foreground">聊天入口</label>
-                <input
+                <Input
                   v-model="localSettings.public_display.chat_url"
                   type="text"
-                  class="ui-input-sm w-full"
+                  block
                   placeholder="聊天入口地址"
                 />
                 <label class="block text-xs text-muted-foreground">会话有效时长</label>
-                <input
-                  v-model.number="localSettings.session.expire_hours"
+                <Input
+                  v-model="sessionExpireHoursInput"
                   type="number"
-                  min="1"
-                  class="ui-input-sm w-full"
+                  block
                 />
               </div>
             </div>
@@ -426,12 +450,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
+import { Button, Checkbox, HelpTip, Input, SelectMenu } from 'nanocat-ui'
 import { useSettingsStore } from '@/stores/settings'
-import { useToast } from '@/composables/useToast'
 import { defaultMailProvider, mailProviderOptions } from '@/constants/mailProviders'
-import SelectMenu from '@/components/ui/SelectMenu.vue'
-import Checkbox from '@/components/ui/Checkbox.vue'
-import HelpTip from '@/components/ui/HelpTip.vue'
+import { useToast } from '@/composables/useToast'
 import type { Settings } from '@/types/api'
 
 const settingsStore = useSettingsStore()
@@ -466,6 +488,26 @@ const createCooldownHours = (
   }
 })
 
+const clampInteger = (value: number, min: number, max: number = Number.MAX_SAFE_INTEGER) =>
+  Math.max(min, Math.min(max, Math.round(value)))
+
+const createNumberInputBinding = (
+  getter: () => number | undefined,
+  setter: (value: number) => void,
+  normalize: (value: number) => number = (value) => value
+) => computed({
+  get: () => {
+    const value = getter()
+    return Number.isFinite(value) ? String(value) : ''
+  },
+  set: (raw: string | number) => {
+    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim())
+    if (Number.isFinite(parsed)) {
+      setter(normalize(parsed))
+    }
+  }
+})
+
 const textRateLimitCooldownHours = createCooldownHours(
   'text_rate_limit_cooldown_seconds',
   DEFAULT_COOLDOWN_HOURS.text
@@ -477,6 +519,110 @@ const imagesRateLimitCooldownHours = createCooldownHours(
 const videosRateLimitCooldownHours = createCooldownHours(
   'videos_rate_limit_cooldown_seconds',
   DEFAULT_COOLDOWN_HOURS.videos
+)
+
+const maxAccountSwitchTriesInput = createNumberInputBinding(
+  () => localSettings.value?.retry?.max_account_switch_tries,
+  (value) => {
+    if (localSettings.value?.retry) {
+      localSettings.value.retry.max_account_switch_tries = value
+    }
+  },
+  (value) => clampInteger(value, 1)
+)
+
+const textRateLimitCooldownHoursInput = createNumberInputBinding(
+  () => textRateLimitCooldownHours.value,
+  (value) => {
+    textRateLimitCooldownHours.value = value
+  },
+  (value) => clampInteger(value, 1, 24)
+)
+
+const imagesRateLimitCooldownHoursInput = createNumberInputBinding(
+  () => imagesRateLimitCooldownHours.value,
+  (value) => {
+    imagesRateLimitCooldownHours.value = value
+  },
+  (value) => clampInteger(value, 1, 24)
+)
+
+const videosRateLimitCooldownHoursInput = createNumberInputBinding(
+  () => videosRateLimitCooldownHours.value,
+  (value) => {
+    videosRateLimitCooldownHours.value = value
+  },
+  (value) => clampInteger(value, 1, 24)
+)
+
+const sessionCacheTtlInput = createNumberInputBinding(
+  () => localSettings.value?.retry?.session_cache_ttl_seconds,
+  (value) => {
+    if (localSettings.value?.retry) {
+      localSettings.value.retry.session_cache_ttl_seconds = value
+    }
+  },
+  (value) => clampInteger(value, 0)
+)
+
+const autoRefreshAccountsSecondsInput = createNumberInputBinding(
+  () => localSettings.value?.retry?.auto_refresh_accounts_seconds,
+  (value) => {
+    if (localSettings.value?.retry) {
+      localSettings.value.retry.auto_refresh_accounts_seconds = value
+    }
+  },
+  (value) => clampInteger(value, 0, 600)
+)
+
+const registerDefaultCountInput = createNumberInputBinding(
+  () => localSettings.value?.basic?.register_default_count,
+  (value) => {
+    if (localSettings.value?.basic) {
+      localSettings.value.basic.register_default_count = value
+    }
+  },
+  (value) => clampInteger(value, 1)
+)
+
+const quotaTextDailyLimitInput = createNumberInputBinding(
+  () => localSettings.value?.quota_limits?.text_daily_limit,
+  (value) => {
+    if (localSettings.value?.quota_limits) {
+      localSettings.value.quota_limits.text_daily_limit = value
+    }
+  },
+  (value) => clampInteger(value, 0, 9999)
+)
+
+const quotaImagesDailyLimitInput = createNumberInputBinding(
+  () => localSettings.value?.quota_limits?.images_daily_limit,
+  (value) => {
+    if (localSettings.value?.quota_limits) {
+      localSettings.value.quota_limits.images_daily_limit = value
+    }
+  },
+  (value) => clampInteger(value, 0, 9999)
+)
+
+const quotaVideosDailyLimitInput = createNumberInputBinding(
+  () => localSettings.value?.quota_limits?.videos_daily_limit,
+  (value) => {
+    if (localSettings.value?.quota_limits) {
+      localSettings.value.quota_limits.videos_daily_limit = value
+    }
+  },
+  (value) => clampInteger(value, 0, 9999)
+)
+
+const sessionExpireHoursInput = createNumberInputBinding(
+  () => localSettings.value?.session?.expire_hours,
+  (value) => {
+    if (localSettings.value?.session) {
+      localSettings.value.session.expire_hours = value
+    }
+  },
+  (value) => clampInteger(value, 1)
 )
 
 const browserEngineOptions = [
